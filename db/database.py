@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS {table} (
     paid_at INTEGER,
     tier TEXT NOT NULL DEFAULT 'basic',
     created_at INTEGER NOT NULL,
-    subscription_id TEXT
+    subscription_id TEXT,
+    channel TEXT
 );
 """
 PAYMENTS_INDEXES_SQL = """
@@ -48,7 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_payments_pending ON payments(status, created_at);
 """
 PAYMENTS_COLUMNS = (
     "payment_id, telegram_id, amount, currency, months, method, status, "
-    "provider_id, paid_at, tier, created_at, subscription_id"
+    "provider_id, paid_at, tier, created_at, subscription_id, channel"
 )
 
 SCHEMA = (
@@ -287,6 +288,8 @@ MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("users", "tier", "TEXT NOT NULL DEFAULT 'basic'"),
     ("payments", "tier", "TEXT NOT NULL DEFAULT 'basic'"),
     ("payments", "subscription_id", "TEXT"),
+    # 'telegram' = ruble invoice paid inside Telegram (YooKassa provider token).
+    ("payments", "channel", "TEXT"),
 )
 HEX_KEY_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -1162,6 +1165,53 @@ class Database:
             (now(), before),
         )
 
+    async def create_telegram_rub_order(
+        self,
+        *,
+        payment_id: str,
+        telegram_id: int,
+        amount: int,
+        months: int,
+        tier: str,
+    ) -> None:
+        await self._execute(
+            "INSERT INTO payments (payment_id, telegram_id, amount, currency, "
+            "months, method, status, tier, created_at, channel) "
+            "VALUES (?, ?, ?, 'RUB', ?, 'sbp', 'pending', ?, ?, 'telegram')",
+            (payment_id, telegram_id, amount, months, tier, now()),
+        )
+
+    async def open_telegram_rub_order(
+        self, telegram_id: int, months: int, tier: str, since: int
+    ) -> dict[str, Any] | None:
+        return await self._fetchone(
+            "SELECT * FROM payments WHERE telegram_id = ? AND months = ? AND tier = ? "
+            "AND method = 'sbp' AND channel = 'telegram' AND status = 'pending' "
+            "AND provider_id IS NULL AND created_at >= ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (telegram_id, months, tier, since),
+        )
+
+    async def bind_telegram_rub_charge(self, payment_id: str, provider_id: str) -> bool:
+        """Attach YooKassa's payment number to a Telegram ruble order, once.
+
+        As with Stars, money already taken reopens an order cancelled as stale.
+        """
+        async with self.transaction() as conn:
+            await conn.execute(
+                "UPDATE payments SET provider_id = ?, status = CASE "
+                "WHEN status = 'cancelled' THEN 'pending' ELSE status END "
+                "WHERE payment_id = ? AND method = 'sbp' AND channel = 'telegram' "
+                "AND provider_id IS NULL",
+                (provider_id, payment_id),
+            )
+            cur = await conn.execute(
+                "SELECT provider_id FROM payments WHERE payment_id = ?",
+                (payment_id,),
+            )
+            row = await cur.fetchone()
+        return row is not None and row[0] == provider_id
+
     async def mark_payment_refunded(self, payment_id: str) -> bool:
         """paid -> refunded, once. Refunded orders never count as paid again."""
         rowcount = await self._execute(
@@ -1298,7 +1348,8 @@ class Database:
             "WHERE status = 'pending' AND created_at < ? "
             "AND (provider_id IS NULL OR (provider_id NOT LIKE 'yookassa:%' "
             "AND provider_id NOT LIKE 'cryptopay:%' "
-            "AND provider_id NOT LIKE 'tgstars:%')) "
+            "AND provider_id NOT LIKE 'tgstars:%' "
+            "AND provider_id NOT LIKE 'tgyk:%')) "
             "AND NOT EXISTS (SELECT 1 FROM yookassa_creations c "
             "WHERE c.payment_id = payments.payment_id)",
             (older_than,),

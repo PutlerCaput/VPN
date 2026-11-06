@@ -6,6 +6,8 @@
 #   bash update_bot.sh --rollback node-rental-bot:rollback-<stamp> [.env backup]
 #   bash update_bot.sh --set-tiers standard        # switch the tariffs on sale
 #   bash update_bot.sh --set CONFIG_DELIVERY=subscription STARS_AUTORENEW_ENABLED=true
+#   bash update_bot.sh --set-secret TELEGRAM_PAYMENT_TOKEN   # typed hidden on the server
+#   bash update_bot.sh --payment-status                       # what can take payments now
 #
 # Optional with --apply: --env-add appends the new settings that are missing
 # from .env (STARS_ENABLED, STARS_RUB_PER_STAR, YOOKASSA_IN_BOT,
@@ -79,7 +81,70 @@ fi
 # Settings an owner may change with --set; anything else is edited by hand.
 SETTABLE_KEYS="ENABLED_TIERS CONFIG_DELIVERY SUBSCRIPTION_BASE_URL MAIN_LOCATION_NAME \
 STARS_ENABLED STARS_AUTORENEW_ENABLED STARS_RUB_PER_STAR YOOKASSA_IN_BOT TRIAL_TRAFFIC_GB \
-AWG_ENABLED AWG_AGENT_URL AWG_AGENT_TOKEN"
+AWG_ENABLED AWG_AGENT_URL AWG_AGENT_TOKEN TELEGRAM_PAYMENT_TOKEN \
+YOOKASSA_RECEIPT_MODE"
+
+if [[ "${1:-}" == "--payment-status" ]]; then
+  # Safe summary only: which payment paths are configured, never any value.
+  docker exec -i "$CONTAINER" python3 - <<'PY'
+import json, sys, urllib.request
+sys.path.insert(0, "/app")
+from config import get_settings
+s = get_settings()
+token = s.telegram_payment_token.get_secret_value() if s.telegram_payment_token else ""
+rest = s.sbp_provider == "yookassa" and bool(s.yookassa_shop_id and s.yookassa_secret_key)
+placeholder = "REPLACE_WITH" in (s.sbp_qr_url + s.sbp_payment_url).upper()
+menu = []
+if s.stars_enabled:
+    menu.append("stars")
+if s.yookassa_in_bot and (token or rest or (s.sbp_provider == "manual" and not placeholder)):
+    menu.append("yookassa")
+req = urllib.request.Request("http://127.0.0.1:8080/yookassa/webhook", data=b"{}",
+                             headers={"Content-Type": "application/json"}, method="POST")
+try:
+    webhook = urllib.request.urlopen(req, timeout=5).status
+except urllib.error.HTTPError as exc:
+    webhook = exc.code
+except OSError:
+    webhook = "unreachable"
+print(json.dumps({
+    "yookassa_in_telegram_token": bool(token),
+    "yookassa_telegram_mode": ("TEST" if ":TEST:" in token.upper() else "LIVE") if token else None,
+    "yookassa_rest_keys": rest,
+    "sbp_provider": s.sbp_provider,
+    "sbp_placeholder_links": placeholder,
+    "yookassa_button_in_bot": s.yookassa_in_bot,
+    "stars_enabled": s.stars_enabled,
+    "bot_payment_menu": menu,
+    "local_webhook_status": webhook,
+    "receipt_mode": s.yookassa_receipt_mode,
+}, ensure_ascii=False, indent=1))
+PY
+  exit $?
+fi
+
+if [[ "${1:-}" == "--set-secret" ]]; then
+  # The value is typed on the server, hidden; it never appears in the chat,
+  # the command line, shell history or the output.
+  key="${2:-}"
+  [[ "$key" == TELEGRAM_PAYMENT_TOKEN || "$key" == AWG_AGENT_TOKEN ]] \
+    || fail "usage: --set-secret TELEGRAM_PAYMENT_TOKEN"
+  if [[ -r /dev/tty && -z "${SECRET_FROM_STDIN:-}" ]]; then
+    printf 'Вставьте значение %s и нажмите Enter (ввод не отображается): ' "$key" >/dev/tty
+    IFS= read -rs secret_value </dev/tty
+    printf '\n' >/dev/tty
+  else
+    IFS= read -r secret_value
+  fi
+  secret_value="${secret_value//[$'\r\n\t ']/}"
+  [[ -n "$secret_value" ]] || fail "empty value"
+  if [[ "$key" == TELEGRAM_PAYMENT_TOKEN && ! "$secret_value" =~ ^[0-9]{3,20}:[A-Za-z0-9_:-]{2,256}$ ]]; then
+    fail "this does not look like a BotFather payment token (digits:LIVE:... or digits:TEST:...)"
+  fi
+  chmod 600 "$WORKDIR/.env" 2>/dev/null || true
+  set -- --set "$key=$secret_value"
+  unset secret_value
+fi
 
 if [[ "${1:-}" == "--set-tiers" ]]; then
   set -- --set "ENABLED_TIERS=${2:-}"
@@ -190,7 +255,7 @@ if ((ENV_ADD)); then
   }
   add_env STARS_ENABLED true
   add_env STARS_RUB_PER_STAR 1.60
-  add_env YOOKASSA_IN_BOT false
+  add_env YOOKASSA_IN_BOT true
   add_env TRIAL_TRAFFIC_GB 3
   add_env ENABLED_TIERS standard
 fi

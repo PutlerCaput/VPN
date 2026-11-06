@@ -20,6 +20,7 @@ from services.sbp import SbpService
 from services.scheduler import AnomalyMonitor
 from services.security import SlidingWindowLimiter
 from services.stars import StarsPayments
+from services.telegram_rub import TelegramRubPayments
 from services.yookassa import YooKassaClient
 
 
@@ -40,4 +41,5 @@ class Services:
     stars: StarsPayments | None = None
     health: ServiceHealth | None = None
     awg: AwgService | None = None
+    telegram_rub: TelegramRubPayments | None = None
     limiters: list[SlidingWindowLimiter] = field(default_factory=list)

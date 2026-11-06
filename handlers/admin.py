@@ -12,7 +12,8 @@ from aiogram.types import Message
 from services.audit import audit
 from services.container import Services
 from services.scheduler import SEVERE_KINDS
-from services.security import is_valid_payment_id
+from services.security import html_escape, is_valid_payment_id
+from services.telegram_rub import PROVIDER_PREFIX as RUB_PROVIDER_PREFIX
 
 router = Router(name="admin")
 
@@ -105,6 +106,27 @@ async def cmd_refund(
     payment_id = (command.args or "").strip()
     if not is_valid_payment_id(payment_id):
         await message.answer("Использование: <code>/refund &lt;payment_id&gt;</code>")
+        return
+    payment = await services.db.get_payment(payment_id)
+    provider_id = str((payment or {}).get("provider_id") or "")
+    if payment is not None and provider_id.startswith(RUB_PROVIDER_PREFIX):
+        # The Bot API cannot refund YooKassa payments: the money is returned
+        # in the YooKassa dashboard; here only the paid period is taken back.
+        if payment["status"] != "paid":
+            await message.answer(REFUND_RESULTS["not_refundable"])
+            return
+        await audit(
+            services.db,
+            message.from_user.id if message.from_user else None,
+            "admin_refund",
+            payment_id,
+        )
+        await services.provisioning.revoke_refunded_payment(payment_id)
+        yookassa_id = html_escape(provider_id.removeprefix(RUB_PROVIDER_PREFIX))
+        await message.answer(
+            "↩️ Оплаченный период снят с подписки. Верните деньги в личном "
+            f"кабинете ЮKassa: платёж <code>{yookassa_id}</code> → «Вернуть»."
+        )
         return
     if services.stars is None:
         await message.answer("Оплата Telegram Stars не включена.")
