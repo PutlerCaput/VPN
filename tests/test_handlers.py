@@ -114,11 +114,14 @@ def test_parse_start_arg() -> None:
     assert parse_start_arg("1", 1) == (None, None, None, False)
     assert parse_start_arg("pay", 1) == (None, None, None, True)
     # "pay_<months>" predates tiers: it means the basic tier.
-    assert parse_start_arg("pay_3", 1) == (None, "basic", 3, True)
-    assert parse_start_arg("pay_5", 1) == (None, None, None, True)
+    # Without a tier the handler picks the first tier on sale.
+    assert parse_start_arg("pay_3", 1) == (None, None, 3, True)
+    assert parse_start_arg("pay_5", 1) == (None, None, 5, True)
+    assert parse_start_arg("pay_7", 1) == (None, None, None, True)
+    assert parse_start_arg("pay_standard_2", 1) == (None, "standard", 2, True)
     assert parse_start_arg("pay_complete", 1) == (None, "complete", None, True)
     assert parse_start_arg("pay_prime_12", 1) == (None, "prime", 12, True)
-    assert parse_start_arg("pay_gold_12", 1) == (None, "basic", 12, True)
+    assert parse_start_arg("pay_gold_12", 1) == (None, None, 12, True)
     assert parse_start_arg("x" * 10, 1) == (None, None, None, False)
     assert parse_start_arg("9" * 25, 1) == (None, None, None, False)
 

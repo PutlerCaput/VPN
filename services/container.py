@@ -17,6 +17,7 @@ from services.push import PushService
 from services.sbp import SbpService
 from services.scheduler import AnomalyMonitor
 from services.security import SlidingWindowLimiter
+from services.stars import StarsPayments
 from services.yookassa import YooKassaClient
 
 
@@ -34,4 +35,5 @@ class Services:
     billing: BillingService
     monitor: AnomalyMonitor
     yookassa: YooKassaClient | None = None
+    stars: StarsPayments | None = None
     limiters: list[SlidingWindowLimiter] = field(default_factory=list)

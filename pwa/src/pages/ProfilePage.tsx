@@ -1,11 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { endpoints, formatDate, type Me } from "../api/client";
+import { endpoints, formatAmount, formatDate, type Me } from "../api/client";
 import { currentSubscription, disablePush, enablePush, pushSupported } from "../push";
 import { useAppStore } from "../store";
 
-const PAYMENT_STATUS = { pending: "ожидает", paid: "оплачен", cancelled: "отменён" } as const;
+const PAYMENT_STATUS = { pending: "ожидает", paid: "оплачен", cancelled: "отменён", refunded: "возвращён" } as const;
 
 export function ProfilePage({ me }: { me: Me }) {
   const queryClient = useQueryClient();
@@ -87,7 +87,7 @@ export function ProfilePage({ me }: { me: Me }) {
                     <td>{formatDate(p.created_at)}</td>
                     <td>{p.months} мес.</td>
                     <td>
-                      {p.currency === "RUB" ? `${p.amount} ₽` : `${p.amount.toFixed(2)} USDT`}
+                      {formatAmount(p.amount, p.currency)}
                     </td>
                     <td>{PAYMENT_STATUS[p.status]}</td>
                   </tr>

@@ -17,8 +17,10 @@ from config import (
     TIER_PRICES_USDT,
     TIERS,
     Settings,
+    all_periods,
     device_note,
     savings_percent,
+    stars_price,
 )
 from db.database import Database
 from services.billing import BillingError
@@ -30,24 +32,46 @@ from webhook_server import create_webhook_app
 
 def test_price_matrix_matches_the_tariff_sheet() -> None:
     assert TIER_PRICES_RUB == {
+        "standard": {1: 299, 2: 549, 3: 799, 4: 999, 5: 1199, 6: 1399},
         "basic": {1: 300, 3: 800, 6: 1500, 12: 2700},
         "complete": {1: 450, 3: 1200, 6: 2200, 12: 4000},
         "prime": {1: 700, 3: 1800, 6: 3500, 12: 6000},
     }
     assert {key: tier.devices for key, tier in TIERS.items()} == {
+        "standard": 2,
         "basic": 5,
         "complete": 10,
         "prime": 15,
     }
 
 
+def test_standard_tier_has_a_shared_monthly_quota() -> None:
+    standard = TIERS["standard"]
+    assert standard.traffic_gb == 200
+    assert standard.traffic_bytes == 200 * 1024**3
+    assert standard.traffic_reset == "month"
+    # The original tiers stay unlimited, so their offer terms do not change.
+    assert all(TIERS[key].traffic_gb == 0 for key in ("basic", "complete", "prime"))
+
+
 def test_usdt_prices_cover_every_period_and_grow_with_the_tier() -> None:
+    for key in TIERS:
+        assert set(TIER_PRICES_USDT[key]) == set(TIER_PRICES_RUB[key])
+        assert all(v % Decimal("0.5") == 0 for v in TIER_PRICES_USDT[key].values())
+        values = [TIER_PRICES_USDT[key][m] for m in sorted(TIER_PRICES_USDT[key])]
+        assert values == sorted(values)
     for months in (1, 3, 6, 12):
         values = [
             TIER_PRICES_USDT[key][months] for key in ("basic", "complete", "prime")
         ]
         assert values == sorted(values)
-        assert all(v % Decimal("0.5") == 0 for v in values)
+
+
+def test_stars_price_rounds_up_to_whole_stars() -> None:
+    assert stars_price("standard", 1, Decimal("1.60")) == 187  # 299 / 1.6 = 186.9
+    assert stars_price("standard", 6, Decimal("1.60")) == 875  # 1399 / 1.6
+    assert stars_price("basic", 1, Decimal("1")) == 300
+    assert all_periods() == [1, 2, 3, 4, 5, 6, 12]
 
 
 def test_savings_badge_is_computed_against_monthly_billing() -> None:
@@ -56,7 +80,7 @@ def test_savings_badge_is_computed_against_monthly_billing() -> None:
     assert savings_percent("basic", 12) == 25  # 2700 instead of 3600
     assert savings_percent("prime", 12) == 29  # 6000 instead of 8400
     for key in TIERS:
-        badges = [savings_percent(key, m) for m in (1, 3, 6, 12)]
+        badges = [savings_percent(key, m) for m in sorted(TIER_PRICES_RUB[key])]
         assert badges == sorted(badges)
 
 
@@ -89,10 +113,24 @@ async def test_marzban_payload_keeps_vision_flow_and_notes_the_device_limit() ->
         transport=httpx.MockTransport(handler),
     )
     await client.create_user("u123456", expire=2_000_000_000, tier="prime")
+    await client.create_user("u123457", expire=2_000_000_000, tier="standard")
+    await client.create_user(
+        "u123458",
+        expire=2_000_000_000,
+        tier="standard",
+        data_limit=3 * 1024**3,
+        data_limit_reset_strategy="no_reset",
+    )
     await client.close()
     body = seen[0]
     assert body["proxies"] == {"vless": {"flow": "xtls-rprx-vision"}}
     assert body["note"] == "tier=prime devices=15"
+    assert (body["data_limit"], body["data_limit_reset_strategy"]) == (0, "no_reset")
+    assert seen[1]["note"] == "tier=standard devices=2"
+    assert seen[1]["data_limit"] == 200 * 1024**3
+    assert seen[1]["data_limit_reset_strategy"] == "month"
+    assert seen[2]["data_limit"] == 3 * 1024**3
+    assert seen[2]["data_limit_reset_strategy"] == "no_reset"
     # Marzban has no such field; sending it would be silently ignored.
     assert "ip_limit" not in body
     offline = MarzbanClient("http://x", "a", "b", "t")
@@ -211,6 +249,7 @@ async def test_api_lists_enabled_tiers_and_creates_tiered_payments(
             "months": 12,
             "rub": 6000,
             "usdt": "64.50",
+            "stars": None,  # Stars are off in this configuration
             "save_percent": 29,
         }
 
@@ -263,7 +302,7 @@ def test_bot_keyboards_offer_every_enabled_tier_and_fit_callback_limits() -> Non
         for row in rows:
             for button in row:
                 assert len((button.callback_data or "").encode()) <= 64
-    overview = tiers_text("рубли", ["basic", "prime"])
+    overview = tiers_text("sbp", ["basic", "prime"])
     assert "Basic" in overview
     assert "Prime" in overview
     assert "Complete" not in overview

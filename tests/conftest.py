@@ -33,9 +33,13 @@ class FakeMarzban:
 
     def _payload(self, username: str) -> dict[str, Any]:
         user = self.users[username]
+        revision = user.get("revision", 0)
+        suffix = f"&rev={revision}" if revision else ""
         return {
             **user,
-            "links": [f"vless://{username}@node.example.com:443?security=reality"],
+            "links": [
+                f"vless://{username}@node.example.com:443?security=reality{suffix}"
+            ],
             "subscription_url": f"/sub/{username}",
         }
 
@@ -46,14 +50,29 @@ class FakeMarzban:
         *,
         expire: int | None = None,
         tier: str = "basic",
+        data_limit: int | None = None,
+        data_limit_reset_strategy: str | None = None,
     ) -> dict[str, Any]:
+        from services.marzban import traffic_policy
+
         self.calls.append(("create", username))
+        limit, strategy = traffic_policy(tier, data_limit, data_limit_reset_strategy)
         self.users[username] = {
             "username": username,
             "expire": expire or int(time.time()) + (days or 1) * 86400,
             "status": "active",
             "note": device_note(tier),
+            "data_limit": limit,
+            "data_limit_reset_strategy": strategy,
+            "used_traffic": 0,
         }
+        return self._payload(username)
+
+    async def revoke_subscription(self, username: str) -> dict[str, Any]:
+        if username not in self.users:
+            raise MarzbanNotFound(username)
+        self.calls.append(("revoke", username))
+        self.users[username]["revision"] = self.users[username].get("revision", 0) + 1
         return self._payload(username)
 
     async def modify_user(
@@ -63,6 +82,8 @@ class FakeMarzban:
         expire: int | None = None,
         status: str | None = None,
         note: str | None = None,
+        data_limit: int | None = None,
+        data_limit_reset_strategy: str | None = None,
     ) -> dict[str, Any]:
         if username not in self.users:
             raise MarzbanNotFound(username)
@@ -76,6 +97,12 @@ class FakeMarzban:
             self.users[username]["status"] = status
         if note is not None:
             self.users[username]["note"] = note
+        if data_limit is not None:
+            self.users[username]["data_limit"] = data_limit
+        if data_limit_reset_strategy is not None:
+            self.users[username]["data_limit_reset_strategy"] = (
+                data_limit_reset_strategy
+            )
         return self._payload(username)
 
     async def get_user(self, username: str) -> dict[str, Any]:

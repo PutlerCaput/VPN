@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from config import DEFAULT_TIER, TIERS, device_note
+from config import DEFAULT_TIER, TIERS, TRAFFIC_RESET_STRATEGIES, device_note
 from services.metrics import MARZBAN_ERRORS
 from services.security import is_valid_node_username
 
@@ -21,6 +21,20 @@ BACKOFF_BASE = 0.5
 
 class MarzbanError(Exception):
     pass
+
+
+def traffic_policy(
+    tier: str, data_limit: int | None = None, reset_strategy: str | None = None
+) -> tuple[int, str]:
+    """(data_limit bytes, reset strategy) for a tier; overrides win."""
+    spec = TIERS[tier]
+    limit = spec.traffic_bytes if data_limit is None else data_limit
+    strategy = reset_strategy or (spec.traffic_reset if data_limit is None else None)
+    if strategy is None:
+        strategy = "no_reset"
+    if limit < 0 or strategy not in TRAFFIC_RESET_STRATEGIES:
+        raise ValueError("invalid traffic policy")
+    return limit, strategy
 
 
 class MarzbanNotFound(MarzbanError):
@@ -146,25 +160,30 @@ class MarzbanClient:
         *,
         expire: int | None = None,
         tier: str = DEFAULT_TIER,
+        data_limit: int | None = None,
+        data_limit_reset_strategy: str | None = None,
     ) -> dict[str, Any]:
         """Creates a VLESS user; flow xtls-rprx-vision is always set.
 
         Marzban has no per-user IP/device limit, so the tier's device limit goes into
         the user's note for the admin and is a term of the offer, not a panel setting.
+        The traffic quota is the tier's unless ``data_limit`` overrides it
+        (the free trial). 0 bytes means unlimited.
         """
         self._validate(username)
         if tier not in TIERS:
             raise ValueError(f"unknown tier: {tier!r}")
         if expire is None:
             expire = int(time.time()) + int(days or 1) * 86400
+        limit, strategy = traffic_policy(tier, data_limit, data_limit_reset_strategy)
         body = {
             "username": username,
             "proxies": {"vless": {"flow": "xtls-rprx-vision"}},
             "inbounds": {"vless": [self.inbound_tag]},
             "note": device_note(tier),
             "expire": expire,
-            "data_limit": 0,
-            "data_limit_reset_strategy": "no_reset",
+            "data_limit": limit,
+            "data_limit_reset_strategy": strategy,
             "status": "active",
         }
         response = await self._request(
@@ -172,7 +191,12 @@ class MarzbanClient:
         )
         if response.status_code == 409:
             return await self.modify_user(
-                username, expire=expire, status="active", note=device_note(tier)
+                username,
+                expire=expire,
+                status="active",
+                note=device_note(tier),
+                data_limit=limit,
+                data_limit_reset_strategy=strategy,
             )
         return self._check(response, "create_user")
 
@@ -183,6 +207,8 @@ class MarzbanClient:
         expire: int | None = None,
         status: str | None = None,
         note: str | None = None,
+        data_limit: int | None = None,
+        data_limit_reset_strategy: str | None = None,
     ) -> dict[str, Any]:
         self._validate(username)
         body: dict[str, Any] = {}
@@ -194,6 +220,14 @@ class MarzbanClient:
             body["status"] = status
         if note is not None:
             body["note"] = note
+        if data_limit is not None:
+            if data_limit < 0:
+                raise ValueError("data_limit must not be negative")
+            body["data_limit"] = data_limit
+        if data_limit_reset_strategy is not None:
+            if data_limit_reset_strategy not in TRAFFIC_RESET_STRATEGIES:
+                raise ValueError("unknown data_limit_reset_strategy")
+            body["data_limit_reset_strategy"] = data_limit_reset_strategy
         response = await self._request(
             "PUT",
             f"/api/user/{username}",
@@ -201,6 +235,14 @@ class MarzbanClient:
             json_body=body,
         )
         return self._check(response, "modify_user")
+
+    async def revoke_subscription(self, username: str) -> dict[str, Any]:
+        """New credentials for the user; every previously shared link stops working."""
+        self._validate(username)
+        response = await self._request(
+            "POST", f"/api/user/{username}/revoke_sub", operation="revoke_sub"
+        )
+        return self._check(response, "revoke_sub")
 
     async def set_user_status(self, username: str, status: str) -> dict[str, Any]:
         return await self.modify_user(username, status=status)

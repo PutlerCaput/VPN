@@ -30,6 +30,7 @@ from config import (
     TIER_PRICES_USDT,
     TIERS,
     savings_percent,
+    stars_price,
 )
 from handlers.legal import offer_text
 from services.billing import BillingError
@@ -184,7 +185,13 @@ async def me(request: web.Request) -> web.Response:
 
 @routes.get("/subscription")
 async def subscription(request: web.Request) -> web.Response:
+    services = request.app[SERVICES_KEY]
     user = request["user"]
+    traffic = (
+        await services.provisioning.traffic_status(user)
+        if user["status"] == "active"
+        else None
+    )
     return web.json_response(
         {
             "status": user["status"],
@@ -193,6 +200,15 @@ async def subscription(request: web.Request) -> web.Response:
             if user["status"] == "active"
             else 0,
             "node_username": user["node_username"],
+            # null when the panel is unreachable; limit 0 means unlimited.
+            "traffic": None
+            if traffic is None
+            else {
+                "used_bytes": traffic.used_bytes,
+                "limit_bytes": traffic.limit_bytes,
+                "resets_every_30_days": traffic.reset_strategy == "month",
+                "exhausted": traffic.limited,
+            },
         },
     )
 
@@ -230,6 +246,7 @@ async def tariffs(request: web.Request) -> web.Response:
                     "key": key,
                     "title": tier.title,
                     "devices": tier.devices,
+                    "traffic_gb": tier.traffic_gb,
                     "priority_support": tier.priority_support,
                     "features": list(tier.features),
                     "prices": [
@@ -237,6 +254,12 @@ async def tariffs(request: web.Request) -> web.Response:
                             "months": m,
                             "rub": TIER_PRICES_RUB[key][m],
                             "usdt": f"{TIER_PRICES_USDT[key][m]:.2f}",
+                            # Stars are paid only inside the bot.
+                            "stars": stars_price(
+                                key, m, services.settings.stars_rub_per_star
+                            )
+                            if services.settings.stars_enabled
+                            else None,
                             "save_percent": savings_percent(key, m),
                         }
                         for m in sorted(TIER_PRICES_RUB[key])
@@ -290,7 +313,10 @@ async def payments_history(request: web.Request) -> web.Response:
         [
             {
                 "payment_id": row["payment_id"],
-                "amount": row["amount"] / 100,
+                # XTR has no minor unit; RUB/USDT are stored in kopecks/cents.
+                "amount": row["amount"]
+                if row["currency"] == "XTR"
+                else row["amount"] / 100,
                 "currency": row["currency"],
                 "months": row["months"],
                 "tier": row["tier"],

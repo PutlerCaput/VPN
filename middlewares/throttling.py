@@ -14,6 +14,13 @@ from services.security import SlidingWindowLimiter
 THROTTLE_TEXT = "⏳ Слишком много запросов. Подождите минуту."
 
 
+def is_payment_service_message(event: TelegramObject) -> bool:
+    return isinstance(event, Message) and (
+        getattr(event, "successful_payment", None) is not None
+        or getattr(event, "refunded_payment", None) is not None
+    )
+
+
 class ThrottlingMiddleware(BaseMiddleware):
     def __init__(self, limiter: SlidingWindowLimiter | None = None) -> None:
         self.limiter = limiter or SlidingWindowLimiter(limit=30, window_seconds=60)
@@ -26,7 +33,8 @@ class ThrottlingMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         user: User | None = data.get("event_from_user")
-        if user is None:
+        if user is None or is_payment_service_message(event):
+            # Telegram has already taken the payment: never drop its receipt.
             return await handler(event, data)
         if self.limiter.hit(str(user.id)):
             return await handler(event, data)

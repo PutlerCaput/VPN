@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { endpoints, isApiError, type Status } from "../api/client";
+import { endpoints, formatTraffic, isApiError, type Status } from "../api/client";
 import { QRCode } from "../components/QRCode";
 import { formatDate, ru } from "../i18n/ru";
 import { haptic, openBotPayment } from "../telegram";
@@ -76,6 +76,12 @@ export function DashboardPage() {
                 <>
                   <dt>{ru.dashboard.remaining}</dt>
                   <dd className={styles.countdown}>{countdown}</dd>
+                </>
+              )}
+              {sub.data.status === "active" && sub.data.traffic && (
+                <>
+                  <dt>{ru.dashboard.traffic}</dt>
+                  <dd>{formatTraffic(sub.data.traffic)}</dd>
                 </>
               )}
               {sub.data.node_username && (

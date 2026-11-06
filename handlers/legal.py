@@ -31,6 +31,7 @@ async def _send_offer(message: Message, offer_url: str) -> None:
 
 @router.message(F.text == BTN_LEGAL)
 @router.message(Command("legal"))
+@router.message(Command("terms"))
 async def cmd_legal(message: Message, services: Services) -> None:
     await _send_offer(message, services.settings.offer_url)
 

@@ -20,7 +20,38 @@ import aiosqlite
 
 MINIMUM_REMINDER_PERIOD_SECONDS = 3 * 24 * 60 * 60
 
-SCHEMA = """
+# Kept separate so an old database can be rebuilt with the same definition:
+# SQLite cannot change CHECK constraints in place. XTR is Telegram Stars
+# (whole stars, no minor unit); RUB/USDT amounts stay in kopecks/cents.
+PAYMENTS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS {table} (
+    payment_id TEXT PRIMARY KEY,
+    telegram_id INTEGER NOT NULL,
+    amount INTEGER NOT NULL,
+    currency TEXT NOT NULL CHECK (currency IN ('RUB', 'USDT', 'XTR')),
+    months INTEGER NOT NULL CHECK (months BETWEEN 1 AND 12),
+    method TEXT NOT NULL CHECK (method IN ('sbp', 'usdt', 'stars')),
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'paid', 'cancelled', 'refunded')),
+    provider_id TEXT,
+    paid_at INTEGER,
+    tier TEXT NOT NULL DEFAULT 'basic',
+    created_at INTEGER NOT NULL
+);
+"""
+PAYMENTS_INDEXES_SQL = """
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(telegram_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_provider
+    ON payments(provider_id) WHERE provider_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_payments_pending ON payments(status, created_at);
+"""
+PAYMENTS_COLUMNS = (
+    "payment_id, telegram_id, amount, currency, months, method, status, "
+    "provider_id, paid_at, tier, created_at"
+)
+
+SCHEMA = (
+    """
 CREATE TABLE IF NOT EXISTS users (
     telegram_id INTEGER PRIMARY KEY,
     username TEXT,
@@ -39,25 +70,10 @@ CREATE TABLE IF NOT EXISTS users (
 );
 CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
 CREATE INDEX IF NOT EXISTS idx_users_status_expires ON users(status, expires_at);
-
-CREATE TABLE IF NOT EXISTS payments (
-    payment_id TEXT PRIMARY KEY,
-    telegram_id INTEGER NOT NULL,
-    amount INTEGER NOT NULL,
-    currency TEXT NOT NULL CHECK (currency IN ('RUB', 'USDT')),
-    months INTEGER NOT NULL CHECK (months IN (1, 3, 6, 12)),
-    method TEXT NOT NULL CHECK (method IN ('sbp', 'usdt')),
-    status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'paid', 'cancelled')),
-    provider_id TEXT,
-    paid_at INTEGER,
-    tier TEXT NOT NULL DEFAULT 'basic',
-    created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(telegram_id, created_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_provider
-    ON payments(provider_id) WHERE provider_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_payments_pending ON payments(status, created_at);
+"""
+    + PAYMENTS_TABLE_SQL.format(table="payments")
+    + PAYMENTS_INDEXES_SQL
+    + """
 
 -- A persisted schedule makes reconciliation fair across restarts and outages.
 CREATE TABLE IF NOT EXISTS payment_checks (
@@ -207,7 +223,20 @@ CREATE TABLE IF NOT EXISTS support_messages (
     telegram_id INTEGER NOT NULL,
     created_at INTEGER NOT NULL
 );
+
+-- Quota notices are sent once per traffic window and threshold. window_start
+-- is the traffic counted before the current window (lifetime minus current
+-- usage); it changes exactly when the panel resets the counter. No history
+-- of visited resources or connection times is kept here.
+CREATE TABLE IF NOT EXISTS traffic_notices (
+    node_username TEXT NOT NULL,
+    window_start INTEGER NOT NULL,
+    level INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (node_username, window_start, level)
+);
 """
+)
 
 
 # Columns added after the first release: (table, column, definition).
@@ -301,6 +330,7 @@ class Database:
                 await self.conn.execute(
                     f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
                 )
+        await self._rebuild_payments_constraints()
         # Run the one-time migration baseline exactly once. If it ran on every
         # startup, a paid webhook interrupted between marking the payment and
         # creating its activation job could be mistaken for historical work
@@ -332,6 +362,63 @@ class Database:
                     "VALUES ('retry_jobs_v1_migrated', '1')"
                 )
         await self.conn.commit()
+
+    async def _rebuild_payments_constraints(self) -> None:
+        """Widen the payments CHECK constraints of a database created earlier.
+
+        Old releases allowed only 1/3/6/12 months and SBP/USDT. SQLite cannot
+        alter a CHECK constraint, so the table is rebuilt in one transaction
+        (create, copy, drop, rename). Foreign keys must be off while the old
+        table is dropped: otherwise ON DELETE CASCADE would delete every
+        payment_checks and yookassa_creations row. Every row is preserved;
+        a foreign-key violation aborts and rolls the whole rebuild back.
+        """
+        row = await self._fetchone(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'payments'"
+        )
+        if row is None or "'stars'" in str(row["sql"] or ""):
+            return
+        await self.conn.commit()
+        await self.conn.execute("PRAGMA foreign_keys=OFF")
+        try:
+            await self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                await self.conn.execute(
+                    PAYMENTS_TABLE_SQL.format(table="payments_rebuild")
+                )
+                await self.conn.execute(
+                    f"INSERT INTO payments_rebuild ({PAYMENTS_COLUMNS}) "  # noqa: S608 -- constant column list
+                    f"SELECT {PAYMENTS_COLUMNS} FROM payments"
+                )
+                async with self.conn.execute("SELECT COUNT(*) FROM payments") as cur:
+                    before = (await cur.fetchone() or (0,))[0]
+                async with self.conn.execute(
+                    "SELECT COUNT(*) FROM payments_rebuild"
+                ) as cur:
+                    after = (await cur.fetchone() or (-1,))[0]
+                if before != after:
+                    raise RuntimeError("payments rebuild lost rows")
+                await self.conn.execute("DROP TABLE payments")
+                await self.conn.execute(
+                    "ALTER TABLE payments_rebuild RENAME TO payments"
+                )
+                for statement in PAYMENTS_INDEXES_SQL.split(";"):
+                    if statement.strip():
+                        await self.conn.execute(statement)
+                async with self.conn.execute("PRAGMA foreign_key_check") as cur:
+                    if await cur.fetchone() is not None:
+                        raise RuntimeError("payments rebuild broke a foreign key")
+                await self.conn.execute(
+                    "INSERT OR REPLACE INTO app_meta (key, value) "
+                    "VALUES ('payments_constraints_v2', ?)",
+                    (str(now()),),
+                )
+                await self.conn.commit()
+            except BaseException:
+                await self.conn.rollback()
+                raise
+        finally:
+            await self.conn.execute("PRAGMA foreign_keys=ON")
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -797,6 +884,85 @@ class Database:
         )
         return rowcount == 1
 
+    async def open_stars_payment(
+        self, telegram_id: int, months: int, tier: str, since: int
+    ) -> dict[str, Any] | None:
+        """A recent unpaid Stars order of the same plan, reused for a new invoice."""
+        return await self._fetchone(
+            "SELECT * FROM payments WHERE telegram_id = ? AND months = ? AND tier = ? "
+            "AND method = 'stars' AND status = 'pending' AND provider_id IS NULL "
+            "AND created_at >= ? ORDER BY created_at DESC LIMIT 1",
+            (telegram_id, months, tier, since),
+        )
+
+    async def bind_stars_charge(self, payment_id: str, provider_id: str) -> bool:
+        """Attach Telegram's charge ID to the order the stars were paid for.
+
+        Telegram has already taken the stars, so an order cancelled meanwhile
+        as stale is reopened instead of losing the payment. Returns False if
+        the order is bound to a different charge (never rebinds).
+        """
+        async with self.transaction() as conn:
+            await conn.execute(
+                "UPDATE payments SET provider_id = ?, status = CASE "
+                "WHEN status = 'cancelled' THEN 'pending' ELSE status END "
+                "WHERE payment_id = ? AND method = 'stars' AND provider_id IS NULL",
+                (provider_id, payment_id),
+            )
+            cur = await conn.execute(
+                "SELECT provider_id FROM payments WHERE payment_id = ?",
+                (payment_id,),
+            )
+            row = await cur.fetchone()
+        return row is not None and row[0] == provider_id
+
+    async def mark_payment_refunded(self, payment_id: str) -> bool:
+        """paid -> refunded, once. Refunded orders never count as paid again."""
+        rowcount = await self._execute(
+            "UPDATE payments SET status = 'refunded' "
+            "WHERE payment_id = ? AND status = 'paid'",
+            (payment_id,),
+        )
+        return rowcount == 1
+
+    async def get_meta(self, key: str) -> str | None:
+        row = await self._fetchone("SELECT value FROM app_meta WHERE key = ?", (key,))
+        return str(row["value"]) if row else None
+
+    async def set_meta(self, key: str, value: str) -> None:
+        await self._execute(
+            "INSERT INTO app_meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+
+    async def claim_traffic_notice(
+        self, node_username: str, window_start: int, level: int
+    ) -> bool:
+        """True the first time a quota level is reached in a traffic window."""
+        rowcount = await self._execute(
+            "INSERT OR IGNORE INTO traffic_notices "
+            "(node_username, window_start, level, created_at) VALUES (?, ?, ?, ?)",
+            (node_username, window_start, level, now()),
+        )
+        return rowcount == 1
+
+    async def release_traffic_notice(
+        self, node_username: str, window_start: int, level: int
+    ) -> None:
+        """Undo a claim whose message was not delivered, so it is retried."""
+        await self._execute(
+            "DELETE FROM traffic_notices WHERE node_username = ? "
+            "AND window_start = ? AND level = ?",
+            (node_username, window_start, level),
+        )
+
+    async def purge_traffic_notices(self, older_than: int) -> int:
+        return await self._execute(
+            "DELETE FROM traffic_notices WHERE created_at < ?",
+            (older_than,),
+        )
+
     async def get_payment_activation(self, payment_id: str) -> dict[str, Any] | None:
         return await self._fetchone(
             "SELECT * FROM payment_activations WHERE payment_id = ?",
@@ -885,7 +1051,8 @@ class Database:
             "UPDATE payments SET status = 'cancelled' "
             "WHERE status = 'pending' AND created_at < ? "
             "AND (provider_id IS NULL OR (provider_id NOT LIKE 'yookassa:%' "
-            "AND provider_id NOT LIKE 'cryptopay:%')) "
+            "AND provider_id NOT LIKE 'cryptopay:%' "
+            "AND provider_id NOT LIKE 'tgstars:%')) "
             "AND NOT EXISTS (SELECT 1 FROM yookassa_creations c "
             "WHERE c.payment_id = payments.payment_id)",
             (older_than,),

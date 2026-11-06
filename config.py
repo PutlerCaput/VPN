@@ -6,6 +6,7 @@ environment variables / .env for local development.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -27,12 +28,24 @@ SECRETS_DIR = Path(os.environ.get("SECRETS_DIR", "/run/secrets"))
 
 # Tariffs: tier -> months -> price. RUB for SBP (integer roubles), USDT as Decimal.
 # USDT prices follow the RUB ratio of the basic tier, rounded to 0.50.
+# "standard" is the 2026-11 model (1-6 months, two devices, traffic quota).
+# It is sold only when ENABLED_TIERS lists it, so an existing deployment keeps
+# its current terms until the owner switches deliberately.
 TIER_PRICES_RUB: dict[str, dict[int, int]] = {
+    "standard": {1: 299, 2: 549, 3: 799, 4: 999, 5: 1199, 6: 1399},
     "basic": {1: 300, 3: 800, 6: 1500, 12: 2700},
     "complete": {1: 450, 3: 1200, 6: 2200, 12: 4000},
     "prime": {1: 700, 3: 1800, 6: 3500, 12: 6000},
 }
 TIER_PRICES_USDT: dict[str, dict[int, Decimal]] = {
+    "standard": {
+        1: Decimal("3.50"),
+        2: Decimal("6.50"),
+        3: Decimal("9.50"),
+        4: Decimal("11.50"),
+        5: Decimal("14.00"),
+        6: Decimal("16.50"),
+    },
     "basic": {
         1: Decimal("3.50"),
         3: Decimal("9.00"),
@@ -55,6 +68,12 @@ TIER_PRICES_USDT: dict[str, dict[int, Decimal]] = {
 DEFAULT_TIER = "basic"
 
 
+GIB = 1024**3
+# Marzban's "month" reset strategy restarts the counter every 30 days counted
+# from the user's creation or last reset, not on a calendar month.
+TRAFFIC_RESET_STRATEGIES = ("no_reset", "day", "week", "month", "year")
+
+
 @dataclass(frozen=True, slots=True)
 class Tier:
     slug: str
@@ -64,11 +83,33 @@ class Tier:
     devices: int
     priority_support: bool
     features: tuple[str, ...]
+    # Shared traffic quota of the whole subscription, enforced by Marzban
+    # (data_limit). 0 means unlimited, as in the original tiers.
+    traffic_gb: int = 0
+    traffic_reset: str = "no_reset"
+
+    @property
+    def traffic_bytes(self) -> int:
+        return self.traffic_gb * GIB
 
 
 # Only features that exist today are listed here: they appear in the bot, the apps
 # and the offer. Multi-hop, a dedicated IP and bundled cloud storage are not built.
 TIERS: dict[str, Tier] = {
+    "standard": Tier(
+        slug="standard",
+        title="Стандарт",
+        devices=2,
+        priority_support=False,
+        features=(
+            "Протокол VLESS + XTLS-Reality (flow xtls-rprx-vision)",
+            "До 2 устройств по одной подписке",
+            "200 ГБ трафика на каждые 30 дней, общий для всех устройств",
+            "Блокировка вредоносных и фишинговых ресурсов, ресурсов 18+ и азартных игр",
+        ),
+        traffic_gb=200,
+        traffic_reset="month",
+    ),
     "basic": Tier(
         slug="basic",
         title="Basic",
@@ -117,6 +158,25 @@ def savings_percent(tier: str, months: int) -> int:
 def device_note(tier: str) -> str:
     """Panel-side note: the tier and its device limit, visible to the admin."""
     return f"tier={tier} devices={TIERS[tier].devices}"
+
+
+def all_periods() -> list[int]:
+    """Every period (months) sold in at least one tier."""
+    return sorted({months for prices in TIER_PRICES_RUB.values() for months in prices})
+
+
+def stars_price(tier: str, months: int, rub_per_star: Decimal) -> int:
+    """Telegram Stars price: the rouble price converted at the owner's rate.
+
+    Rounded up to whole stars, because XTR has no fractional unit.
+    """
+    value = Decimal(TIER_PRICES_RUB[tier][months]) / rub_per_star
+    return max(1, math.ceil(value))
+
+
+def format_gb(value_bytes: int) -> str:
+    gb = value_bytes / GIB
+    return f"{gb:.1f}" if gb < 10 else f"{gb:.0f}"
 
 
 DAYS_PER_MONTH = 30
@@ -214,8 +274,18 @@ class Settings(BaseSettings):
     traffic_anomaly_gb_per_day: int = 800
     autoban_gb_per_day: int = 2000
 
+    # --- Telegram Stars (in-bot sales of digital services) -------------------
+    # Telegram requires Stars (XTR) for digital goods sold inside bots.
+    stars_enabled: bool = False
+    # How many roubles one star is counted at when converting tariff prices.
+    stars_rub_per_star: Decimal = Field(Decimal("1.60"), gt=0, le=100)
+    # Ruble checkout (YooKassa web page) inside the bot. See docs/PAYMENTS_TELEGRAM.md.
+    yookassa_in_bot: bool = True
+
     # --- Business -----------------------------------------------------------
     trial_seconds: int = 86400
+    # Traffic quota of the free trial in GB; 0 keeps the trial unlimited.
+    trial_traffic_gb: int = Field(0, ge=0, le=1000)
     referral_acquisition_enabled: bool = False
     referral_inviter_bonus_days: int = 15
     referral_invitee_bonus_days: int = 3
@@ -391,6 +461,22 @@ class Settings(BaseSettings):
     def enabled_tiers(self) -> list[str]:
         items = (item.strip().lower() for item in self.enabled_tiers_csv.split(","))
         return [item for item in items if item]
+
+    @property
+    def default_tier(self) -> str:
+        """The tier used for deep links without a tier and for the trial."""
+        tiers = self.enabled_tiers
+        return tiers[0] if tiers else DEFAULT_TIER
+
+    @property
+    def payment_methods_in_bot(self) -> list[str]:
+        """Ordinary payment menu of the bot; USDT has its own entry point."""
+        methods = []
+        if self.stars_enabled:
+            methods.append("stars")
+        if self.yookassa_in_bot:
+            methods.append("sbp")
+        return methods
 
     @property
     def referral_link_base(self) -> str:

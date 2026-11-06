@@ -8,10 +8,11 @@ from typing import Any, Protocol
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject, User
 
-ALLOWED_COMMANDS = ("/start", "/legal")
+# /terms and /paysupport stay available: payment disputes must be reachable.
+ALLOWED_COMMANDS = ("/start", "/legal", "/terms", "/paysupport")
 BANNED_TEXT = (
     "🔴 Доступ заблокирован за нарушение правил использования. "
-    "Доступны только /start и /legal."
+    "Доступны только /start, /legal, /terms и /paysupport."
 )
 
 
@@ -20,6 +21,12 @@ class UserStatusSource(Protocol):
 
 
 def is_allowed_for_banned(event: TelegramObject) -> bool:
+    if isinstance(event, Message) and (
+        getattr(event, "successful_payment", None) is not None
+        or getattr(event, "refunded_payment", None) is not None
+    ):
+        # The payment is recorded so the owner can review or refund it.
+        return True
     if isinstance(event, Message) and event.text:
         command = event.text.split(maxsplit=1)[0].split("@", 1)[0].lower()
         return command in ALLOWED_COMMANDS
