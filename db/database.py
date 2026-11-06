@@ -243,6 +243,29 @@ CREATE TABLE IF NOT EXISTS star_subscriptions (
 CREATE INDEX IF NOT EXISTS idx_star_subscriptions_user
     ON star_subscriptions(telegram_id, status);
 
+-- AmneziaWG: one key pair per subscriber device (private key kept so the
+-- config can be sent again; the file is encrypted with SQLCipher in production).
+CREATE TABLE IF NOT EXISTS awg_devices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    public_key TEXT NOT NULL UNIQUE,
+    private_key TEXT NOT NULL,
+    preshared_key TEXT NOT NULL,
+    address TEXT NOT NULL UNIQUE,
+    last_counter INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_awg_devices_user ON awg_devices(telegram_id);
+
+-- AmneziaWG traffic in the user's current Marzban traffic window
+-- (window_key = Marzban lifetime minus current usage; -1 = not known yet).
+CREATE TABLE IF NOT EXISTS awg_usage (
+    telegram_id INTEGER PRIMARY KEY,
+    window_key INTEGER NOT NULL,
+    bytes INTEGER NOT NULL DEFAULT 0
+);
+
 -- Quota notices are sent once per traffic window and threshold. window_start
 -- is the traffic counted before the current window (lifetime minus current
 -- usage); it changes exactly when the panel resets the counter. No history
@@ -935,6 +958,97 @@ class Database:
             )
             row = await cur.fetchone()
         return row is not None and row[0] == provider_id
+
+    # ------------------------------------------------------------ amneziawg
+    async def awg_devices(self, telegram_id: int) -> list[dict[str, Any]]:
+        return await self._fetchall(
+            "SELECT * FROM awg_devices WHERE telegram_id = ? ORDER BY id",
+            (telegram_id,),
+        )
+
+    async def all_awg_devices(self) -> list[dict[str, Any]]:
+        return await self._fetchall("SELECT * FROM awg_devices ORDER BY id")
+
+    async def get_awg_device(self, device_id: int) -> dict[str, Any] | None:
+        return await self._fetchone(
+            "SELECT * FROM awg_devices WHERE id = ?", (device_id,)
+        )
+
+    async def add_awg_device(
+        self,
+        *,
+        telegram_id: int,
+        name: str,
+        public_key: str,
+        private_key: str,
+        preshared_key: str,
+        address: str,
+    ) -> dict[str, Any]:
+        async with self.transaction() as conn:
+            cur = await conn.execute(
+                "INSERT INTO awg_devices (telegram_id, name, public_key, private_key, "
+                "preshared_key, address, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    telegram_id,
+                    name,
+                    public_key,
+                    private_key,
+                    preshared_key,
+                    address,
+                    now(),
+                ),
+            )
+            device_id = cur.lastrowid
+        device = await self.get_awg_device(int(device_id or 0))
+        if device is None:
+            raise RuntimeError("device was not stored")
+        return device
+
+    async def delete_awg_device(self, device_id: int) -> None:
+        await self._execute("DELETE FROM awg_devices WHERE id = ?", (device_id,))
+
+    async def set_awg_counter(self, device_id: int, counter: int) -> None:
+        await self._execute(
+            "UPDATE awg_devices SET last_counter = ? WHERE id = ?",
+            (counter, device_id),
+        )
+
+    async def get_awg_usage(self, telegram_id: int) -> dict[str, Any] | None:
+        return await self._fetchone(
+            "SELECT * FROM awg_usage WHERE telegram_id = ?", (telegram_id,)
+        )
+
+    async def set_awg_usage(self, telegram_id: int, window_key: int, delta: int) -> int:
+        """Add traffic to the window; a new window starts from this traffic.
+
+        Traffic counted while the window was unknown (-1) is carried over.
+        Returns the bytes of the current window.
+        """
+        async with self.transaction() as conn:
+            cur = await conn.execute(
+                "SELECT window_key, bytes FROM awg_usage WHERE telegram_id = ?",
+                (telegram_id,),
+            )
+            row = await cur.fetchone()
+            if row is not None and int(row[0]) in (window_key, -1):
+                total = int(row[1]) + delta
+            else:
+                total = delta
+            await conn.execute(
+                "INSERT INTO awg_usage (telegram_id, window_key, bytes) "
+                "VALUES (?, ?, ?) ON CONFLICT(telegram_id) DO UPDATE SET "
+                "window_key = excluded.window_key, bytes = excluded.bytes",
+                (telegram_id, window_key, total),
+            )
+        return total
+
+    async def add_awg_usage_bytes(self, telegram_id: int, delta: int) -> None:
+        """Traffic seen while the Marzban window is unknown."""
+        await self._execute(
+            "INSERT INTO awg_usage (telegram_id, window_key, bytes) VALUES (?, -1, ?) "
+            "ON CONFLICT(telegram_id) DO UPDATE SET bytes = bytes + excluded.bytes",
+            (telegram_id, delta),
+        )
 
     # ------------------------------------------------------ star subscriptions
     async def create_star_subscription(

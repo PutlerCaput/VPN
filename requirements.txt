@@ -11,3 +11,4 @@ pywebpush==2.0.3
 qrcode[pil]==7.4.2
 python-dotenv==1.2.4
 sqlcipher3-binary==0.6.0
+cryptography==50.0.2

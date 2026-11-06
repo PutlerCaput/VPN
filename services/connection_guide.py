@@ -13,6 +13,8 @@ class ClientGuide:
     steps: str
 
 
+AMNEZIA_APP_URL = "https://github.com/amnezia-vpn/amnezia-client/releases"
+
 GUIDES: dict[str, ClientGuide] = {
     "android": ClientGuide(
         "Android",
@@ -83,6 +85,27 @@ GUIDES: dict[str, ClientGuide] = {
         "Не запускайте команды из неизвестных источников.",
     ),
 }
+
+# Shown only when the AmneziaWG server is connected (AWG_ENABLED).
+AMNEZIA_GUIDE = ClientGuide(
+    "AmneziaVPN (все системы)",
+    "AmneziaVPN",
+    AMNEZIA_APP_URL,
+    "AmneziaWG — второй протокол с маскировкой трафика; у каждого устройства "
+    "свой ключ.\n\n"
+    "1. Установите AmneziaVPN из официального раздела Releases (есть версии для "
+    "Android, iPhone/iPad, Windows, macOS и Linux) или из магазина приложений.\n"
+    "2. Нажмите «Получить мою конфигурацию» ниже → «➕ Добавить устройство». "
+    "Бот пришлёт файл .conf и QR-код для этого устройства.\n"
+    "3. В AmneziaVPN добавьте подключение из файла или отсканируйте QR-код "
+    "с другого экрана.\n"
+    "4. Подключитесь и проверьте обычный сайт.\n\n"
+    "Если уже пользуетесь AmneziaVPN со своим сервером, новое подключение "
+    "добавится рядом, старое останется. Раздельное туннелирование (какие "
+    "сайты или приложения идут мимо VPN) настраивается в самом приложении. "
+    "Файл подходит и для приложений AmneziaWG и роутеров с поддержкой "
+    "AmneziaWG.",
+)
 
 HELP_TEXT = (
     "🛠 <b>Помощь с подключением</b>\n\n"

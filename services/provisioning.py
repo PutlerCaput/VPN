@@ -212,8 +212,14 @@ class ProvisioningService:
         try:
             used = max(0, int(data.get("used_traffic") or 0))
             limit = max(0, int(data.get("data_limit") or 0))
+            lifetime = max(used, int(data.get("lifetime_used_traffic") or used))
         except (TypeError, ValueError):
             return None
+        from services.awg import combined_usage
+
+        used, limit = await combined_usage(
+            self.db, int(user["telegram_id"]), used, lifetime, limit
+        )
         status = TrafficStatus(
             used_bytes=used,
             limit_bytes=limit,

@@ -4,14 +4,20 @@ from __future__ import annotations
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from services.connection_guide import GUIDES
+from services.connection_guide import AMNEZIA_GUIDE, GUIDES
 
 
-def setup_kb() -> InlineKeyboardMarkup:
+def setup_kb(awg: bool = False) -> InlineKeyboardMarkup:
     buttons = [
         InlineKeyboardButton(text=g.title, callback_data=f"setup:guide:{key}")
         for key, g in GUIDES.items()
     ]
+    if awg:
+        buttons.append(
+            InlineKeyboardButton(
+                text=f"🛰 {AMNEZIA_GUIDE.title}", callback_data="setup:guide:amnezia"
+            )
+        )
     rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
     rows.append(
         [
@@ -27,7 +33,8 @@ def setup_kb() -> InlineKeyboardMarkup:
 
 
 def guide_kb(key: str) -> InlineKeyboardMarkup:
-    guide = GUIDES[key]
+    guide = AMNEZIA_GUIDE if key == "amnezia" else GUIDES[key]
+    config_action = "awg:menu" if key == "amnezia" else "setup:config"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -37,7 +44,7 @@ def guide_kb(key: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="Получить мою конфигурацию", callback_data="setup:config"
+                    text="Получить мою конфигурацию", callback_data=config_action
                 )
             ],
             [InlineKeyboardButton(text="Не получается", callback_data="setup:help")],

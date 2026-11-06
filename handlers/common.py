@@ -91,7 +91,9 @@ def status_text(
     return "\n".join(lines)
 
 
-async def send_config(message: Message, link: str, expires_at: int | None) -> None:
+async def send_config(
+    message: Message, link: str, expires_at: int | None, *, awg: bool = False
+) -> None:
     if message.chat.type != "private":
         return
     kind = (
@@ -106,7 +108,7 @@ async def send_config(message: Message, link: str, expires_at: int | None) -> No
         f"<code>{html_escape(link)}</code>\n\n"
         f"Активна до: <b>{format_date(expires_at)}</b>\n\n{APPS_HINT}\n\n"
         "⚠️ Не передавайте ссылку третьим лицам: она привязана к вашему аккаунту.",
-        reply_markup=setup_kb(),
+        reply_markup=setup_kb(awg),
     )
     await message.answer_photo(
         BufferedInputFile(render_qr_png(link), filename="config.png"),
@@ -115,5 +117,5 @@ async def send_config(message: Message, link: str, expires_at: int | None) -> No
             "Если ссылка попала к посторонним или вы сменили устройство, "
             "сбросьте её: старые копии перестанут работать."
         ),
-        reply_markup=config_actions_kb(),
+        reply_markup=config_actions_kb(awg),
     )

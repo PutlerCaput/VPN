@@ -15,6 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from config import Settings, format_gb
 from db.database import Database
+from services.awg import AwgService, combined_usage
 from services.health import ServiceHealth
 from services.marzban import MarzbanClient, MarzbanError
 from services.metrics import ACTIVE_USERS, JOB_FAILURES
@@ -234,6 +235,8 @@ class AnomalyMonitor:
             return
         if limit <= 0:
             return
+        window = max(0, lifetime - used)
+        used, limit = await combined_usage(self.db, telegram_id, used, lifetime, limit)
         exhausted = panel_user.get("status") == "limited" or used >= limit
         if exhausted:
             level = 100
@@ -241,7 +244,6 @@ class AnomalyMonitor:
             level = QUOTA_WARNING_PERCENT
         else:
             return
-        window = max(0, lifetime - used)
         if not await self.db.claim_traffic_notice(node, window, level):
             return
         resets = panel_user.get("data_limit_reset_strategy") not in (None, "no_reset")
@@ -353,6 +355,7 @@ class Jobs:
         *,
         stars: StarsPayments | None = None,
         health: ServiceHealth | None = None,
+        awg: AwgService | None = None,
     ) -> None:
         self.db = db
         self.provisioning = provisioning
@@ -363,6 +366,7 @@ class Jobs:
         self.payment_reconciler = payment_reconciler
         self.stars = stars
         self.health = health
+        self.awg = awg
 
     async def daily_expiry_check(self) -> None:
         for user in await self.db.users_to_expire(int(time.time())):
@@ -410,6 +414,10 @@ class Jobs:
     async def stars_reconciliation(self) -> None:
         if self.stars is not None:
             await self.stars.reconcile()
+
+    async def awg_reconcile(self) -> None:
+        if self.awg is not None:
+            await self.awg.reconcile()
 
     async def health_check(self) -> None:
         if self.health is not None:
@@ -487,6 +495,12 @@ def build_scheduler(jobs: Jobs) -> AsyncIOScheduler:
         _guarded("payment_reconciliation", jobs.payment_reconciliation),
         IntervalTrigger(minutes=1, timezone=UTC),
         id="payment_reconciliation",
+        **defaults,
+    )
+    scheduler.add_job(
+        _guarded("awg_reconcile", jobs.awg_reconcile),
+        IntervalTrigger(minutes=3, timezone=UTC),
+        id="awg_reconcile",
         **defaults,
     )
     scheduler.add_job(

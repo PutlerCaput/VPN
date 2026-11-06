@@ -189,17 +189,25 @@ def sbp_payment_kb(payment_url: str, payment_id: str) -> InlineKeyboardMarkup:
     )
 
 
-def config_actions_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+def config_actions_kb(awg: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="🔄 Сбросить ссылку (отключить старые устройства)",
+                callback_data="cfg:revoke",
+            )
+        ]
+    ]
+    if awg:
+        rows.append(
             [
                 InlineKeyboardButton(
-                    text="🔄 Сбросить ссылку (отключить старые устройства)",
-                    callback_data="cfg:revoke",
+                    text="🛰 AmneziaWG: отдельный ключ на устройство",
+                    callback_data="awg:menu",
                 )
             ]
-        ],
-    )
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def revoke_confirm_kb() -> InlineKeyboardMarkup:
