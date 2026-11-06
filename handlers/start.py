@@ -161,4 +161,9 @@ async def cb_accept_offer(callback: CallbackQuery, services: Services) -> None:
         reply_markup=main_menu_kb(),
     )
     if result.config_link:
-        await send_config(message, result.config_link, result.expires_at)
+        await send_config(
+            message,
+            result.config_link,
+            result.expires_at,
+            awg=services.awg is not None,
+        )

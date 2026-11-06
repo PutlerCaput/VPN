@@ -6,6 +6,7 @@ from aiogram import F, Router
 
 from handlers import (
     admin,
+    amnezia,
     legal,
     onboarding,
     payments,
@@ -27,6 +28,7 @@ def build_root_router() -> Router:
     root.include_router(payments.router)
     root.include_router(profile.router)
     root.include_router(onboarding.router)
+    root.include_router(amnezia.router)
     root.include_router(referral.router)
     root.include_router(support.router)
     return root

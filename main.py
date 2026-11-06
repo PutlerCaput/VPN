@@ -24,6 +24,7 @@ from db.database import Database, DatabaseKeyError
 from handlers import build_root_router
 from logging_setup import setup_logging
 from middlewares import BannedMiddleware, ThrottlingMiddleware
+from services.awg import AwgAgent, AwgService
 from services.billing import BillingService
 from services.container import Services
 from services.cryptopay import CryptoPayClient
@@ -119,6 +120,19 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
         health=ServiceHealth(
             marzban, notifier, settings.admin_telegram_id, settings.main_location_name
         ),
+        awg=(
+            AwgService(
+                db,
+                AwgAgent(
+                    settings.awg_agent_url,
+                    settings.awg_agent_token.get_secret_value(),
+                ),
+                marzban,
+                settings,
+            )
+            if settings.awg_enabled and settings.awg_agent_token is not None
+            else None
+        ),
     )
 
 
@@ -128,6 +142,7 @@ BOT_COMMANDS = (
     ("config", "Моя конфигурация"),
     ("connect", "Подключить устройство"),
     ("servers", "Серверы и их состояние"),
+    ("amnezia", "AmneziaWG: ключи для устройств"),
     ("help", "Помощь с подключением"),
     ("support", "Написать в поддержку"),
     ("autorenew", "Автопродление"),
@@ -236,6 +251,7 @@ async def run() -> None:
         ),
         stars=services.stars,
         health=services.health,
+        awg=services.awg,
     )
     scheduler = build_scheduler(jobs)
 
@@ -318,6 +334,8 @@ async def run() -> None:
             await services.cryptopay.close()
         if services.yookassa is not None:
             await services.yookassa.close()
+        if services.awg is not None:
+            await services.awg.agent.close()
         await bot.session.close()
         await db.close()
         logger.info("stopped")

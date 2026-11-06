@@ -78,7 +78,8 @@ fi
 
 # Settings an owner may change with --set; anything else is edited by hand.
 SETTABLE_KEYS="ENABLED_TIERS CONFIG_DELIVERY SUBSCRIPTION_BASE_URL MAIN_LOCATION_NAME \
-STARS_ENABLED STARS_AUTORENEW_ENABLED STARS_RUB_PER_STAR YOOKASSA_IN_BOT TRIAL_TRAFFIC_GB"
+STARS_ENABLED STARS_AUTORENEW_ENABLED STARS_RUB_PER_STAR YOOKASSA_IN_BOT TRIAL_TRAFFIC_GB \
+AWG_ENABLED AWG_AGENT_URL AWG_AGENT_TOKEN"
 
 if [[ "${1:-}" == "--set-tiers" ]]; then
   set -- --set "ENABLED_TIERS=${2:-}"
@@ -112,7 +113,8 @@ if [[ "${1:-}" == "--set" ]]; then
   say "ENV_BACKUP $ENV_BACKUP"
   recreate
   if wait_healthy; then
-    say "SET_OK $*"
+    # Keys only: a token value must not end up in the terminal or a log.
+    say "SET_OK $(for pair in "$@"; do printf '%s ' "${pair%%=*}"; done)"
     exit 0
   fi
   cp -p "$ENV_BACKUP" "$ENV_FILE"

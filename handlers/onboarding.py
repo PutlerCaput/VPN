@@ -10,7 +10,12 @@ from aiogram.types import CallbackQuery, Message
 from handlers.profile import deliver_config
 from keyboards.main_menu import BTN_SETUP
 from keyboards.onboarding import guide_kb, help_kb, setup_kb
-from services.connection_guide import GUIDES, HELP_TEXT, KILL_SWITCH_TEXT
+from services.connection_guide import (
+    AMNEZIA_GUIDE,
+    GUIDES,
+    HELP_TEXT,
+    KILL_SWITCH_TEXT,
+)
 from services.container import Services
 
 router = Router(name="onboarding")
@@ -24,9 +29,12 @@ SETUP_TEXT = (
 
 @router.message(F.text == BTN_SETUP)
 @router.message(Command("connect"))
-async def start_setup(message: Message, state: FSMContext) -> None:
+async def start_setup(
+    message: Message, state: FSMContext, services: Services | None = None
+) -> None:
     await state.clear()
-    await message.answer(SETUP_TEXT, reply_markup=setup_kb())
+    awg = services is not None and services.awg is not None
+    await message.answer(SETUP_TEXT, reply_markup=setup_kb(awg))
 
 
 @router.message(Command("help"))
@@ -50,7 +58,11 @@ async def setup_action(
     action = callback.data or ""
     if action.startswith("setup:guide:"):
         key = action.removeprefix("setup:guide:")
-        guide = GUIDES.get(key)
+        guide = (
+            AMNEZIA_GUIDE
+            if key == "amnezia" and services.awg is not None
+            else GUIDES.get(key)
+        )
         if guide is None:
             await callback.answer("Выберите устройство заново: /connect.")
             return
@@ -65,7 +77,7 @@ async def setup_action(
         )
     elif action == "setup:choose":
         await callback.answer()
-        await start_setup(message, state)
+        await start_setup(message, state, services)
     elif action == "setup:killswitch":
         await callback.answer()
         await message.answer(KILL_SWITCH_TEXT, reply_markup=help_kb())

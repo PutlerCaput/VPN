@@ -8,6 +8,7 @@ from aiogram import Bot
 
 from config import Settings
 from db.database import Database
+from services.awg import AwgService
 from services.billing import BillingService
 from services.cryptopay import CryptoPayClient
 from services.health import ServiceHealth
@@ -38,4 +39,5 @@ class Services:
     yookassa: YooKassaClient | None = None
     stars: StarsPayments | None = None
     health: ServiceHealth | None = None
+    awg: AwgService | None = None
     limiters: list[SlidingWindowLimiter] = field(default_factory=list)

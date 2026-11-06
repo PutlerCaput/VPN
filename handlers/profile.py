@@ -114,7 +114,7 @@ async def deliver_config(message: Message, owner_id: int, services: Services) ->
             "⚠️ Узел временно недоступен. Попробуйте через несколько минут."
         )
         return
-    await send_config(message, link, user["expires_at"])
+    await send_config(message, link, user["expires_at"], awg=services.awg is not None)
     if notice := outage_suffix(services):
         await message.answer(notice.strip())
 
@@ -171,4 +171,9 @@ async def cb_revoke(callback: CallbackQuery, services: Services) -> None:
         return
     user = await services.db.get_user(owner_id)
     await message.answer("✅ Старая ссылка отключена. Новая конфигурация:")
-    await send_config(message, link, user["expires_at"] if user else None)
+    await send_config(
+        message,
+        link,
+        user["expires_at"] if user else None,
+        awg=services.awg is not None,
+    )

@@ -245,6 +245,12 @@ class Settings(BaseSettings):
     # Display name of the server that runs the Marzban core itself.
     main_location_name: str = Field("Основной сервер", min_length=1, max_length=64)
 
+    # --- AmneziaWG: second protocol, one key per device ----------------------
+    # Requires the separate cyberdefency-awg container (scripts/install_awg.sh).
+    awg_enabled: bool = False
+    awg_agent_url: str = "http://cyberdefency-awg:8090"
+    awg_agent_token: SecretStr | None = None
+
     # --- Crypto Pay (@CryptoBot), outside Russia only -----------------------
     crypto_pay_token: SecretStr | None = None
     crypto_pay_testnet: bool = False
@@ -364,6 +370,27 @@ class Settings(BaseSettings):
             raise ValueError("subscription_base_url must be an HTTPS origin, no path")
         return value
 
+    @field_validator("awg_agent_url")
+    @classmethod
+    def _awg_agent_origin(cls, value: str) -> str:
+        value = value.rstrip("/")
+        try:
+            url = urlsplit(value)
+            _ = url.port
+            valid = (
+                url.scheme in ("http", "https")
+                and bool(url.hostname)
+                and url.username is None
+                and url.password is None
+                and url.path == ""
+                and not url.query
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ValueError("awg_agent_url must be an http(s) origin without a path")
+        return value
+
     @field_validator("marzban_url")
     @classmethod
     def _strip_marzban_slash(cls, value: str) -> str:
@@ -384,6 +411,7 @@ class Settings(BaseSettings):
         "yookassa_return_url",
         "yookassa_proxy_url",
         "subscription_base_url",
+        "awg_agent_token",
         mode="before",
     )
     @classmethod
@@ -464,6 +492,13 @@ class Settings(BaseSettings):
         keys = self.enabled_tiers
         if not keys or any(key not in TIERS for key in keys):
             problems.append(f"enabled_tiers must list tiers from: {', '.join(TIERS)}")
+        if self.awg_enabled and (
+            self.awg_agent_token is None
+            or len(self.awg_agent_token.get_secret_value()) < 32
+        ):
+            problems.append(
+                "awg_agent_token (32+ characters) is required for AmneziaWG"
+            )
         if self.bot_mode == "webhook" and not self.telegram_webhook_secret:
             problems.append("telegram_webhook_secret is required in webhook mode")
         if problems:
