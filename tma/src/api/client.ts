@@ -34,6 +34,18 @@ export interface Subscription {
   traffic?: TrafficStatus | null;
 }
 
+export interface ServerLocation {
+  name: string;
+  online: boolean;
+}
+
+export interface ServersReport {
+  checked_at: number;
+  panel_ok: boolean;
+  subscription: boolean;
+  locations: ServerLocation[];
+}
+
 export interface TrafficStatus {
   used_bytes: number;
   limit_bytes: number;
@@ -123,6 +135,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const endpoints = {
   me: () => api<Me>("/me"),
   subscription: () => api<Subscription>("/subscription"),
+  servers: () => api<ServersReport>("/servers"),
   config: () => api<NodeConfig>("/config"),
   tariffs: () => api<{ tiers: Tier[] }>("/tariffs"),
   history: () => api<PaymentRow[]>("/payments/history"),

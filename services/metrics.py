@@ -60,3 +60,9 @@ JOB_FAILURES = Counter(
     ["job"],
     registry=REGISTRY,
 )
+LOCATION_UP = Gauge(
+    "location_up",
+    "1 if the location (Marzban core or node) is serving, else 0",
+    ["location"],
+    registry=REGISTRY,
+)

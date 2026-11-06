@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 import re
 import time
+import uuid
+from datetime import datetime
 from typing import Any, Protocol
 
 from aiogram.types import StarTransaction, TransactionPartnerUser
@@ -32,6 +34,11 @@ logger = logging.getLogger(__name__)
 
 CURRENCY = "XTR"
 PROVIDER_PREFIX = "tgstars:"
+# Invoice payload of a monthly subscription: "sub:<subscription id>".
+SUBSCRIPTION_PREFIX = "sub:"
+SUBSCRIPTION_PERIOD_SECONDS = 30 * 86400  # the only period Telegram allows
+# A renewal that did not arrive this long after its date ends the subscription.
+SUBSCRIPTION_GRACE_SECONDS = 3 * 86400
 # An unpaid invoice older than this is refused at checkout: prices may have
 # changed and housekeeping cancels such orders anyway.
 CHECKOUT_MAX_AGE_SECONDS = 48 * 3600
@@ -59,6 +66,28 @@ class StarsBot(Protocol):
     async def refund_star_payment(
         self, user_id: int, telegram_payment_charge_id: str
     ) -> bool: ...
+
+    async def edit_user_star_subscription(
+        self, user_id: int, telegram_payment_charge_id: str, is_canceled: bool
+    ) -> bool: ...
+
+
+def _unix(value: Any) -> int:
+    """aiogram parses dates into datetime; raw updates carry Unix seconds."""
+    if isinstance(value, datetime):
+        return int(value.timestamp())
+    return int(value)
+
+
+def subscription_id_from(payload: str) -> str | None:
+    if not payload.startswith(SUBSCRIPTION_PREFIX):
+        return None
+    value = payload.removeprefix(SUBSCRIPTION_PREFIX)
+    return value if is_valid_payment_id(value) else None
+
+
+def subscription_payload(subscription_id: str) -> str:
+    return f"{SUBSCRIPTION_PREFIX}{subscription_id}"
 
 
 def provider_id_for(charge_id: str) -> str:
@@ -91,6 +120,11 @@ class StarsPayments:
         self, *, payload: str, from_id: int, currency: str, total_amount: int
     ) -> str | None:
         """None if the order may be charged now, else a CHECKOUT_ERRORS key."""
+        subscription_id = subscription_id_from(payload)
+        if subscription_id is not None:
+            return await self._subscription_checkout_error(
+                subscription_id, from_id, currency, total_amount
+            )
         payment = await self._order(payload)
         if payment is None or int(payment["telegram_id"]) != from_id:
             return "not_found"
@@ -111,6 +145,27 @@ class StarsPayments:
             return "offer_not_accepted"
         return None
 
+    async def _subscription_checkout_error(
+        self, subscription_id: str, from_id: int, currency: str, total_amount: int
+    ) -> str | None:
+        sub = await self.db.get_star_subscription(subscription_id)
+        if sub is None or int(sub["telegram_id"]) != from_id:
+            return "not_found"
+        # "active"/"failed" too: whether Telegram asks before a renewal or a
+        # retry is not documented, and neither may be refused by our own check.
+        if sub["status"] not in ("pending", "active", "failed"):
+            return "stale"
+        if currency != CURRENCY or int(sub["amount"]) != total_amount:
+            return "mismatch"
+        user = await self.db.get_user(from_id)
+        if user is None:
+            return "not_found"
+        if user["status"] == "banned":
+            return "banned"
+        if not await self.db.has_accepted_offer(from_id):
+            return "offer_not_accepted"
+        return None
+
     # ---------------------------------------------------------------- success
     async def record_success(
         self,
@@ -120,8 +175,19 @@ class StarsPayments:
         currency: str,
         total_amount: int,
         charge_id: str,
+        next_charge_at: int | None = None,
     ) -> bool:
         """Credit a completed Stars payment once. True if the order is now paid."""
+        subscription_id = subscription_id_from(payload)
+        if subscription_id is not None:
+            return await self.record_subscription_charge(
+                subscription_id=subscription_id,
+                from_id=from_id,
+                currency=currency,
+                total_amount=total_amount,
+                charge_id=charge_id,
+                next_charge_at=next_charge_at,
+            )
         payment = await self._order(payload)
         if (
             payment is None
@@ -151,6 +217,109 @@ class StarsPayments:
         await self.provisioning.process_paid_payment(payment_id)
         return True
 
+    async def record_subscription_charge(
+        self,
+        *,
+        subscription_id: str,
+        from_id: int,
+        currency: str,
+        total_amount: int,
+        charge_id: str,
+        next_charge_at: int | None,
+    ) -> bool:
+        """One subscription charge -> one payment -> one 30-day extension."""
+        sub = await self.db.get_star_subscription(subscription_id)
+        if (
+            sub is None
+            or int(sub["telegram_id"]) != from_id
+            or currency != CURRENCY
+            or int(sub["amount"]) != total_amount
+            or not CHARGE_ID_RE.fullmatch(charge_id)
+        ):
+            logger.error("stars_subscription_mismatch")
+            await self.provisioning.notifier.telegram(
+                self.admin_telegram_id,
+                "⚠️ Списание по подписке Stars не совпало с заказом. "
+                f"Пользователь <code>{from_id}</code>, сумма {total_amount} XTR. "
+                "Срок не продлён автоматически; проверьте и при необходимости "
+                "оформите возврат.",
+            )
+            return False
+        user = await self.db.get_user(from_id)
+        if user is not None and user["status"] == "banned":
+            await self.cancel_subscription(subscription_id)
+            await self.provisioning.notifier.telegram(
+                self.admin_telegram_id,
+                f"⚠️ Заблокированному пользователю <code>{from_id}</code> пришло "
+                "списание по подписке Stars. Автопродление отключено; срок не "
+                f"продлён. Решите вопрос возврата: /refund после проверки "
+                f"(списание <code>{charge_id}</code>).",
+            )
+            return False
+        payment_id = await self.db.record_subscription_charge(
+            subscription_id=subscription_id,
+            payment_id=uuid.uuid4().hex,
+            provider_id=provider_id_for(charge_id),
+            next_charge_at=next_charge_at
+            or int(time.time()) + SUBSCRIPTION_PERIOD_SECONDS,
+        )
+        await self.provisioning.process_paid_payment(payment_id)
+        return True
+
+    async def cancel_subscription(self, subscription_id: str) -> bool:
+        """Stop future charges; the period already paid stays."""
+        sub = await self.db.get_star_subscription(subscription_id)
+        if sub is None:
+            return False
+        charges = [c for c in (sub["first_charge_id"], sub["last_charge_id"]) if c]
+        for charge_id in dict.fromkeys(charges):
+            try:
+                await self.bot.edit_user_star_subscription(
+                    user_id=int(sub["telegram_id"]),
+                    telegram_payment_charge_id=str(charge_id),
+                    is_canceled=True,
+                )
+                break
+            except Exception as exc:
+                logger.warning(
+                    "stars_subscription_cancel_failed",
+                    extra={"error": type(exc).__name__},
+                )
+        else:
+            if charges:
+                return False
+        await self.db.set_star_subscription_status(subscription_id, "canceled")
+        return True
+
+    async def subscription_changed(
+        self, *, payload: str, from_id: int, state: str
+    ) -> str | None:
+        """Telegram reported a subscription change (canceled/active/failed)."""
+        subscription_id = subscription_id_from(payload)
+        if subscription_id is None:
+            return None
+        sub = await self.db.get_star_subscription(subscription_id)
+        if sub is None or int(sub["telegram_id"]) != from_id:
+            return None
+        status = {"canceled": "canceled", "active": "active", "failed": "failed"}.get(
+            state
+        )
+        if status is None:
+            return None
+        await self.db.set_star_subscription_status(subscription_id, status)
+        return status
+
+    async def active_subscription(self, telegram_id: int) -> dict[str, Any] | None:
+        for sub in await self.db.user_star_subscriptions(telegram_id):
+            if sub["status"] in ("active", "failed"):
+                return sub
+        return None
+
+    async def end_lapsed(self) -> int:
+        return await self.db.end_lapsed_star_subscriptions(
+            int(time.time()) - SUBSCRIPTION_GRACE_SECONDS
+        )
+
     # ---------------------------------------------------------- reconciliation
     async def _reconcile_transaction(self, tx: StarTransaction) -> bool:
         source = tx.source
@@ -159,6 +328,19 @@ class StarsPayments:
         if source.transaction_type not in (None, "invoice_payment"):
             return False
         payload = source.invoice_payload or ""
+        subscription_id = subscription_id_from(payload)
+        if subscription_id is not None:
+            if await self.db.get_payment_by_provider(provider_id_for(tx.id)):
+                return False
+            logger.warning("stars_subscription_charge_recovered")
+            return await self.record_subscription_charge(
+                subscription_id=subscription_id,
+                from_id=source.user.id,
+                currency=CURRENCY,
+                total_amount=tx.amount,
+                charge_id=tx.id,
+                next_charge_at=_unix(tx.date) + SUBSCRIPTION_PERIOD_SECONDS,
+            )
         payment = await self._order(payload)
         if payment is None or payment["status"] in ("paid", "refunded"):
             return False
@@ -221,6 +403,9 @@ class StarsPayments:
             logger.error("stars_refund_failed", extra={"error": type(exc).__name__})
             return "telegram_error"
         await self.provisioning.revoke_refunded_payment(payment_id)
+        if payment.get("subscription_id"):
+            # A refunded renewal must not be followed by the next charge.
+            await self.cancel_subscription(str(payment["subscription_id"]))
         return "refunded"
 
     async def record_refund(self, *, payload: str, from_id: int) -> bool:

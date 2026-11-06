@@ -234,6 +234,17 @@ class Settings(BaseSettings):
     marzban_verify_tls: bool = True
     marzban_timeout: float = 15.0
 
+    # --- Locations and configuration delivery -------------------------------
+    # link: one vless:// link to the first location (original behaviour).
+    # subscription: the Marzban subscription URL with every location; clients
+    # refresh the server list themselves when servers are added or removed.
+    config_delivery: Literal["link", "subscription"] = "link"
+    # Public origin of the Marzban subscription endpoint, used when Marzban
+    # reports a relative /sub/... path (XRAY_SUBSCRIPTION_URL_PREFIX unset).
+    subscription_base_url: str | None = None
+    # Display name of the server that runs the Marzban core itself.
+    main_location_name: str = Field("Основной сервер", min_length=1, max_length=64)
+
     # --- Crypto Pay (@CryptoBot), outside Russia only -----------------------
     crypto_pay_token: SecretStr | None = None
     crypto_pay_testnet: bool = False
@@ -279,6 +290,9 @@ class Settings(BaseSettings):
     stars_enabled: bool = False
     # How many roubles one star is counted at when converting tariff prices.
     stars_rub_per_star: Decimal = Field(Decimal("1.60"), gt=0, le=100)
+    # Monthly auto-renewal through a Telegram Stars subscription (30 days is the
+    # only period Telegram supports). Off until the offer says so (clause 3.3.1).
+    stars_autorenew_enabled: bool = False
     # Ruble checkout (YooKassa web page) inside the bot. See docs/PAYMENTS_TELEGRAM.md.
     yookassa_in_bot: bool = True
 
@@ -326,6 +340,30 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("subscription_base_url")
+    @classmethod
+    def _subscription_origin(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.rstrip("/")
+        try:
+            url = urlsplit(value)
+            _ = url.port
+            valid = (
+                url.scheme == "https"
+                and bool(url.hostname)
+                and url.username is None
+                and url.password is None
+                and url.path == ""
+                and not url.query
+                and not url.fragment
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ValueError("subscription_base_url must be an HTTPS origin, no path")
+        return value
+
     @field_validator("marzban_url")
     @classmethod
     def _strip_marzban_slash(cls, value: str) -> str:
@@ -345,6 +383,7 @@ class Settings(BaseSettings):
         "yookassa_secret_key",
         "yookassa_return_url",
         "yookassa_proxy_url",
+        "subscription_base_url",
         mode="before",
     )
     @classmethod

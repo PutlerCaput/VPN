@@ -33,6 +33,8 @@ MAX_PENDING_PAYMENTS = 5
 # of filling the pending-order limit.
 STARS_REUSE_SECONDS = 24 * 3600
 METHODS = ("sbp", "usdt", "stars")
+# Telegram's limit for a subscription price.
+MAX_SUBSCRIPTION_STARS = 10000
 
 
 def invoice_texts(tier: str, months: int) -> tuple[str, str, str]:
@@ -186,6 +188,64 @@ class BillingService:
         )
         return CreatedPayment(
             payment_id=payment_id, method=method, months=months, data=data
+        )
+
+    async def create_stars_subscription(
+        self, telegram_id: int, tier: str
+    ) -> CreatedPayment:
+        """A monthly Stars subscription (auto-renewal) for one tier.
+
+        Returns the subscription ID as ``payment_id``; each charge later becomes
+        its own payment. The price is the tier's one-month price in stars.
+        """
+        if self.stars_rub_per_star is None:
+            raise BillingError("stars_unavailable")
+        if tier not in TIERS or (
+            self.enabled_tiers is not None and tier not in self.enabled_tiers
+        ):
+            raise BillingError("invalid_tier")
+        if 1 not in TIER_PRICES_RUB[tier]:
+            raise BillingError("invalid_months")
+        user = await self.db.get_user(telegram_id)
+        if user is None:
+            raise BillingError("no_user")
+        if user["status"] == "banned":
+            raise BillingError("banned")
+        if not await self.db.has_accepted_offer(telegram_id):
+            raise BillingError("offer_not_accepted")
+        subscriptions = await self.db.user_star_subscriptions(telegram_id)
+        if any(sub["status"] in ("active", "failed") for sub in subscriptions):
+            raise BillingError("subscription_exists")
+        amount = stars_price(tier, 1, self.stars_rub_per_star)
+        if amount > MAX_SUBSCRIPTION_STARS:
+            raise BillingError("stars_unavailable")
+        existing = await self.db.open_star_subscription(
+            telegram_id, tier, int(time.time()) - STARS_REUSE_SECONDS
+        )
+        if existing is not None and int(existing["amount"]) == amount:
+            subscription_id = str(existing["subscription_id"])
+        else:
+            subscription_id = uuid.uuid4().hex
+            await self.db.create_star_subscription(
+                subscription_id, telegram_id, tier, amount
+            )
+            await audit(
+                self.db, telegram_id, "subscription_created", subscription_id, tier=tier
+            )
+        title, description, label = invoice_texts(tier, 1)
+        return CreatedPayment(
+            payment_id=subscription_id,
+            method="stars",
+            months=1,
+            data={
+                "amount_xtr": amount,
+                "title": f"Автопродление: {TIERS[tier].title}"[:32],
+                "description": (
+                    f"{description} Звёзды списываются каждые 30 дней; "
+                    "отключить можно в любой момент (/autorenew)."
+                )[:255],
+                "label": f"{label}, каждые 30 дней"[:64],
+            },
         )
 
     async def _create_stars(

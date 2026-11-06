@@ -42,6 +42,18 @@ export interface Subscription {
   traffic?: TrafficStatus | null;
 }
 
+export interface ServerLocation {
+  name: string;
+  online: boolean;
+}
+
+export interface ServersReport {
+  checked_at: number;
+  panel_ok: boolean;
+  subscription: boolean;
+  locations: ServerLocation[];
+}
+
 export interface TrafficStatus {
   used_bytes: number;
   limit_bytes: number;
@@ -185,6 +197,7 @@ export const endpoints = {
     api<void>("/auth/logout", { method: "POST", body: JSON.stringify({ refresh_token: refreshToken }) }),
   me: () => api<Me>("/me"),
   subscription: () => api<Subscription>("/subscription"),
+  servers: () => api<ServersReport>("/servers"),
   config: () => api<NodeConfig>("/config"),
   tariffs: () => api<{ tiers: Tier[] }>("/tariffs"),
   createPayment: (months: number, method: "sbp" | "usdt", tier: string, email?: string) =>

@@ -15,6 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from config import Settings, format_gb
 from db.database import Database
+from services.health import ServiceHealth
 from services.marzban import MarzbanClient, MarzbanError
 from services.metrics import ACTIVE_USERS, JOB_FAILURES
 from services.notifier import Notifier
@@ -351,6 +352,7 @@ class Jobs:
         payment_reconciler: PaymentReconciler | None = None,
         *,
         stars: StarsPayments | None = None,
+        health: ServiceHealth | None = None,
     ) -> None:
         self.db = db
         self.provisioning = provisioning
@@ -360,6 +362,7 @@ class Jobs:
         self.limiters = limiters
         self.payment_reconciler = payment_reconciler
         self.stars = stars
+        self.health = health
 
     async def daily_expiry_check(self) -> None:
         for user in await self.db.users_to_expire(int(time.time())):
@@ -376,10 +379,23 @@ class Jobs:
         for user in await self.db.users_to_remind(current, reminder_deadline):
             telegram_id = int(user["telegram_id"])
             expires = int(user["expires_at"])
+            renewing = (
+                self.stars is not None
+                and (sub := await self.stars.active_subscription(telegram_id))
+                is not None
+                and sub["status"] == "active"
+            )
+            text = (
+                f"⏰ Оплаченный срок заканчивается <b>{format_date(expires)}</b>. "
+                "Автопродление через Telegram Stars включено: подписка продлится "
+                "сама, если на балансе хватит звёзд. Отключить: /autorenew."
+                if renewing
+                else f"⏰ Подписка заканчивается <b>{format_date(expires)}</b>. "
+                "Продлите в разделе «💳 Оплата», чтобы подключение не прервалось."
+            )
             delivered = await self.notifier.notify(
                 telegram_id,
-                f"⏰ Подписка заканчивается <b>{format_date(expires)}</b>. "
-                "Продлите в разделе «💳 Оплата», чтобы подключение не прервалось.",
+                text,
                 push_title="Подписка скоро закончится",
                 push_body=f"Подписка активна до {format_date(expires)}",
                 url="/#/pay",
@@ -395,6 +411,10 @@ class Jobs:
         if self.stars is not None:
             await self.stars.reconcile()
 
+    async def health_check(self) -> None:
+        if self.health is not None:
+            await self.health.poll()
+
     async def anomaly_poller(self) -> None:
         await self.monitor.poll()
 
@@ -407,6 +427,8 @@ class Jobs:
         cutoff = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%d")
         await self.db.purge_traffic_days(cutoff)
         await self.db.purge_traffic_notices(current - TRAFFIC_NOTICE_RETENTION_SECONDS)
+        if self.stars is not None:
+            await self.stars.end_lapsed()
         for limiter in self.limiters:
             limiter.prune()
 
@@ -465,6 +487,12 @@ def build_scheduler(jobs: Jobs) -> AsyncIOScheduler:
         _guarded("payment_reconciliation", jobs.payment_reconciliation),
         IntervalTrigger(minutes=1, timezone=UTC),
         id="payment_reconciliation",
+        **defaults,
+    )
+    scheduler.add_job(
+        _guarded("health_check", jobs.health_check),
+        IntervalTrigger(minutes=2, timezone=UTC),
+        id="health_check",
         **defaults,
     )
     scheduler.add_job(

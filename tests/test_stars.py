@@ -412,6 +412,7 @@ async def test_successful_payment_handler_credits(
             total_amount=order.data["amount_xtr"],
             invoice_payload=order.payment_id,
             telegram_payment_charge_id="stx-handler",
+            subscription_expiration_date=None,
         ),
         answer=AsyncMock(),
     )

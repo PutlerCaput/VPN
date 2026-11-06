@@ -6,6 +6,7 @@ import asyncio
 import logging
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -39,6 +40,10 @@ def traffic_policy(
 
 class MarzbanNotFound(MarzbanError):
     pass
+
+
+class MarzbanForbidden(MarzbanError):
+    """The panel answered, but this admin account may not read the resource."""
 
 
 class MarzbanClient:
@@ -138,6 +143,8 @@ class MarzbanClient:
     def _check(response: httpx.Response, operation: str) -> dict[str, Any]:
         if response.status_code == 404:
             raise MarzbanNotFound(operation)
+        if response.status_code == 403:
+            raise MarzbanForbidden(operation)
         if response.status_code >= 400:
             raise MarzbanError(
                 f"{operation}: HTTP {response.status_code} {response.text[:200]}"
@@ -273,6 +280,48 @@ class MarzbanClient:
         if isinstance(subscription, str) and subscription:
             return subscription
         raise MarzbanError("no vless link in user payload")
+
+    @staticmethod
+    def extract_subscription_url(
+        user: dict[str, Any], base_url: str | None
+    ) -> str | None:
+        """Absolute HTTPS subscription URL of a user, or None if unusable."""
+        value = user.get("subscription_url")
+        if not isinstance(value, str) or not value or len(value) > 2048:
+            return None
+        if value.startswith("/"):
+            if not base_url:
+                return None
+            value = f"{base_url.rstrip('/')}{value}"
+        try:
+            url = urlsplit(value)
+            valid = (
+                url.scheme == "https"
+                and bool(url.hostname)
+                and url.username is None
+                and url.password is None
+                and url.path.startswith("/")
+            )
+        except ValueError:
+            valid = False
+        return value if valid else None
+
+    async def get_core(self) -> dict[str, Any]:
+        """Core (Xray on the panel host) state: {"version", "started", ...}."""
+        response = await self._request("GET", "/api/core", operation="get_core")
+        return self._check(response, "get_core")
+
+    async def get_nodes(self) -> list[dict[str, Any]]:
+        """Additional Marzban nodes (other locations) with their status."""
+        response = await self._request("GET", "/api/nodes", operation="get_nodes")
+        if response.status_code == 403:
+            raise MarzbanForbidden("get_nodes")
+        if response.status_code >= 400:
+            raise MarzbanError(f"get_nodes: HTTP {response.status_code}")
+        data = response.json()
+        if not isinstance(data, list):
+            raise MarzbanError("get_nodes: unexpected payload")
+        return [node for node in data if isinstance(node, dict)]
 
     async def get_users_usage(self, page_size: int = 1000) -> list[dict[str, Any]]:
         users: list[dict[str, Any]] = []

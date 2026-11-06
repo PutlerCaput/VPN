@@ -5,6 +5,7 @@
 #   bash update_bot.sh /root/vpn-update --apply    # switch, roll back if unhealthy
 #   bash update_bot.sh --rollback node-rental-bot:rollback-<stamp> [.env backup]
 #   bash update_bot.sh --set-tiers standard        # switch the tariffs on sale
+#   bash update_bot.sh --set CONFIG_DELIVERY=subscription STARS_AUTORENEW_ENABLED=true
 #
 # Optional with --apply: --env-add appends the new settings that are missing
 # from .env (STARS_ENABLED, STARS_RUB_PER_STAR, YOOKASSA_IN_BOT,
@@ -75,28 +76,48 @@ if [[ "${1:-}" == "--rollback" ]]; then
   exit 0
 fi
 
+# Settings an owner may change with --set; anything else is edited by hand.
+SETTABLE_KEYS="ENABLED_TIERS CONFIG_DELIVERY SUBSCRIPTION_BASE_URL MAIN_LOCATION_NAME \
+STARS_ENABLED STARS_AUTORENEW_ENABLED STARS_RUB_PER_STAR YOOKASSA_IN_BOT TRIAL_TRAFFIC_GB"
+
 if [[ "${1:-}" == "--set-tiers" ]]; then
-  TIERS_VALUE="${2:-}"
-  [[ "$TIERS_VALUE" =~ ^(standard|basic|complete|prime)(,(standard|basic|complete|prime))*$ ]] \
-    || fail "usage: --set-tiers standard  (names: standard, basic, complete, prime)"
+  set -- --set "ENABLED_TIERS=${2:-}"
+fi
+if [[ "${1:-}" == "--set" ]]; then
+  shift
+  (($# > 0)) || fail "usage: --set KEY=VALUE [KEY=VALUE ...]  keys: $SETTABLE_KEYS"
+  for pair in "$@"; do
+    key="${pair%%=*}"
+    value="${pair#*=}"
+    [[ "$pair" == *=* && " $SETTABLE_KEYS " == *" $key "* ]] \
+      || fail "not allowed: $key (allowed: $SETTABLE_KEYS)"
+    [[ -n "$value" && "$value" != *$'\n'* && "$value" != *[\"\'\\\$\`]* ]] \
+      || fail "invalid value for $key"
+    if [[ "$key" == ENABLED_TIERS ]]; then
+      [[ "$value" =~ ^(standard|basic|complete|prime)(,(standard|basic|complete|prime))*$ ]] \
+        || fail "usage: --set ENABLED_TIERS=standard  (standard, basic, complete, prime)"
+    fi
+  done
   ENV_FILE="$WORKDIR/.env"
   [[ -f "$ENV_FILE" ]] || fail "$ENV_FILE not found"
-  ENV_BACKUP="$ENV_FILE.before-tiers-$STAMP"
+  ENV_BACKUP="$ENV_FILE.before-set-$STAMP"
   cp -p "$ENV_FILE" "$ENV_BACKUP"
-  if grep -q '^ENABLED_TIERS=' "$ENV_FILE"; then
-    sed -i "s/^ENABLED_TIERS=.*/ENABLED_TIERS=$TIERS_VALUE/" "$ENV_FILE"
-  else
-    printf 'ENABLED_TIERS=%s\n' "$TIERS_VALUE" >>"$ENV_FILE"
-  fi
+  for pair in "$@"; do
+    key="${pair%%=*}"
+    grep -v "^$key=" "$ENV_FILE" >"$ENV_FILE.tmp-$STAMP" || true
+    printf '%s\n' "$pair" >>"$ENV_FILE.tmp-$STAMP"
+    cat "$ENV_FILE.tmp-$STAMP" >"$ENV_FILE"  # keeps owner and permissions
+    rm -f "$ENV_FILE.tmp-$STAMP"
+  done
   say "ENV_BACKUP $ENV_BACKUP"
   recreate
   if wait_healthy; then
-    say "TIERS_OK ENABLED_TIERS=$TIERS_VALUE"
+    say "SET_OK $*"
     exit 0
   fi
   cp -p "$ENV_BACKUP" "$ENV_FILE"
   recreate
-  wait_healthy && fail "bot refused the new tariffs; previous .env restored (healthy)" \
+  wait_healthy && fail "bot refused the new settings; previous .env restored (healthy)" \
     || fail "previous .env restored, but the bot is not healthy"
 fi
 

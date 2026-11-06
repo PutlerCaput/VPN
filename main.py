@@ -27,6 +27,7 @@ from middlewares import BannedMiddleware, ThrottlingMiddleware
 from services.billing import BillingService
 from services.container import Services
 from services.cryptopay import CryptoPayClient
+from services.health import ServiceHealth
 from services.marzban import MarzbanClient
 from services.notifier import Notifier
 from services.payment_reconciliation import PaymentReconciler
@@ -115,6 +116,9 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
             if settings.stars_enabled
             else None
         ),
+        health=ServiceHealth(
+            marzban, notifier, settings.admin_telegram_id, settings.main_location_name
+        ),
     )
 
 
@@ -123,8 +127,10 @@ BOT_COMMANDS = (
     ("status", "Срок подписки и трафик"),
     ("config", "Моя конфигурация"),
     ("connect", "Подключить устройство"),
+    ("servers", "Серверы и их состояние"),
     ("help", "Помощь с подключением"),
     ("support", "Написать в поддержку"),
+    ("autorenew", "Автопродление"),
     ("paysupport", "Вопрос по оплате"),
     ("terms", "Условия (оферта)"),
 )
@@ -229,6 +235,7 @@ async def run() -> None:
             db, services.provisioning, services.yookassa, services.cryptopay
         ),
         stars=services.stars,
+        health=services.health,
     )
     scheduler = build_scheduler(jobs)
 

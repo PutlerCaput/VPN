@@ -94,6 +94,17 @@ class ProvisioningService:
     def _lock(self, telegram_id: int) -> asyncio.Lock:
         return self._locks[telegram_id]
 
+    def _config_from(self, data: dict[str, Any]) -> str:
+        """What the user imports: all-locations subscription or a single link."""
+        if self.settings.config_delivery == "subscription":
+            url = MarzbanClient.extract_subscription_url(
+                data, self.settings.subscription_base_url
+            )
+            if url is not None:
+                return url
+            logger.warning("subscription_url_unavailable")
+        return MarzbanClient.extract_vless_link(data)
+
     async def _disable_and_confirm(self, node_username: str) -> None:
         result = await self.marzban.disable_user(node_username)
         if result.get("status") == "disabled":
@@ -130,7 +141,7 @@ class ProvisioningService:
                     data_limit=self.settings.trial_traffic_gb * GIB,
                     data_limit_reset_strategy="no_reset",
                 )
-                link = MarzbanClient.extract_vless_link(created)
+                link = self._config_from(created)
             except MarzbanError:
                 logger.exception(
                     "trial_provision_failed", extra={"telegram_id": telegram_id}
@@ -156,7 +167,7 @@ class ProvisioningService:
         user = await self.db.get_user(telegram_id)
         if user is None or user["status"] != "active" or not user["node_username"]:
             raise ProvisioningError("no_active_node")
-        link = await self.marzban.get_vless_link(user["node_username"])
+        link = self._config_from(await self.marzban.get_user(user["node_username"]))
         if link != user["config_link"]:
             await self.db.set_config_link(telegram_id, link)
         return link
@@ -173,9 +184,11 @@ class ProvisioningService:
                 raise ProvisioningError("no_active_node")
             data = await self.marzban.revoke_subscription(user["node_username"])
             try:
-                link = MarzbanClient.extract_vless_link(data)
+                link = self._config_from(data)
             except MarzbanError:
-                link = await self.marzban.get_vless_link(user["node_username"])
+                link = self._config_from(
+                    await self.marzban.get_user(user["node_username"])
+                )
             await self.db.set_config_link(telegram_id, link)
         await audit(self.db, telegram_id, "link_revoked", user["node_username"])
         return link
@@ -240,7 +253,7 @@ class ProvisioningService:
             data = await self.marzban.create_user(node, expire=new_expires, tier=tier)
         link: str | None
         try:
-            link = MarzbanClient.extract_vless_link(data)
+            link = self._config_from(data)
         except MarzbanError:
             link = None
         status = "suspended" if user["status"] == "suspended" else "active"
@@ -314,7 +327,7 @@ class ProvisioningService:
                 await self._disable_and_confirm(node)
                 data = await self.marzban.get_user(node)
         try:
-            link = MarzbanClient.extract_vless_link(data)
+            link = self._config_from(data)
         except MarzbanError:
             link = None
         status = "suspended" if user["status"] == "suspended" else "active"
