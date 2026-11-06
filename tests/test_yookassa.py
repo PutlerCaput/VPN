@@ -251,11 +251,17 @@ async def test_webhook_credits_only_after_api_confirms(
         assert (await client.post("/yookassa/webhook", data=b"{not json")).status == 400
 
 
-async def test_webhook_disabled_without_yookassa(services: Any) -> None:
+async def test_webhook_without_rest_keys_is_acknowledged_not_404(
+    services: Any,
+) -> None:
+    """A 404 made YooKassa retry and report failed notifications for a day."""
     app = create_webhook_app(services.bot, None, services)  # type: ignore[arg-type]
     async with TestClient(TestServer(app)) as client:
         response = await client.post("/yookassa/webhook", data=notification())
-        assert response.status == 404
+        assert response.status == 200
+    # Nothing is credited from an unverifiable notification.
+    paid = await services.db._fetchall("SELECT * FROM payments WHERE status = 'paid'")
+    assert paid == []
 
 
 async def test_api_asks_for_receipt_email(yk_services: Any) -> None:

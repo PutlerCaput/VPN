@@ -299,7 +299,11 @@ class Settings(BaseSettings):
     # Monthly auto-renewal through a Telegram Stars subscription (30 days is the
     # only period Telegram supports). Off until the offer says so (clause 3.3.1).
     stars_autorenew_enabled: bool = False
-    # Ruble checkout (YooKassa web page) inside the bot. See docs/PAYMENTS_TELEGRAM.md.
+    # YooKassa connected through @BotFather → Payments («ЮKassa: платежи»):
+    # ruble invoices paid inside Telegram. Docker secret telegram_payment_token
+    # or TELEGRAM_PAYMENT_TOKEN. Takes precedence over the REST checkout in the bot.
+    telegram_payment_token: SecretStr | None = None
+    # Ruble checkout (YooKassa) inside the bot. See docs/PAYMENTS_TELEGRAM.md.
     yookassa_in_bot: bool = True
 
     # --- Business -----------------------------------------------------------
@@ -412,6 +416,7 @@ class Settings(BaseSettings):
         "yookassa_proxy_url",
         "subscription_base_url",
         "awg_agent_token",
+        "telegram_payment_token",
         mode="before",
     )
     @classmethod
@@ -492,6 +497,13 @@ class Settings(BaseSettings):
         keys = self.enabled_tiers
         if not keys or any(key not in TIERS for key in keys):
             problems.append(f"enabled_tiers must list tiers from: {', '.join(TIERS)}")
+        if self.telegram_payment_token is not None and not re.fullmatch(
+            r"[0-9]{3,20}:[A-Za-z0-9_:-]{2,256}",
+            self.telegram_payment_token.get_secret_value(),
+        ):
+            problems.append(
+                "telegram_payment_token does not look like a BotFather payment token"
+            )
         if self.awg_enabled and (
             self.awg_agent_token is None
             or len(self.awg_agent_token.get_secret_value()) < 32
@@ -507,6 +519,7 @@ class Settings(BaseSettings):
 
     def disabled_features(self) -> list[str]:
         features = {
+            "yookassa_telegram (telegram_payment_token)": self.telegram_payment_token,
             "usdt_payments (crypto_pay_token)": self.crypto_pay_token,
             "web_push (vapid_private)": self.vapid_private,
             "abuse_reports (abuse_report_token)": self.abuse_report_token,

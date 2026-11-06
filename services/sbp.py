@@ -60,9 +60,21 @@ class SbpService:
     def is_manual(self) -> bool:
         return self.provider == "manual"
 
+    @property
+    def has_real_links(self) -> bool:
+        """False while the .env.example placeholder links are still in place.
+
+        Those links open a 404 page at qr.nspk.ru, so they must never be shown.
+        """
+        return not any(
+            "REPLACE_WITH" in url.upper() for url in (self.qr_url, self.payment_url)
+        )
+
     def instructions(self, months: int, tier: str = DEFAULT_TIER) -> SbpInstructions:
         if months not in TIER_PRICES_RUB.get(tier, {}):
             raise SbpError("unknown tariff")
+        if not self.has_real_links:
+            raise SbpError("SBP links are placeholders")
         return SbpInstructions(
             qr_url=self.qr_url,
             payment_url=self.payment_url,

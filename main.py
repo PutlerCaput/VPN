@@ -37,6 +37,7 @@ from services.push import PushService
 from services.sbp import SbpService
 from services.scheduler import AnomalyMonitor, Jobs, build_scheduler
 from services.stars import StarsPayments
+from services.telegram_rub import TelegramRubPayments
 from services.yookassa import YooKassaClient
 from webhook_server import TELEGRAM_WEBHOOK_PATH, create_webhook_app
 
@@ -119,6 +120,16 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
         ),
         health=ServiceHealth(
             marzban, notifier, settings.admin_telegram_id, settings.main_location_name
+        ),
+        telegram_rub=(
+            TelegramRubPayments(
+                db,
+                provisioning,
+                settings.admin_telegram_id,
+                settings.telegram_payment_token.get_secret_value(),
+            )
+            if settings.telegram_payment_token is not None
+            else None
         ),
         awg=(
             AwgService(

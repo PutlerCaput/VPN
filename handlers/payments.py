@@ -48,6 +48,10 @@ from services.stars import (
     SUBSCRIPTION_PERIOD_SECONDS,
     subscription_payload,
 )
+from services.telegram_rub import CHECKOUT_ERRORS as RUB_CHECKOUT_ERRORS
+from services.telegram_rub import invoice_options
+from services.telegram_rub import payload_for as rub_payload_for
+from services.telegram_rub import payment_id_from as rub_payment_id_from
 from services.yookassa import is_valid_email
 
 logger = logging.getLogger(__name__)
@@ -79,8 +83,8 @@ def channel_text(methods: list[str]) -> str:
         )
     if "sbp" in methods:
         lines.append(
-            "💳 <b>ЮKassa</b> — рубли через СБП или банковскую карту на странице "
-            "ЮKassa. Доступные способы определяются платёжным сервисом и банком. "
+            "💳 <b>ЮKassa</b> — оплата в рублях. Доступные способы (банковская "
+            "карта, ЮMoney, SberPay, СБП) определяются ЮKassa и вашим банком. "
             "Чек формируется в установленном порядке."
         )
     return "\n\n".join(lines)
@@ -144,8 +148,9 @@ def bot_methods(services: Services) -> list[str]:
             continue
         if (
             method == "sbp"
+            and services.telegram_rub is None
             and billing.yookassa is None
-            and not billing.allow_legacy_sbp
+            and not (billing.allow_legacy_sbp and billing.sbp.has_real_links)
         ):
             # Do not show a ruble button that can only answer "unavailable".
             continue
@@ -394,6 +399,19 @@ async def create_and_show(
     state: FSMContext,
     tier: str = DEFAULT_TIER,
 ) -> None:
+    if method == "sbp" and services.telegram_rub is not None:
+        # YooKassa connected through @BotFather: the checkout opens in Telegram.
+        try:
+            order = await services.billing.create_telegram_rub(
+                telegram_id, months, tier
+            )
+        except BillingError as exc:
+            await message.answer(
+                BILLING_ERRORS.get(exc.code, "Не удалось создать платёж.")
+            )
+            return
+        await send_rub_invoice(message, order.payment_id, order.data, services)
+        return
     try:
         payment = await services.billing.create(telegram_id, months, method, tier)
     except BillingError as exc:
@@ -521,11 +539,68 @@ async def send_stars_invoice(
     )
 
 
+async def send_rub_invoice(
+    message: Message, payment_id: str, data: dict[str, object], services: Services
+) -> None:
+    rub = services.telegram_rub
+    amount = data.get("amount_kopecks")
+    if rub is None or not isinstance(amount, int) or amount <= 0:
+        await message.answer(BILLING_ERRORS["ruble_payments_unavailable"])
+        return
+    settings = services.settings
+    payment = await services.db.get_payment(payment_id)
+    tier = TIERS.get(str(payment["tier"])) if payment else None
+    extra = invoice_options(
+        receipt_mode=settings.yookassa_receipt_mode,
+        amount_kopecks=amount,
+        months=int(payment["months"]) if payment else 1,
+        tier_title=tier.title if tier else "",
+        vat_code=settings.yookassa_vat_code,
+        tax_system_code=settings.yookassa_tax_system_code,
+    )
+    await message.answer_invoice(
+        title=str(data["title"]),
+        description=str(data["description"]),
+        payload=rub_payload_for(payment_id),
+        currency="RUB",
+        prices=[LabeledPrice(label=str(data["label"]), amount=amount)],
+        provider_token=rub.provider_token,
+        **extra,
+    )
+    test_note = (
+        "\n\n🧪 Сейчас подключён <b>тестовый</b> магазин ЮKassa: деньги не "
+        "списываются, оплата проходит только тестовой картой."
+        if rub.test_mode
+        else ""
+    )
+    await message.answer(
+        f"Номер заказа: <code>{payment_id}</code>\n"
+        "Нажмите «Оплатить» в счёте выше: откроется оплата ЮKassa (банковская "
+        "карта, ЮMoney или SberPay). Подписка продлится автоматически один раз "
+        "сразу после подтверждения. Вопросы по оплате: /paysupport."
+        f"{test_note}"
+    )
+
+
 @router.pre_checkout_query()
 async def stars_pre_checkout(query: PreCheckoutQuery, services: Services) -> None:
     """Telegram cancels the payment unless this answers within 10 seconds."""
     error: str | None = "not_found"
-    if services.stars is not None:
+    errors = CHECKOUT_ERRORS
+    if rub_payment_id_from(query.invoice_payload) is not None:
+        errors = RUB_CHECKOUT_ERRORS
+        if services.telegram_rub is not None:
+            try:
+                error = await services.telegram_rub.checkout_error(
+                    payload=query.invoice_payload,
+                    from_id=query.from_user.id,
+                    currency=query.currency,
+                    total_amount=query.total_amount,
+                )
+            except Exception:
+                logger.exception("telegram_rub_checkout_failed")
+                error = "not_found"
+    elif services.stars is not None:
         try:
             error = await services.stars.checkout_error(
                 payload=query.invoice_payload,
@@ -541,14 +616,31 @@ async def stars_pre_checkout(query: PreCheckoutQuery, services: Services) -> Non
     else:
         await query.answer(
             ok=False,
-            error_message=CHECKOUT_ERRORS.get(error, CHECKOUT_ERRORS["not_found"]),
+            error_message=errors.get(error, errors["not_found"]),
         )
 
 
 @router.message(F.successful_payment)
 async def stars_successful_payment(message: Message, services: Services) -> None:
     paid = message.successful_payment
-    if paid is None or message.from_user is None or services.stars is None:
+    if paid is None or message.from_user is None:
+        return
+    if paid.currency == "RUB" and services.telegram_rub is not None:
+        credited = await services.telegram_rub.record_success(
+            payload=paid.invoice_payload,
+            from_id=message.from_user.id,
+            currency=paid.currency,
+            total_amount=paid.total_amount,
+            provider_charge_id=paid.provider_payment_charge_id,
+        )
+        if not credited:
+            await message.answer(
+                "⚠️ Оплата получена, но не совпала с заказом. Мы проверим её "
+                "вручную и продлим подписку или вернём деньги. Вопрос по оплате: "
+                "/paysupport."
+            )
+        return
+    if services.stars is None:
         return
     if paid.currency != "XTR":
         logger.error("unexpected_payment_currency")

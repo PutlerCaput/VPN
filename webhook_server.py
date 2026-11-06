@@ -145,7 +145,11 @@ async def yookassa_webhook(request: web.Request) -> web.Response:
     YooKassa retry, so a 5xx is returned only when the API check itself fails."""
     services = request.app[SERVICES]
     if services.yookassa is None:
-        return web.Response(status=404)
+        # No REST keys: payments go through Telegram (or are off), and Telegram
+        # itself confirms them. A 404 here would make YooKassa retry and report
+        # failed notifications for a day; acknowledge and ignore instead.
+        logger.warning("yookassa_notification_ignored_without_rest_keys")
+        return _ok()
     raw = await _read_limited(request)
     try:
         update: Any = json.loads(raw or b"")
