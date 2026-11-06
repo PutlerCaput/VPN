@@ -14,6 +14,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError, TelegramUnauthorizedError
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand
 from aiohttp import web
 from pydantic import ValidationError
 from pydantic_settings import SettingsError
@@ -33,6 +34,7 @@ from services.provisioning import ProvisioningService
 from services.push import PushService
 from services.sbp import SbpService
 from services.scheduler import AnomalyMonitor, Jobs, build_scheduler
+from services.stars import StarsPayments
 from services.yookassa import YooKassaClient
 from webhook_server import TELEGRAM_WEBHOOK_PATH, create_webhook_app
 
@@ -97,11 +99,35 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
         notifier=notifier,
         provisioning=provisioning,
         billing=BillingService(
-            db, sbp, cryptopay, yookassa, enabled_tiers=settings.enabled_tiers
+            db,
+            sbp,
+            cryptopay,
+            yookassa,
+            enabled_tiers=settings.enabled_tiers,
+            stars_rub_per_star=(
+                settings.stars_rub_per_star if settings.stars_enabled else None
+            ),
         ),
         monitor=AnomalyMonitor(db, marzban, provisioning, settings),
         yookassa=yookassa,
+        stars=(
+            StarsPayments(db, provisioning, bot, settings.admin_telegram_id)
+            if settings.stars_enabled
+            else None
+        ),
     )
+
+
+BOT_COMMANDS = (
+    ("start", "Главное меню"),
+    ("status", "Срок подписки и трафик"),
+    ("config", "Моя конфигурация"),
+    ("connect", "Подключить устройство"),
+    ("help", "Помощь с подключением"),
+    ("support", "Написать в поддержку"),
+    ("paysupport", "Вопрос по оплате"),
+    ("terms", "Условия (оферта)"),
+)
 
 
 def build_dispatcher(services: Services) -> Dispatcher:
@@ -202,6 +228,7 @@ async def run() -> None:
         PaymentReconciler(
             db, services.provisioning, services.yookassa, services.cryptopay
         ),
+        stars=services.stars,
     )
     scheduler = build_scheduler(jobs)
 
@@ -233,6 +260,14 @@ async def run() -> None:
         stop.set()
 
     try:
+        with contextlib.suppress(Exception):
+            # Best effort: the menu is a convenience, the commands work without it.
+            await asyncio.wait_for(
+                bot.set_my_commands(
+                    [BotCommand(command=c, description=d) for c, d in BOT_COMMANDS]
+                ),
+                timeout=10,
+            )
         if settings.bot_mode == "webhook":
             secret = settings.telegram_webhook_secret
             await call_with_retry(

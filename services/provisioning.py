@@ -7,14 +7,19 @@ import contextlib
 import json
 import logging
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from config import DAYS_PER_MONTH, DEFAULT_TIER, TIERS, Settings, device_note
+from config import DAYS_PER_MONTH, DEFAULT_TIER, GIB, TIERS, Settings, device_note
 from db.database import Database
 from services.audit import audit
-from services.marzban import MarzbanClient, MarzbanError, MarzbanNotFound
+from services.marzban import (
+    MarzbanClient,
+    MarzbanError,
+    MarzbanNotFound,
+    traffic_policy,
+)
 from services.metrics import (
     AUTOBANS,
     PAYMENTS_PAID,
@@ -26,6 +31,12 @@ from services.security import node_username_for
 
 logger = logging.getLogger(__name__)
 
+# Profile and dashboard reads share one panel request per user per minute,
+# and never wait long for a slow panel.
+TRAFFIC_CACHE_SECONDS = 60.0
+TRAFFIC_TIMEOUT_SECONDS = 4.0
+TRAFFIC_CACHE_SIZE = 10000
+
 AUTOBAN_TEXT = (
     "🔴 Access denied. Your remote node connection has been permanently blocked "
     "automatically due to severe acceptable use policy violations (cybercrime "
@@ -35,6 +46,14 @@ AUTOBAN_TEXT = (
 
 class ProvisioningError(Exception):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class TrafficStatus:
+    used_bytes: int
+    limit_bytes: int  # 0 = unlimited
+    reset_strategy: str
+    limited: bool  # Marzban stopped the node because the quota is used up
 
 
 @dataclass(slots=True)
@@ -68,6 +87,9 @@ class ProvisioningService:
         self.notifier = notifier
         self.settings = settings
         self._locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._traffic_cache: OrderedDict[str, tuple[float, TrafficStatus]] = (
+            OrderedDict()
+        )
 
     def _lock(self, telegram_id: int) -> asyncio.Lock:
         return self._locks[telegram_id]
@@ -99,8 +121,15 @@ class ProvisioningService:
                 )
             node = node_username_for(telegram_id)
             expires_at = _ts() + self.settings.trial_seconds
+            tier = self.settings.default_tier
             try:
-                created = await self.marzban.create_user(node, expire=expires_at)
+                created = await self.marzban.create_user(
+                    node,
+                    expire=expires_at,
+                    tier=tier,
+                    data_limit=self.settings.trial_traffic_gb * GIB,
+                    data_limit_reset_strategy="no_reset",
+                )
                 link = MarzbanClient.extract_vless_link(created)
             except MarzbanError:
                 logger.exception(
@@ -114,6 +143,7 @@ class ProvisioningService:
                 node_username=node,
                 config_link=link,
             )
+            await self.db.set_user_tier(telegram_id, tier)
             await self.db.mark_trial_used(telegram_id)
             TRIALS_PROVISIONED.inc()
             await audit(
@@ -130,6 +160,58 @@ class ProvisioningService:
         if link != user["config_link"]:
             await self.db.set_config_link(telegram_id, link)
         return link
+
+    async def revoke_link(self, telegram_id: int) -> str:
+        """Issue new credentials: copies of the old link stop working at once.
+
+        This is how a subscriber removes a device they no longer control; the
+        device limit itself is a term of the offer, not a technical control.
+        """
+        async with self._lock(telegram_id):
+            user = await self.db.get_user(telegram_id)
+            if user is None or user["status"] != "active" or not user["node_username"]:
+                raise ProvisioningError("no_active_node")
+            data = await self.marzban.revoke_subscription(user["node_username"])
+            try:
+                link = MarzbanClient.extract_vless_link(data)
+            except MarzbanError:
+                link = await self.marzban.get_vless_link(user["node_username"])
+            await self.db.set_config_link(telegram_id, link)
+        await audit(self.db, telegram_id, "link_revoked", user["node_username"])
+        return link
+
+    async def traffic_status(self, user: dict[str, Any]) -> TrafficStatus | None:
+        """Current quota usage from the panel; None when unknown or no node."""
+        node = user.get("node_username")
+        if not node:
+            return None
+        node = str(node)
+        cached = self._traffic_cache.get(node)
+        current = time.monotonic()
+        if cached is not None and current - cached[0] < TRAFFIC_CACHE_SECONDS:
+            return cached[1]
+        try:
+            data = await asyncio.wait_for(
+                self.marzban.get_user(node), timeout=TRAFFIC_TIMEOUT_SECONDS
+            )
+        except (MarzbanError, TimeoutError):
+            return None
+        try:
+            used = max(0, int(data.get("used_traffic") or 0))
+            limit = max(0, int(data.get("data_limit") or 0))
+        except (TypeError, ValueError):
+            return None
+        status = TrafficStatus(
+            used_bytes=used,
+            limit_bytes=limit,
+            reset_strategy=str(data.get("data_limit_reset_strategy") or "no_reset"),
+            limited=data.get("status") == "limited",
+        )
+        self._traffic_cache[node] = (current, status)
+        self._traffic_cache.move_to_end(node)
+        while len(self._traffic_cache) > TRAFFIC_CACHE_SIZE:
+            self._traffic_cache.popitem(last=False)
+        return status
 
     # ----------------------------------------------------------- subscription
     async def _extend(
@@ -206,13 +288,22 @@ class ProvisioningService:
         if user["status"] == "banned":
             raise ProvisioningError("banned")
         selected_tier = tier if tier in TIERS else str(user.get("tier") or DEFAULT_TIER)
+        if selected_tier not in TIERS:
+            selected_tier = DEFAULT_TIER
         node = user["node_username"] or node_username_for(telegram_id)
+        # A paid period sets the tier's quota; bonus days keep the current one.
+        limit: int | None = None
+        strategy: str | None = None
+        if tier in TIERS:
+            limit, strategy = traffic_policy(selected_tier)
         try:
             await self.marzban.modify_user(
                 node,
                 expire=target_expires_at,
                 status=("disabled" if user["status"] == "suspended" else "active"),
                 note=device_note(selected_tier),
+                data_limit=limit,
+                data_limit_reset_strategy=strategy,
             )
             data = await self.marzban.get_user(node)
         except MarzbanNotFound:
@@ -235,6 +326,7 @@ class ProvisioningService:
             config_link=link,
         )
         await self.db.set_user_tier(telegram_id, selected_tier)
+        self._traffic_cache.pop(node, None)
         return target_expires_at
 
     async def process_paid_payment(self, payment_id: str) -> bool:
@@ -322,6 +414,55 @@ class ProvisioningService:
         )
         await self.apply_referral_bonus(telegram_id)
         return True
+
+    async def revoke_refunded_payment(self, payment_id: str) -> int | None:
+        """Take back the period of a refunded payment, exactly once.
+
+        Returns the new expiry, or None if the payment was not paid or was
+        already handled. Other periods (later payments, bonuses) stay intact.
+        """
+        payment = await self.db.get_payment(payment_id)
+        if payment is None:
+            return None
+        telegram_id = int(payment["telegram_id"])
+        async with self._lock(telegram_id):
+            activation = await self.db.get_payment_activation(payment_id)
+            if not await self.db.mark_payment_refunded(payment_id):
+                return None
+            user = await self.db.get_user(telegram_id)
+            applied = activation is not None and activation["status"] == "completed"
+            if user is None or not applied or user["status"] == "banned":
+                await audit(self.db, telegram_id, "payment_refunded", payment_id)
+                return None
+            period = int(payment["months"]) * DAYS_PER_MONTH * 86400
+            current = int(user["expires_at"] or 0)
+            target = max(_ts(), current - period)
+            try:
+                await self._apply_expiration_target(telegram_id, target)
+            except (ProvisioningError, MarzbanError):
+                logger.exception(
+                    "refund_revoke_failed", extra={"payment_id": payment_id}
+                )
+                await self.notifier.telegram(
+                    self.settings.admin_telegram_id,
+                    f"⚠️ Возврат <code>{payment_id}</code> записан, но срок в панели "
+                    "не уменьшен. Проверьте пользователя вручную.",
+                )
+                return None
+        await audit(
+            self.db, telegram_id, "payment_refunded", payment_id, expires_at=target
+        )
+        if target <= _ts():
+            fresh = await self.db.get_user(telegram_id)
+            if fresh is not None:
+                await self.expire_user(fresh)
+        else:
+            await self.notifier.telegram(
+                telegram_id,
+                "↩️ Платёж возвращён. Срок подписки уменьшен на оплаченный период: "
+                f"теперь до <b>{format_date(target)}</b>.",
+            )
+        return target
 
     async def apply_referral_bonus(self, telegram_id: int) -> None:
         user = await self.db.get_user(telegram_id)

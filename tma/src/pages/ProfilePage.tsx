@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { endpoints, type Me } from "../api/client";
+import { endpoints, formatAmount, type Me } from "../api/client";
 import { clearSession } from "../auth/initData";
 import { formatDate, ru } from "../i18n/ru";
 import { secureClear } from "../storage/secure";
@@ -55,7 +55,7 @@ export function ProfilePage({ me }: { me: Me }) {
                   <tr key={p.payment_id}>
                     <td>{formatDate(p.created_at)}</td>
                     <td>{ru.payment.months(p.months)}</td>
-                    <td>{p.currency === "RUB" ? `${p.amount} ₽` : `${p.amount.toFixed(2)} USDT`}</td>
+                    <td>{formatAmount(p.amount, p.currency)}</td>
                     <td>{ru.profile.paymentStatus[p.status]}</td>
                   </tr>
                 ))}

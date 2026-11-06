@@ -21,9 +21,11 @@ class LogoutIn(BaseModel):
 
 
 class PaymentCreateIn(StrictModel):
-    months: Literal[1, 3, 6, 12]
+    # The billing service checks the period against the tier's price table.
+    months: int = Field(ge=1, le=12, strict=True)
+    # Telegram Stars are sold only inside the bot, never through this API.
     method: Literal["sbp", "usdt"]
-    tier: Literal["basic", "complete", "prime"] = "basic"
+    tier: Literal["standard", "basic", "complete", "prime"] = "basic"
     # Receipt email (54-ФЗ) for YooKassa; saved to the profile when given.
     email: str | None = Field(default=None, max_length=254)
 

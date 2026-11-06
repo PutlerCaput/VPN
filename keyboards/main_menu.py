@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from decimal import Decimal
 from urllib.parse import quote
 
 from aiogram.types import (
@@ -18,7 +20,14 @@ from config import (
     TIER_PRICES_USDT,
     TIERS,
     savings_percent,
+    stars_price,
 )
+
+DEFAULT_RUB_PER_STAR = Decimal("1.60")
+CHANNEL_BUTTONS = {
+    "stars": "⭐ Telegram Stars",
+    "sbp": "💳 ЮKassa: СБП или карта",
+}
 
 BTN_CONFIG = "🔐 Моя конфигурация"
 BTN_SETUP = "📱 Подключить устройство"
@@ -70,7 +79,9 @@ def app_kb(tma_url: str) -> InlineKeyboardMarkup:
 
 
 def channel_kb(
-    months: int | None = None, tier: str | None = None
+    months: int | None = None,
+    tier: str | None = None,
+    methods: Sequence[str] = ("sbp",),
 ) -> InlineKeyboardMarkup:
     """Payment channel choice; a deep link may pre-select the tier and the period."""
     suffix = f":{tier}:{months}" if tier and months else (f":{tier}" if tier else "")
@@ -78,25 +89,42 @@ def channel_kb(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="💳 ЮKassa: СБП или карта",
-                    callback_data=f"chan:sbp{suffix}",
+                    text=CHANNEL_BUTTONS[method],
+                    callback_data=f"chan:{method}{suffix}",
                 )
-            ],
+            ]
+            for method in methods
+            if method in CHANNEL_BUTTONS
         ],
     )
 
 
-def _from_price(method: str, tier: str) -> str:
-    if method == "sbp":
-        return f"от {TIER_PRICES_RUB[tier][1]} ₽/мес"
-    return f"от {TIER_PRICES_USDT[tier][1]} USDT/мес"
+def price_text(
+    method: str,
+    tier: str,
+    months: int,
+    rub_per_star: Decimal = DEFAULT_RUB_PER_STAR,
+) -> str:
+    if method == "stars":
+        return f"{stars_price(tier, months, rub_per_star)} ⭐"
+    if method == "usdt":
+        return f"{TIER_PRICES_USDT[tier][months]} USDT"
+    return f"{TIER_PRICES_RUB[tier][months]} ₽"
 
 
-def tiers_kb(method: str, enabled: list[str]) -> InlineKeyboardMarkup:
+def _from_price(method: str, tier: str, rub_per_star: Decimal) -> str:
+    return f"от {price_text(method, tier, 1, rub_per_star)}/мес"
+
+
+def tiers_kb(
+    method: str,
+    enabled: list[str],
+    rub_per_star: Decimal = DEFAULT_RUB_PER_STAR,
+) -> InlineKeyboardMarkup:
     rows = [
         [
             InlineKeyboardButton(
-                text=f"{TIERS[key].title} — {_from_price(method, key)}",
+                text=f"{TIERS[key].title} — {_from_price(method, key, rub_per_star)}",
                 callback_data=f"tier:{method}:{key}",
             )
         ]
@@ -107,14 +135,14 @@ def tiers_kb(method: str, enabled: list[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def tariffs_kb(method: str, tier: str = DEFAULT_TIER) -> InlineKeyboardMarkup:
+def tariffs_kb(
+    method: str,
+    tier: str = DEFAULT_TIER,
+    rub_per_star: Decimal = DEFAULT_RUB_PER_STAR,
+) -> InlineKeyboardMarkup:
     rows = []
     for months in sorted(TIER_PRICES_RUB[tier]):
-        price = (
-            f"{TIER_PRICES_RUB[tier][months]} ₽"
-            if method == "sbp"
-            else f"{TIER_PRICES_USDT[tier][months]} USDT"
-        )
+        price = price_text(method, tier, months, rub_per_star)
         badge = savings_percent(tier, months)
         label = f"{months} мес. — {price}" + (f" · выгода {badge}%" if badge else "")
         rows.append(
@@ -143,6 +171,32 @@ def sbp_payment_kb(payment_url: str, payment_id: str) -> InlineKeyboardMarkup:
                     text="✅ Я оплатил", callback_data=f"paid:{payment_id}"
                 )
             ],
+        ],
+    )
+
+
+def config_actions_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔄 Сбросить ссылку (отключить старые устройства)",
+                    callback_data="cfg:revoke",
+                )
+            ]
+        ],
+    )
+
+
+def revoke_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Да, выдать новую ссылку", callback_data="cfg:revoke:yes"
+                )
+            ],
+            [InlineKeyboardButton(text="Отмена", callback_data="cfg:revoke:no")],
         ],
     )
 

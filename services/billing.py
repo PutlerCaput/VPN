@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
-from config import DEFAULT_TIER, TIER_PRICES_RUB, TIER_PRICES_USDT, TIERS
+from config import (
+    DAYS_PER_MONTH,
+    DEFAULT_TIER,
+    TIER_PRICES_RUB,
+    TIER_PRICES_USDT,
+    TIERS,
+    format_gb,
+    stars_price,
+)
 from db.database import Database, PendingPaymentLimitError
 from services.audit import audit
 from services.cryptopay import CryptoPayClient, CryptoPayError
@@ -20,6 +29,24 @@ from services.yookassa import YooKassaClient, YooKassaError
 logger = logging.getLogger(__name__)
 
 MAX_PENDING_PAYMENTS = 5
+# An unpaid Stars order of the same plan is reused for a repeated tap instead
+# of filling the pending-order limit.
+STARS_REUSE_SECONDS = 24 * 3600
+METHODS = ("sbp", "usdt", "stars")
+
+
+def invoice_texts(tier: str, months: int) -> tuple[str, str, str]:
+    """(title <= 32, description <= 255, price label) for a Telegram invoice."""
+    spec = TIERS[tier]
+    title = f"Подписка {spec.title}, {months} мес."[:32]
+    parts = [
+        f"Защищённое подключение на {months * DAYS_PER_MONTH} дней",
+        f"до {spec.devices} устройств",
+    ]
+    if spec.traffic_gb:
+        parts.append(f"{format_gb(spec.traffic_bytes)} ГБ на каждые 30 дней")
+    description = (", ".join(parts) + ". Условия — в оферте (/terms).")[:255]
+    return title, description, f"{spec.title}, {months} мес."
 
 
 class BillingError(Exception):
@@ -46,6 +73,7 @@ class BillingService:
         enabled_tiers: list[str] | None = None,
         *,
         allow_legacy_sbp: bool = False,
+        stars_rub_per_star: Decimal | None = None,
     ) -> None:
         self.db = db
         self.sbp = sbp
@@ -56,6 +84,8 @@ class BillingService:
         # Opt-in compatibility for old integrations/tests; normal application
         # construction never enables direct/manual ruble invoice creation.
         self.allow_legacy_sbp = allow_legacy_sbp
+        # None = Telegram Stars are not sold.
+        self.stars_rub_per_star = stars_rub_per_star
 
     async def create(
         self,
@@ -70,7 +100,7 @@ class BillingService:
             raise BillingError("invalid_tier")
         if months not in TIER_PRICES_RUB[tier]:
             raise BillingError("invalid_months")
-        if method not in ("sbp", "usdt"):
+        if method not in METHODS:
             raise BillingError("invalid_method")
         user = await self.db.get_user(telegram_id)
         if user is None:
@@ -79,6 +109,8 @@ class BillingService:
             raise BillingError("banned")
         if not await self.db.has_accepted_offer(telegram_id):
             raise BillingError("offer_not_accepted")
+        if method == "stars":
+            return await self._create_stars(telegram_id, months, tier)
         if (
             not (method == "sbp" and self.yookassa is not None)
             and await self.db.count_pending_payments(telegram_id)
@@ -154,6 +186,56 @@ class BillingService:
         )
         return CreatedPayment(
             payment_id=payment_id, method=method, months=months, data=data
+        )
+
+    async def _create_stars(
+        self, telegram_id: int, months: int, tier: str
+    ) -> CreatedPayment:
+        if self.stars_rub_per_star is None:
+            raise BillingError("stars_unavailable")
+        amount = stars_price(tier, months, self.stars_rub_per_star)
+        existing = await self.db.open_stars_payment(
+            telegram_id, months, tier, int(time.time()) - STARS_REUSE_SECONDS
+        )
+        if existing is not None and int(existing["amount"]) == amount:
+            payment_id = str(existing["payment_id"])
+        else:
+            if (
+                await self.db.count_pending_payments(telegram_id)
+                >= MAX_PENDING_PAYMENTS
+            ):
+                raise BillingError("too_many_pending")
+            payment_id = uuid.uuid4().hex
+            await self.db.create_payment(
+                payment_id=payment_id,
+                telegram_id=telegram_id,
+                amount=amount,
+                currency="XTR",
+                months=months,
+                method="stars",
+                tier=tier,
+            )
+            PAYMENTS_CREATED.labels(method="stars").inc()
+            await audit(
+                self.db,
+                telegram_id,
+                "payment_created",
+                payment_id,
+                method="stars",
+                months=months,
+                tier=tier,
+            )
+        title, description, label = invoice_texts(tier, months)
+        return CreatedPayment(
+            payment_id=payment_id,
+            method="stars",
+            months=months,
+            data={
+                "amount_xtr": amount,
+                "title": title,
+                "description": description,
+                "label": label,
+            },
         )
 
     async def _create_yookassa(

@@ -11,10 +11,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from config import Settings
+from config import Settings, format_gb
 from db.database import Database
 from services.marzban import MarzbanClient, MarzbanError
 from services.metrics import ACTIVE_USERS, JOB_FAILURES
@@ -22,6 +21,7 @@ from services.notifier import Notifier
 from services.payment_reconciliation import PaymentReconciler
 from services.provisioning import ProvisioningService, format_date
 from services.security import SlidingWindowLimiter, is_valid_node_username
+from services.stars import StarsPayments
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,11 @@ GB = 1024**3
 ONLINE_WINDOW_SECONDS = 10 * 60
 SUBSCRIPTION_REMINDER_LEAD_SECONDS = 3 * 24 * 60 * 60
 SUBSCRIPTION_REMINDER_INTERVAL_MINUTES = 15
+# Marzban already stops an expired node at its expire time; this job only
+# brings the bot's own status and the user notice in line with it.
+EXPIRY_CHECK_INTERVAL_MINUTES = 15
+QUOTA_WARNING_PERCENT = 80
+TRAFFIC_NOTICE_RETENTION_SECONDS = 90 * 86400
 FLAG_RE = re.compile(r"[A-Z_]{3,}")
 
 
@@ -216,6 +221,53 @@ class AnomalyMonitor:
         elif open_log is not None:
             await self.db.close_open_conn_logs(node, online_ts or current)
 
+    async def _quota_notice(
+        self, telegram_id: int, node: str, panel_user: dict[str, Any]
+    ) -> None:
+        """Warn once at 80% of the quota and once when the panel stops the node."""
+        try:
+            limit = int(panel_user.get("data_limit") or 0)
+            used = int(panel_user.get("used_traffic") or 0)
+            lifetime = int(panel_user.get("lifetime_used_traffic") or used)
+        except (TypeError, ValueError):
+            return
+        if limit <= 0:
+            return
+        exhausted = panel_user.get("status") == "limited" or used >= limit
+        if exhausted:
+            level = 100
+        elif used * 100 >= limit * QUOTA_WARNING_PERCENT:
+            level = QUOTA_WARNING_PERCENT
+        else:
+            return
+        window = max(0, lifetime - used)
+        if not await self.db.claim_traffic_notice(node, window, level):
+            return
+        resets = panel_user.get("data_limit_reset_strategy") not in (None, "no_reset")
+        amount = f"{format_gb(used)} из {format_gb(limit)} ГБ"
+        if level == 100:
+            text = (
+                f"⛔️ Трафик подписки израсходован ({amount}). Подключение "
+                "приостановлено до обнуления счётчика: он обнуляется каждые "
+                "30 дней. Если считаете это ошибкой, напишите в «💬 Поддержка»."
+                if resets
+                else f"⛔️ Трафик пробного доступа израсходован ({amount}). "
+                "Оформить подписку можно в разделе «💳 Оплата»."
+            )
+            title = "Трафик израсходован"
+        else:
+            text = f"📶 Использовано {QUOTA_WARNING_PERCENT}% трафика: {amount}. " + (
+                "Счётчик обнуляется каждые 30 дней."
+                if resets
+                else "После исчерпания подключение остановится."
+            )
+            title = "Трафик заканчивается"
+        delivered = await self.provisioning.notifier.notify(
+            telegram_id, text, push_title=title, push_body=amount
+        )
+        if not delivered:
+            await self.db.release_traffic_notice(node, window, level)
+
     async def check_user(self, panel_user: dict[str, Any]) -> None:
         node = panel_user.get("username")
         if not isinstance(node, str) or not is_valid_node_username(node):
@@ -238,6 +290,8 @@ class AnomalyMonitor:
 
         if user["status"] == "banned":
             return
+        if user["status"] == "active":
+            await self._quota_notice(telegram_id, node, panel_user)
         flags = extract_flags(panel_user.get("note"))
         # Notes persist between polls, so a sub-threshold note does not re-alert.
         if flags and await self._evaluate(
@@ -295,6 +349,8 @@ class Jobs:
         settings: Settings,
         limiters: list[SlidingWindowLimiter],
         payment_reconciler: PaymentReconciler | None = None,
+        *,
+        stars: StarsPayments | None = None,
     ) -> None:
         self.db = db
         self.provisioning = provisioning
@@ -303,6 +359,7 @@ class Jobs:
         self.settings = settings
         self.limiters = limiters
         self.payment_reconciler = payment_reconciler
+        self.stars = stars
 
     async def daily_expiry_check(self) -> None:
         for user in await self.db.users_to_expire(int(time.time())):
@@ -334,6 +391,10 @@ class Jobs:
         if self.payment_reconciler is not None:
             await self.payment_reconciler.poll()
 
+    async def stars_reconciliation(self) -> None:
+        if self.stars is not None:
+            await self.stars.reconcile()
+
     async def anomaly_poller(self) -> None:
         await self.monitor.poll()
 
@@ -345,6 +406,7 @@ class Jobs:
         await self.db.purge_conn_logs(current - retention)
         cutoff = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%d")
         await self.db.purge_traffic_days(cutoff)
+        await self.db.purge_traffic_notices(current - TRAFFIC_NOTICE_RETENTION_SECONDS)
         for limiter in self.limiters:
             limiter.prune()
 
@@ -377,7 +439,7 @@ def build_scheduler(jobs: Jobs) -> AsyncIOScheduler:
     defaults = {"coalesce": True, "max_instances": 1, "misfire_grace_time": 600}
     scheduler.add_job(
         _guarded("daily_expiry_check", jobs.daily_expiry_check),
-        CronTrigger(hour=3, minute=0, timezone=UTC),
+        IntervalTrigger(minutes=EXPIRY_CHECK_INTERVAL_MINUTES, timezone=UTC),
         id="daily_expiry_check",
         **defaults,
     )
@@ -403,6 +465,12 @@ def build_scheduler(jobs: Jobs) -> AsyncIOScheduler:
         _guarded("payment_reconciliation", jobs.payment_reconciliation),
         IntervalTrigger(minutes=1, timezone=UTC),
         id="payment_reconciliation",
+        **defaults,
+    )
+    scheduler.add_job(
+        _guarded("stars_reconciliation", jobs.stars_reconciliation),
+        IntervalTrigger(minutes=5, timezone=UTC),
+        id="stars_reconciliation",
         **defaults,
     )
     scheduler.add_job(

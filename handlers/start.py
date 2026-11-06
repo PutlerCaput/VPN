@@ -9,8 +9,8 @@ from aiogram import F, Router
 from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import CallbackQuery, Message
 
-from config import DEFAULT_TIER, TIERS
-from handlers.common import DISCLAIMER, send_config, status_text
+from config import TIER_PRICES_RUB, TIERS, all_periods
+from handlers.common import DISCLAIMER, is_trial, send_config, status_text
 from handlers.payments import show_channels
 from keyboards.main_menu import accept_offer_kb, app_kb, main_menu_kb
 from middlewares.banned import BANNED_TEXT
@@ -45,7 +45,8 @@ def parse_start_arg(
     """Returns (referrer_id, pay_tier, pay_months, pay_requested).
 
     Payment deep links: ``pay``, ``pay_<months>``, ``pay_<tier>`` and
-    ``pay_<tier>_<months>``; ``pay_<months>`` predates tiers and means the basic tier.
+    ``pay_<tier>_<months>``. A period without a tier returns tier None; the
+    caller picks the first tier on sale.
     """
     if not arg:
         return None, None, None, False
@@ -55,12 +56,10 @@ def parse_start_arg(
         tier: str | None = None
         months: int | None = None
         for part in arg[4:].split("_")[:2]:
-            if part.isdigit() and int(part) in (1, 3, 6, 12):
+            if part.isdigit() and int(part) in all_periods():
                 months = int(part)
             elif part in TIERS:
                 tier = part
-        if months is not None and tier is None:
-            tier = DEFAULT_TIER
         return None, tier, months, True
     if arg.isdigit() and len(arg) <= 20:
         referrer = int(arg)
@@ -108,7 +107,8 @@ async def cmd_start(
         return
 
     await message.answer(
-        f"{welcome_message(tg.first_name, returning=True)}\n\n{status_text(db_user)}",
+        f"{welcome_message(tg.first_name, returning=True)}\n\n"
+        f"{status_text(db_user, trial=await is_trial(db, db_user))}",
         reply_markup=main_menu_kb(),
     )
     await message.answer(
@@ -116,7 +116,15 @@ async def cmd_start(
         reply_markup=app_kb(services.settings.tma_url),
     )
     if pay_requested:
-        await show_channels(message, pay_months, pay_tier)
+        if pay_months is not None and pay_tier is None:
+            pay_tier = services.settings.default_tier
+        if (
+            pay_tier is not None
+            and pay_months is not None
+            and pay_months not in TIER_PRICES_RUB[pay_tier]
+        ):
+            pay_months = None
+        await show_channels(message, services, pay_months, pay_tier)
 
 
 @router.callback_query(F.data == "offer:accept")
@@ -146,8 +154,11 @@ async def cb_accept_offer(callback: CallbackQuery, services: Services) -> None:
             reply_markup=main_menu_kb(),
         )
         return
+    trial_gb = services.settings.trial_traffic_gb
     await message.answer(
-        "🎉 Пробный доступ на 24 часа активирован!", reply_markup=main_menu_kb()
+        "🎉 Пробный доступ на 24 часа активирован!"
+        + (f" Лимит трафика: {trial_gb} ГБ." if trial_gb else ""),
+        reply_markup=main_menu_kb(),
     )
     if result.config_link:
         await send_config(message, result.config_link, result.expires_at)

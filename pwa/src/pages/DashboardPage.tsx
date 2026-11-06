@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { ApiError, endpoints, formatDate, type Me } from "../api/client";
+import { ApiError, endpoints, formatDate, formatTraffic, type Me } from "../api/client";
 import { InstallHint } from "../components/InstallHint";
 import { QRCode } from "../components/QRCode";
 import { useAppStore } from "../store";
@@ -57,6 +57,12 @@ export function DashboardPage() {
                 <>
                   <dt>Осталось дней</dt>
                   <dd>{sub.data.days_remaining}</dd>
+                </>
+              )}
+              {sub.data.status === "active" && sub.data.traffic && (
+                <>
+                  <dt>Трафик</dt>
+                  <dd>{formatTraffic(sub.data.traffic)}</dd>
                 </>
               )}
               {sub.data.node_username && (

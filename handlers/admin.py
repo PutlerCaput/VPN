@@ -90,6 +90,35 @@ async def cmd_confirm(
         await message.answer("Платёж уже был обработан ранее.")
 
 
+REFUND_RESULTS = {
+    "refunded": "↩️ Звёзды возвращены, оплаченный период снят с подписки.",
+    "not_found": "Платёж Stars не найден.",
+    "not_refundable": "Возвращаются только оплаченные и не возвращённые платежи Stars.",
+    "telegram_error": "⚠️ Telegram не принял возврат. Ничего не изменено.",
+}
+
+
+@router.message(Command("refund"), CanManage())
+async def cmd_refund(
+    message: Message, command: CommandObject, services: Services
+) -> None:
+    payment_id = (command.args or "").strip()
+    if not is_valid_payment_id(payment_id):
+        await message.answer("Использование: <code>/refund &lt;payment_id&gt;</code>")
+        return
+    if services.stars is None:
+        await message.answer("Оплата Telegram Stars не включена.")
+        return
+    await audit(
+        services.db,
+        message.from_user.id if message.from_user else None,
+        "admin_refund",
+        payment_id,
+    )
+    result = await services.stars.refund(payment_id)
+    await message.answer(REFUND_RESULTS.get(result, result))
+
+
 @router.message(Command("unsuspend"), CanManage())
 async def cmd_unsuspend(
     message: Message, command: CommandObject, services: Services

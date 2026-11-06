@@ -30,6 +30,15 @@ export interface Subscription {
   expires_at: number | null;
   days_remaining: number;
   node_username: string | null;
+  /** null when the panel is unreachable; limit_bytes 0 = unlimited. */
+  traffic?: TrafficStatus | null;
+}
+
+export interface TrafficStatus {
+  used_bytes: number;
+  limit_bytes: number;
+  resets_every_30_days: boolean;
+  exhausted: boolean;
 }
 
 export interface NodeConfig {
@@ -57,9 +66,9 @@ export interface Tier {
 export interface PaymentRow {
   payment_id: string;
   amount: number;
-  currency: "RUB" | "USDT";
+  currency: "RUB" | "USDT" | "XTR";
   months: number;
-  status: "pending" | "paid" | "cancelled";
+  status: "pending" | "paid" | "cancelled" | "refunded";
   created_at: number;
 }
 
@@ -122,3 +131,22 @@ export const endpoints = {
   accept: () => api<{ accepted: boolean; trial: string }>("/legal/accept", { method: "POST", body: "{}" }),
   logout: () => api<void>("/auth/logout", { method: "POST", body: "{}" }),
 };
+
+/** Payment amount for display: XTR is whole Telegram Stars. */
+export function formatAmount(amount: number, currency: PaymentRow["currency"]): string {
+  if (currency === "RUB") return `${amount} ₽`;
+  if (currency === "XTR") return `${amount} ⭐`;
+  return `${amount.toFixed(2)} USDT`;
+}
+
+/** "12.3 из 200 ГБ" or "1.5 ГБ, без ограничения". */
+export function formatTraffic(traffic: TrafficStatus): string {
+  const gb = (bytes: number) => {
+    const value = bytes / 1024 ** 3;
+    return value < 10 ? value.toFixed(1) : value.toFixed(0);
+  };
+  if (traffic.limit_bytes <= 0) return `${gb(traffic.used_bytes)} ГБ, без ограничения`;
+  const base = `${gb(traffic.used_bytes)} из ${gb(traffic.limit_bytes)} ГБ`;
+  if (traffic.exhausted) return `${base} — израсходован, ждём обнуления счётчика`;
+  return traffic.resets_every_30_days ? `${base} (обнуляется каждые 30 дней)` : base;
+}
