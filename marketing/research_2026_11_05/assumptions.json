@@ -1,0 +1,39 @@
+{
+  "status": "planning_only_not_deployed",
+  "observed_date": "2026-11-05",
+  "prices_rub": {
+    "1": 299,
+    "2": 549,
+    "3": 799,
+    "4": 999,
+    "5": 1199,
+    "6": 1399
+  },
+  "active_customer_mix": {
+    "1": 0.3,
+    "2": 0.0,
+    "3": 0.4,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.3
+  },
+  "quota_gb_per_30_days": 200,
+  "devices": 2,
+  "days_per_month": 30,
+  "payment_fee_all_in": 0.01,
+  "tax_reserve_rate": 0.06,
+  "refund_reserve_rate": 0.02,
+  "support_and_risk_rub_per_active": 35,
+  "control_fixed_rub_per_month": 3500,
+  "vpn_node_rub_per_month": 1500,
+  "active_customers_per_node": 75,
+  "spare_nodes": 1,
+  "node_included_traffic_gb": 20000,
+  "average_customer_traffic_gb": 80,
+  "traffic_overhead_ratio": 0.15,
+  "overage_rub_per_gb": 0.2,
+  "monthly_equivalent_churn": 0.1,
+  "cac_all_in_rub": 250,
+  "owner_time_rub_per_month": 30000,
+  "warning": "Все стоимости, емкость, комиссия, конверсия и удержание — допущения. Нужны счета VPS, договор ЮKassa, нагрузочный тест и когортные данные. Резерв налога 6% не определяет фактический налоговый режим."
+}

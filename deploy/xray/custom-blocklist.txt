@@ -1,0 +1,5 @@
+# Extra domains blocked on every node, one per line, in Xray syntax:
+#   domain:example.com   (domain and all subdomains)
+#   full:www.example.com (exact host)
+#   keyword:casino       (substring; use sparingly, it causes false positives)
+# Lines starting with # and blank lines are ignored.

@@ -1,0 +1,19 @@
+{
+  "source_repository": "https://github.com/runetfreedom/russia-blocked-geosite.git",
+  "source_url": "https://raw.githubusercontent.com/runetfreedom/russia-blocked-geosite/da174583cce7bc8d5a21b25be6492f4ef27bb901/geosite.dat",
+  "source_commit": "da174583cce7bc8d5a21b25be6492f4ef27bb901",
+  "downloaded_at_utc": "2026-11-02T13:54:52.965802+00:00",
+  "file": "ru-registry-fdc960c6f1b524f869b1dd300bb05cc98503f92038122d4fa160c50cc1fba439.dat",
+  "sha256": "fdc960c6f1b524f869b1dd300bb05cc98503f92038122d4fa160c50cc1fba439",
+  "blocked_category": "ru-blocked-all",
+  "blocked_entries": 1580550,
+  "categories": {
+    "category-social-media-ir": 11,
+    "category-social-media-!cn": 627,
+    "category-games": 1143,
+    "category-social-media-cn": 54,
+    "ru-blocked-all": 1580550
+  },
+  "source_kind": "community aggregation; not an official RKN export",
+  "source_sha256": "60c32a2ec79d7ace234782b03654ac37aa114b4736638b7670ac84369e0e3b63"
+}

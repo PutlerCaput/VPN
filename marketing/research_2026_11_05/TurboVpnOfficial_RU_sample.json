@@ -1,0 +1,70 @@
+{
+  "channel": "TurboVpnOfficial_RU",
+  "url": "https://t.me/s/TurboVpnOfficial_RU",
+  "observed_utc": "2026-11-05T05:52:57.047959+00:00",
+  "subscribers_display": "97.8K",
+  "posts_48h_sample": [
+    {
+      "url": "https://t.me/TurboVpnOfficial_RU/275",
+      "posted_utc": "2026-10-10T08:21:48+00:00",
+      "views_display": "21.6K",
+      "views_estimate": 21600
+    },
+    {
+      "url": "https://t.me/TurboVpnOfficial_RU/272",
+      "posted_utc": "2026-09-01T06:15:05+00:00",
+      "views_display": "47.3K",
+      "views_estimate": 47300
+    },
+    {
+      "url": "https://t.me/TurboVpnOfficial_RU/268",
+      "posted_utc": "2026-08-26T11:03:28+00:00",
+      "views_display": "41.4K",
+      "views_estimate": 41400
+    },
+    {
+      "url": "https://t.me/TurboVpnOfficial_RU/267",
+      "posted_utc": "2026-08-06T15:02:19+00:00",
+      "views_display": "45.9K",
+      "views_estimate": 45900
+    },
+    {
+      "url": "https://t.me/TurboVpnOfficial_RU/266",
+      "posted_utc": "2026-07-31T10:40:21+00:00",
+      "views_display": "43K",
+      "views_estimate": 43000
+    },
+    {
+      "url": "https://t.me/TurboVpnOfficial_RU/262",
+      "posted_utc": "2026-07-23T16:03:49+00:00",
+      "views_display": "46.9K",
+      "views_estimate": 46900
+    },
+    {
+      "url": "https://t.me/TurboVpnOfficial_RU/261",
+      "posted_utc": "2026-06-26T17:00:38+00:00",
+      "views_display": "44.9K",
+      "views_estimate": 44900
+    },
+    {
+      "url": "https://t.me/TurboVpnOfficial_RU/260",
+      "posted_utc": "2026-06-18T17:01:28+00:00",
+      "views_display": "43.6K",
+      "views_estimate": 43600
+    },
+    {
+      "url": "https://t.me/TurboVpnOfficial_RU/259",
+      "posted_utc": "2026-06-12T06:31:47+00:00",
+      "views_display": "39.8K",
+      "views_estimate": 39800
+    },
+    {
+      "url": "https://t.me/TurboVpnOfficial_RU/258",
+      "posted_utc": "2026-06-08T15:02:24+00:00",
+      "views_display": "39.5K",
+      "views_estimate": 39500
+    }
+  ],
+  "median_lifetime_views": 43300.0,
+  "sample_size": 10
+}

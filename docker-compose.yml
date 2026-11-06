@@ -1,0 +1,109 @@
+name: node-rental
+
+x-hardening: &hardening
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  bot:
+    <<: *hardening
+    build:
+      context: .
+      target: bot
+    image: node-rental-bot:latest
+    user: "1000:1000"
+    env_file: .env
+    environment:
+      DATABASE_PATH: /app/data/bot.db
+      LOG_DIR: /app/logs
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: "8080"
+    secrets:
+      - bot_token
+      - crypto_pay_token
+      - marzban_password
+      - jwt_secret
+      - vapid_private
+      - sbp_provider_token
+      - yookassa_secret_key
+      - db_key
+      - abuse_report_token
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    expose:
+      - "8080"
+    ports:
+      # Host-only: the detection service posts to 127.0.0.1:8080/internal/abuse.
+      - "127.0.0.1:8080:8080"
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
+
+  web:
+    <<: *hardening
+    build:
+      context: .
+      target: web
+      args:
+        VITE_BOT_USERNAME: ${BOT_USERNAME}
+    image: node-rental-web:latest
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      bot:
+        condition: service_healthy
+    networks:
+      - internal
+
+secrets:
+  bot_token:
+    file: ./secrets/bot_token.txt
+  crypto_pay_token:
+    file: ./secrets/crypto_pay_token.txt
+  marzban_password:
+    file: ./secrets/marzban_password.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+  vapid_private:
+    file: ./secrets/vapid_private.txt
+  sbp_provider_token:
+    file: ./secrets/sbp_provider_token.txt
+  yookassa_secret_key:
+    file: ./secrets/yookassa_secret_key.txt
+  db_key:
+    file: ./secrets/db_key.txt
+  abuse_report_token:
+    file: ./secrets/abuse_report_token.txt
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:

@@ -1,0 +1,3 @@
+.stats { display: flex; justify-content: space-around; text-align: center; }
+.stats div { display: flex; flex-direction: column; }
+.big { font-size: 1.9rem; font-weight: 700; }

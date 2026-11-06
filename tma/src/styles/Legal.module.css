@@ -1,0 +1,5 @@
+.offer { max-height: 45vh; overflow-y: auto; font-size: 0.88rem; line-height: 1.5; }
+.offer h3 { font-size: 0.98rem; margin: 1rem 0 0.4rem; }
+.checkbox { display: flex; gap: 0.6rem; align-items: flex-start; }
+.checkbox input { width: 1.2rem; height: 1.2rem; margin-top: 0.15rem; flex-shrink: 0; }
+.sticky { position: sticky; bottom: 0.5rem; }

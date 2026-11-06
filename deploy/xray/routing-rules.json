@@ -1,0 +1,77 @@
+{
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "tag": "DIRECT"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "BLOCK",
+      "settings": {
+        "response": {
+          "type": "http"
+        }
+      }
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "ruleTag": "aup-malicious-domains",
+        "type": "field",
+        "outboundTag": "BLOCK",
+        "domain": [
+          "ext:security.dat:malware",
+          "ext:security.dat:phishing",
+          "ext:security.dat:cryptominers"
+        ]
+      },
+      {
+        "ruleTag": "aup-ips",
+        "type": "field",
+        "outboundTag": "BLOCK",
+        "ip": [
+          "ext:security-ip.dat:malware",
+          "ext:security-ip.dat:phishing"
+        ]
+      },
+      {
+        "ruleTag": "protect-private",
+        "type": "field",
+        "outboundTag": "BLOCK",
+        "ip": [
+          "geoip:private"
+        ]
+      },
+      {
+        "ruleTag": "owner-platform-exceptions",
+        "type": "field",
+        "outboundTag": "DIRECT",
+        "domain": [
+          "domain:youtube.com",
+          "domain:youtu.be",
+          "domain:googlevideo.com",
+          "domain:ytimg.com"
+        ]
+      },
+      {
+        "ruleTag": "aup-domains",
+        "type": "field",
+        "outboundTag": "BLOCK",
+        "domain": [
+          "geosite:category-porn",
+          "geosite:category-betting-ru"
+        ]
+      },
+      {
+        "ruleTag": "aup-bittorrent",
+        "type": "field",
+        "outboundTag": "BLOCK",
+        "protocol": [
+          "bittorrent"
+        ]
+      }
+    ]
+  }
+}

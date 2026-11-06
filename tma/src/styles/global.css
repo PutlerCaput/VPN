@@ -1,0 +1,17 @@
+:root {
+  --bg: var(--tg-theme-bg-color, #0f172a);
+  --card: var(--tg-theme-secondary-bg-color, #1e293b);
+  --text: var(--tg-theme-text-color, #e2e8f0);
+  --hint: var(--tg-theme-hint-color, #94a3b8);
+  --link: var(--tg-theme-link-color, #38bdf8);
+  --button: var(--tg-theme-button-color, #22c55e);
+  --button-text: var(--tg-theme-button-text-color, #052e16);
+  --danger: var(--tg-theme-destructive-text-color, #ef4444);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); -webkit-tap-highlight-color: transparent; }
+h1 { font-size: 1.35rem; margin: 0 0 0.9rem; }
+h2 { font-size: 1.05rem; margin: 0 0 0.6rem; }
+code { font-family: ui-monospace, monospace; word-break: break-all; }
+button { font: inherit; }

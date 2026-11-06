@@ -1,0 +1,12 @@
+# Append this site to the EXISTING /opt/marzban/Caddyfile after validation.
+# Keep its panel/sub sites and global settings. Do not replace the whole file.
+app.cyberdefency.com {
+	# Internal application endpoints must never be exposed by this front door.
+	@internal path /metrics /metrics/* /internal /internal/*
+	handle @internal {
+		respond 404
+	}
+	handle {
+		reverse_proxy 127.0.0.1:18082
+	}
+}

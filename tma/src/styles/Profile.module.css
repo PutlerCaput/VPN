@@ -1,0 +1,6 @@
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1rem; margin: 0; }
+.facts dt { color: var(--hint); }
+.facts dd { margin: 0; }
+.tableWrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.table th, .table td { padding: 0.4rem; text-align: left; border-bottom: 1px solid rgba(148, 163, 184, 0.25); }

@@ -1,0 +1,89 @@
+{
+	admin {$CADDY_ADMIN:localhost:2019}
+	email {$ACME_EMAIL}
+	order rate_limit before basic_auth
+	servers {
+		trusted_proxies static 127.0.0.1/32 ::1/128
+		trusted_proxies_strict
+	}
+}
+
+{$DOMAIN} {
+	bind {$CADDY_BIND:0.0.0.0 [::]}
+	encode zstd gzip
+
+	rate_limit {
+		zone per_ip {
+			key {client_ip}
+			events 100
+			window 1m
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		-Server
+	}
+
+	# Metrics and abuse reports stay internal: scrape bot:8080/metrics and
+	# POST bot:8080/internal/abuse from the host or the tailnet, never via Caddy.
+	# A handle block is required: a bare `respond` loses to the SPA fallback below.
+	@internal path /metrics /metrics/* /internal /internal/*
+	handle @internal {
+		respond 404
+	}
+
+	# The contract must be readable without a Telegram session or app login.
+	@public_offer path /oferta /oferta.md
+	handle @public_offer {
+		root * /srv/legal
+		rewrite * /oferta.md
+		header {
+			Content-Type "text/markdown; charset=utf-8"
+			Content-Disposition "inline; filename=publichnaya-oferta.md"
+			Cache-Control "public, max-age=3600"
+		}
+		file_server
+	}
+
+	@backend path /api/* /cryptopay/* /sbp/* /yookassa/* /telegram/* /healthz
+	handle @backend {
+		reverse_proxy {$BOT_UPSTREAM:bot:8080} {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+
+	# Telegram Mini App: must be embeddable by Telegram clients.
+	redir /tma /tma/ 308
+	handle_path /tma/* {
+		root * /srv/tma
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors https://web.telegram.org https://*.telegram.org; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
+			-X-Frame-Options
+		}
+		@tma_assets path /assets/*
+		header @tma_assets Cache-Control "public, max-age=31536000, immutable"
+		@tma_html path / /index.html
+		header @tma_html Cache-Control "no-store"
+		try_files {path} /index.html
+		file_server
+	}
+
+	# PWA
+	handle {
+		root * /srv/pwa
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://t.me https://*.telegram.org; connect-src 'self'; frame-src https://oauth.telegram.org; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; manifest-src 'self'; worker-src 'self'; upgrade-insecure-requests"
+			X-Frame-Options "DENY"
+		}
+		@pwa_assets path /assets/*
+		header @pwa_assets Cache-Control "public, max-age=31536000, immutable"
+		@pwa_nocache path / /index.html /sw.js /service-worker.js /manifest.webmanifest
+		header @pwa_nocache Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}
