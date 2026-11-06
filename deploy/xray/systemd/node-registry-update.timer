@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily preparation of verified domain filtering data
+
+[Timer]
+OnCalendar=*-*-* 03:10:00 UTC
+Persistent=true
+RandomizedDelaySec=10min
+Unit=node-registry-update.service
+
+[Install]
+WantedBy=timers.target

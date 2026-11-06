@@ -1,0 +1,70 @@
+{
+  "channel": "vpngen",
+  "url": "https://t.me/s/vpngen",
+  "observed_utc": "2026-11-05T05:52:57.047959+00:00",
+  "subscribers_display": "68.3K",
+  "posts_48h_sample": [
+    {
+      "url": "https://t.me/vpngen/647",
+      "posted_utc": "2026-11-02T13:05:36+00:00",
+      "views_display": "9.44K",
+      "views_estimate": 9440
+    },
+    {
+      "url": "https://t.me/vpngen/645",
+      "posted_utc": "2026-10-31T09:10:56+00:00",
+      "views_display": "12.3K",
+      "views_estimate": 12300
+    },
+    {
+      "url": "https://t.me/vpngen/644",
+      "posted_utc": "2026-10-30T17:33:16+00:00",
+      "views_display": "13.3K",
+      "views_estimate": 13300
+    },
+    {
+      "url": "https://t.me/vpngen/643",
+      "posted_utc": "2026-10-26T12:53:21+00:00",
+      "views_display": "19.5K",
+      "views_estimate": 19500
+    },
+    {
+      "url": "https://t.me/vpngen/642",
+      "posted_utc": "2026-10-23T07:22:45+00:00",
+      "views_display": "21.8K",
+      "views_estimate": 21800
+    },
+    {
+      "url": "https://t.me/vpngen/641",
+      "posted_utc": "2026-10-19T10:59:59+00:00",
+      "views_display": "22.4K",
+      "views_estimate": 22400
+    },
+    {
+      "url": "https://t.me/vpngen/640",
+      "posted_utc": "2026-10-15T16:45:38+00:00",
+      "views_display": "24.9K",
+      "views_estimate": 24900
+    },
+    {
+      "url": "https://t.me/vpngen/639",
+      "posted_utc": "2026-10-15T05:32:59+00:00",
+      "views_display": "22.9K",
+      "views_estimate": 22900
+    },
+    {
+      "url": "https://t.me/vpngen/638",
+      "posted_utc": "2026-10-14T13:24:06+00:00",
+      "views_display": "18.9K",
+      "views_estimate": 18900
+    },
+    {
+      "url": "https://t.me/vpngen/637",
+      "posted_utc": "2026-10-13T11:29:40+00:00",
+      "views_display": "16.6K",
+      "views_estimate": 16600
+    }
+  ],
+  "median_lifetime_views": 19200.0,
+  "sample_size": 10
+}

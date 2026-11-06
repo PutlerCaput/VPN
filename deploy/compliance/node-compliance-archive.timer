@@ -1,0 +1,11 @@
+[Unit]
+Description=Archive confirmed incident evidence daily at 03:24 Novosibirsk time
+
+[Timer]
+OnCalendar=*-*-* 03:24:00 Asia/Novosibirsk
+Persistent=true
+AccuracySec=1min
+Unit=node-compliance-archive.service
+
+[Install]
+WantedBy=timers.target

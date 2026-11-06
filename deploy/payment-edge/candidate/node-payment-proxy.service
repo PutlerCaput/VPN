@@ -1,0 +1,38 @@
+[Unit]
+Description=Restricted payment API egress on RU
+Requires=wg-quick@wg-payments.service
+After=network-online.target wg-quick@wg-payments.service
+BindsTo=wg-quick@wg-payments.service
+
+[Service]
+Type=simple
+User=proxy
+Group=proxy
+RuntimeDirectory=node-payment-proxy
+RuntimeDirectoryMode=0700
+ExecStartPre=/usr/sbin/squid -k parse -f /etc/node-payment-edge/squid.conf
+ExecStart=/usr/sbin/squid -N -f /etc/node-payment-edge/squid.conf
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+LimitCORE=0
+UMask=0077
+MemoryMax=192M
+TasksMax=32
+ReadWritePaths=/run/node-payment-proxy
+
+[Install]
+WantedBy=multi-user.target

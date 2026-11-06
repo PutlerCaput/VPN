@@ -1,0 +1,67 @@
+# Platform exceptions only: not an exhaustive catalog or a legal classification.
+# Malware/phishing/IP/private-network rules always take precedence.
+# HTTPS paths/content within allowed hosts are not classified.
+domain:youtube.com
+domain:youtu.be
+domain:youtube-nocookie.com
+domain:googlevideo.com
+domain:ytimg.com
+domain:telegram.org
+domain:t.me
+domain:telegram.me
+domain:vk.com
+domain:vk.ru
+domain:ok.ru
+domain:facebook.com
+domain:fbcdn.net
+domain:instagram.com
+domain:cdninstagram.com
+domain:x.com
+domain:twitter.com
+domain:twimg.com
+domain:whatsapp.com
+domain:whatsapp.net
+domain:signal.org
+domain:reddit.com
+domain:redd.it
+domain:tiktok.com
+domain:tiktokcdn.com
+domain:discord.com
+domain:discord.gg
+domain:discordapp.com
+domain:discordapp.net
+domain:twitch.tv
+domain:ttvnw.net
+domain:linkedin.com
+domain:pinterest.com
+domain:snapchat.com
+# News: initial examples; review and extend for actual customer requirements.
+domain:bbc.com
+domain:bbc.co.uk
+domain:dw.com
+domain:reuters.com
+domain:apnews.com
+domain:euronews.com
+# Gaming storefronts/services: game-specific servers may need separate entries.
+domain:steampowered.com
+domain:steamcommunity.com
+domain:steamcontent.com
+domain:steamstatic.com
+domain:epicgames.com
+domain:unrealengine.com
+domain:riotgames.com
+domain:leagueoflegends.com
+domain:playvalorant.com
+domain:battle.net
+domain:blizzard.com
+domain:ea.com
+domain:ubisoft.com
+domain:ubi.com
+domain:xbox.com
+domain:xboxlive.com
+domain:playstation.com
+domain:playstation.net
+domain:roblox.com
+domain:rbxcdn.com
+domain:minecraft.net
+domain:gog.com

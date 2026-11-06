@@ -1,0 +1,43 @@
+[Unit]
+Description=Private payment webhook proxy to the bot
+Requires=wg-quick@wg-payments.service
+After=network-online.target wg-quick@wg-payments.service
+BindsTo=wg-quick@wg-payments.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+RuntimeDirectory=node-payment-backend
+RuntimeDirectoryMode=0700
+ExecStartPre=/usr/bin/mkdir -p /run/node-payment-backend/client_temp
+ExecStartPre=/usr/bin/mkdir -p /run/node-payment-backend/proxy_temp
+ExecStartPre=/usr/bin/mkdir -p /run/node-payment-backend/fastcgi_temp
+ExecStartPre=/usr/bin/mkdir -p /run/node-payment-backend/uwsgi_temp
+ExecStartPre=/usr/bin/mkdir -p /run/node-payment-backend/scgi_temp
+ExecStartPre=/usr/sbin/nginx -t -c /etc/node-payment-edge/de-nginx.conf
+ExecStart=/usr/sbin/nginx -c /etc/node-payment-edge/de-nginx.conf -g "daemon off;"
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+LimitCORE=0
+UMask=0077
+MemoryMax=64M
+TasksMax=32
+ReadWritePaths=/run/node-payment-backend
+
+[Install]
+WantedBy=multi-user.target

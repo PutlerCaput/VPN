@@ -1,0 +1,29 @@
+{
+  "status": "prepared_not_deployed",
+  "payment_domain": "pay.cyberdefency.com",
+  "webhook_url": "https://pay.cyberdefency.com/yookassa/webhook",
+  "ru_private_ip": "10.203.0.1",
+  "de_private_ip": "10.203.0.2",
+  "wireguard_interface": "wg-payments",
+  "api_allowlist": [
+    "api.yookassa.ru:443"
+  ],
+  "ru_public_ip_expected": "45.138.157.65",
+  "de_public_ip_expected": "89.125.210.172",
+  "cloudflare": {
+    "hostname": "pay.cyberdefency.com",
+    "origin_service": "http://127.0.0.1:18080",
+    "path": "/yookassa/webhook",
+    "mode": "named tunnel; proxied CNAME to <TUNNEL-UUID>.cfargotunnel.com",
+    "public_ru_443_listener": false
+  },
+  "prerequisites": [
+    "create the Cloudflare Tunnel and map only pay.cyberdefency.com to localhost:18080",
+    "verify pay hostname DNS ownership and existing records",
+    "verify tunnel subnet has no overlap on either server or Docker",
+    "generate private tunnel keys locally on each server",
+    "allow only DE to RU:3128 and RU to DE:18081 inside the tunnel",
+    "keep RU's current VPN DNAT on 443 and DE Caddy unchanged; use a dedicated DE webhook proxy on wg-payments:18081",
+    "test payment mode in an isolated DB with no production provisioning"
+  ]
+}

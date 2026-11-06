@@ -1,0 +1,21 @@
+[Unit]
+Description=Stage verified public domain filtering data without activating it
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+StateDirectory=node-rental-registry
+WorkingDirectory=/opt/node-rental
+Environment=PATH=/usr/bin:/bin
+ExecStart=/usr/bin/python3 /opt/node-rental/deploy/xray/update_registry.py --output-dir /var/lib/node-rental-registry
+UMask=0022
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+LimitCORE=0
+MemoryMax=768M
+TimeoutStartSec=15min
+Nice=10

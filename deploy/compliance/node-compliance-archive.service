@@ -1,0 +1,34 @@
+[Unit]
+Description=Verified AES256 archival of confirmed AUTOBAN evidence
+RequiresMountsFor=/mnt/cold-compliance
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=/opt/node-rental
+# Adapt this installation path and the DB/key paths before enabling.
+ExecStartPre=/usr/bin/mountpoint -q /mnt/cold-compliance
+ExecStart=/opt/node-rental/.venv/bin/python /opt/node-rental/scripts/compliance_archiver.py --database /opt/node-rental/data/bot.db --cold-dir /mnt/cold-compliance --archive-key-file /etc/node-rental/compliance-archive.key --db-key-file /opt/node-rental/secrets/db_key.txt --temp-dir /var/lib/node-compliance
+EnvironmentFile=-/etc/node-rental/compliance-alert.env
+StateDirectory=node-compliance
+StateDirectoryMode=0700
+ReadWritePaths=/opt/node-rental/data /mnt/cold-compliance /var/lib/node-compliance
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+LimitCORE=0
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=2h
+MemoryMax=256M

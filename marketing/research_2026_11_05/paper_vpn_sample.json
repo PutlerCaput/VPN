@@ -1,0 +1,70 @@
+{
+  "channel": "paper_vpn",
+  "url": "https://t.me/s/paper_vpn",
+  "observed_utc": "2026-11-05T05:52:57.047959+00:00",
+  "subscribers_display": "92.9K",
+  "posts_48h_sample": [
+    {
+      "url": "https://t.me/paper_vpn/300",
+      "posted_utc": "2026-11-01T09:21:07+00:00",
+      "views_display": "30.1K",
+      "views_estimate": 30100
+    },
+    {
+      "url": "https://t.me/paper_vpn/299",
+      "posted_utc": "2026-10-27T15:51:35+00:00",
+      "views_display": "51.6K",
+      "views_estimate": 51600
+    },
+    {
+      "url": "https://t.me/paper_vpn/298",
+      "posted_utc": "2026-10-24T10:40:24+00:00",
+      "views_display": "58.2K",
+      "views_estimate": 58200
+    },
+    {
+      "url": "https://t.me/paper_vpn/297",
+      "posted_utc": "2026-10-22T14:30:44+00:00",
+      "views_display": "63.2K",
+      "views_estimate": 63200
+    },
+    {
+      "url": "https://t.me/paper_vpn/296",
+      "posted_utc": "2026-10-17T09:03:44+00:00",
+      "views_display": "56.7K",
+      "views_estimate": 56700
+    },
+    {
+      "url": "https://t.me/paper_vpn/295",
+      "posted_utc": "2026-10-15T15:07:23+00:00",
+      "views_display": "57.6K",
+      "views_estimate": 57600
+    },
+    {
+      "url": "https://t.me/paper_vpn/294",
+      "posted_utc": "2026-10-13T12:26:51+00:00",
+      "views_display": "62.7K",
+      "views_estimate": 62700
+    },
+    {
+      "url": "https://t.me/paper_vpn/293",
+      "posted_utc": "2026-10-06T15:17:15+00:00",
+      "views_display": "73.5K",
+      "views_estimate": 73500
+    },
+    {
+      "url": "https://t.me/paper_vpn/292",
+      "posted_utc": "2026-10-04T11:03:14+00:00",
+      "views_display": "65.3K",
+      "views_estimate": 65300
+    },
+    {
+      "url": "https://t.me/paper_vpn/291",
+      "posted_utc": "2026-10-01T16:13:47+00:00",
+      "views_display": "79.2K",
+      "views_estimate": 79200
+    }
+  ],
+  "median_lifetime_views": 60450.0,
+  "sample_size": 10
+}

@@ -1,0 +1,25 @@
+# Keep the build context small and free of secrets.
+.git
+.github
+.env
+.env.*
+!.env.example
+secrets/
+data/
+logs/
+**/__pycache__
+**/*.pyc
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.venv
+venv
+tests/
+marketing/
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+*.tar.gz
+
+# Filtering assets are deployed separately from bot/web images.
+deploy/xray/registry/*.dat
