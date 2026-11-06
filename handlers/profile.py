@@ -17,6 +17,7 @@ from keyboards.main_menu import (
     revoke_confirm_kb,
 )
 from services.container import Services
+from services.health import OUTAGE_NOTICE, servers_text
 from services.marzban import MarzbanError
 from services.provisioning import ProvisioningError
 from services.security import SlidingWindowLimiter
@@ -50,11 +51,32 @@ async def show_profile(message: Message, services: Services) -> None:
     await message.answer(
         f"👤 <b>Профиль</b>\n\nID: <code>{user['telegram_id']}</code>\n"
         f"{status_text(user, traffic, trial=await is_trial(services.db, user))}"
-        f"{referrals}",
+        f"{referrals}{outage_suffix(services)}",
         reply_markup=main_menu_kb(),
     )
     await message.answer(
         "Подробнее — в приложении:", reply_markup=app_kb(services.settings.tma_url)
+    )
+
+
+def outage_suffix(services: Services) -> str:
+    """Known-outage banner from the last scheduled check; no extra panel call."""
+    health = services.health
+    if health is None or health.last is None or health.last.all_online:
+        return ""
+    return f"\n\n{OUTAGE_NOTICE}"
+
+
+@router.message(Command("servers"))
+async def show_servers(message: Message, services: Services) -> None:
+    if services.health is None:
+        await message.answer("Состояние серверов сейчас недоступно.")
+        return
+    report = await services.health.current()
+    await message.answer(
+        servers_text(
+            report, subscription=services.settings.config_delivery == "subscription"
+        )
     )
 
 
@@ -93,6 +115,8 @@ async def deliver_config(message: Message, owner_id: int, services: Services) ->
         )
         return
     await send_config(message, link, user["expires_at"])
+    if notice := outage_suffix(services):
+        await message.answer(notice.strip())
 
 
 @router.callback_query(F.data == "cfg:revoke")

@@ -16,6 +16,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
+    BotSubscriptionUpdated,
     BufferedInputFile,
     CallbackQuery,
     LabeledPrice,
@@ -26,9 +27,11 @@ from aiogram.types import (
 from config import DEFAULT_TIER, TIER_PRICES_RUB, TIERS
 from keyboards.main_menu import (
     BTN_PAY,
+    autorenew_cancel_kb,
     channel_kb,
     price_text,
     sbp_payment_kb,
+    subscription_link_kb,
     tariffs_kb,
     tiers_kb,
     usdt_payment_kb,
@@ -37,9 +40,14 @@ from keyboards.main_menu import (
 from services.billing import BillingError
 from services.container import Services
 from services.cryptopay import is_valid_invoice_url
+from services.provisioning import format_date
 from services.qr import render_qr_png
 from services.security import is_valid_payment_id
-from services.stars import CHECKOUT_ERRORS
+from services.stars import (
+    CHECKOUT_ERRORS,
+    SUBSCRIPTION_PERIOD_SECONDS,
+    subscription_payload,
+)
 from services.yookassa import is_valid_email
 
 logger = logging.getLogger(__name__)
@@ -105,6 +113,9 @@ BILLING_ERRORS = {
     "usdt_unavailable": "Оплата USDT временно недоступна.",
     "ruble_payments_unavailable": "Оплата через ЮKassa временно недоступна.",
     "stars_unavailable": "Оплата Telegram Stars временно недоступна.",
+    "subscription_exists": (
+        "Автопродление уже включено. Посмотреть или отключить: /autorenew."
+    ),
     "provider_error": "Платёжный сервис не отвечает. Попробуйте через несколько минут.",
     "payment_processing": (
         "Заказ уже обрабатывается. Не оплачивайте повторно. "
@@ -140,6 +151,14 @@ def bot_methods(services: Services) -> list[str]:
             continue
         methods.append(method)
     return methods
+
+
+def autorenew_available(services: Services) -> bool:
+    return (
+        services.settings.stars_autorenew_enabled
+        and services.stars is not None
+        and "stars" in bot_methods(services)
+    )
 
 
 def method_available(method: str, services: Services) -> bool:
@@ -291,7 +310,9 @@ async def cb_channel(
     if tier:
         await callback.message.edit_text(
             f"Выберите срок ({TIERS[tier].title}, {METHOD_TITLES[method]}):",
-            reply_markup=tariffs_kb(method, tier, rate),
+            reply_markup=tariffs_kb(
+                method, tier, rate, autorenew=autorenew_available(services)
+            ),
         )
     else:
         await callback.message.edit_text(
@@ -319,7 +340,12 @@ async def cb_tier(callback: CallbackQuery, services: Services) -> None:
         return
     await callback.message.edit_text(
         f"Выберите срок ({TIERS[tier].title}, {METHOD_TITLES[method]}):",
-        reply_markup=tariffs_kb(method, tier, services.settings.stars_rub_per_star),
+        reply_markup=tariffs_kb(
+            method,
+            tier,
+            services.settings.stars_rub_per_star,
+            autorenew=autorenew_available(services),
+        ),
     )
     await callback.answer()
 
@@ -533,6 +559,7 @@ async def stars_successful_payment(message: Message, services: Services) -> None
         currency=paid.currency,
         total_amount=paid.total_amount,
         charge_id=paid.telegram_payment_charge_id,
+        next_charge_at=paid.subscription_expiration_date,
     )
     if not ok:
         await message.answer(
@@ -549,3 +576,136 @@ async def stars_refunded_payment(message: Message, services: Services) -> None:
     await services.stars.record_refund(
         payload=refunded.invoice_payload, from_id=message.from_user.id
     )
+
+
+# ------------------------------------------------- monthly auto-renewal (Stars)
+AUTORENEW_TERMS = (
+    "Звёзды списываются автоматически каждые 30 дней, пока автопродление "
+    "включено; каждое списание продлевает подписку на 30 дней. Отключить можно "
+    "в любой момент командой /autorenew или в настройках Telegram — оплаченный "
+    "срок сохранится. Условия — в оферте (п. 3.3.1, /terms)."
+)
+
+
+@router.callback_query(F.data.startswith("autorenew:"))
+async def cb_autorenew(callback: CallbackQuery, services: Services) -> None:
+    message = callback.message
+    if not isinstance(message, Message) or callback.data is None:
+        await callback.answer()
+        return
+    parts = callback.data.split(":")
+    if len(parts) == 3 and parts[1] == "cancel":
+        await autorenew_cancel(callback, message, parts[2], services)
+        return
+    tier = parts[1] if len(parts) == 2 else ""
+    if (
+        not autorenew_available(services)
+        or tier not in TIERS
+        or tier not in services.settings.enabled_tiers
+    ):
+        await callback.answer("Автопродление сейчас недоступно.")
+        return
+    await callback.answer()
+    try:
+        created = await services.billing.create_stars_subscription(
+            callback.from_user.id, tier
+        )
+    except BillingError as exc:
+        await message.answer(BILLING_ERRORS.get(exc.code, "Не удалось оформить."))
+        return
+    data = created.data
+    link = await services.bot.create_invoice_link(
+        title=str(data["title"]),
+        description=str(data["description"]),
+        payload=subscription_payload(created.payment_id),
+        currency="XTR",
+        prices=[LabeledPrice(label=str(data["label"]), amount=int(data["amount_xtr"]))],
+        subscription_period=SUBSCRIPTION_PERIOD_SECONDS,
+    )
+    await message.answer(
+        f"🔁 <b>Автопродление: {TIERS[tier].title}</b>\n\n"
+        f"{data['amount_xtr']} ⭐ каждые 30 дней.\n\n{AUTORENEW_TERMS}",
+        reply_markup=subscription_link_kb(link),
+    )
+
+
+async def autorenew_cancel(
+    callback: CallbackQuery, message: Message, subscription_id: str, services: Services
+) -> None:
+    stars = services.stars
+    sub = (
+        await services.db.get_star_subscription(subscription_id)
+        if stars is not None and is_valid_payment_id(subscription_id)
+        else None
+    )
+    if stars is None or sub is None or int(sub["telegram_id"]) != callback.from_user.id:
+        await callback.answer("Подписка не найдена.", show_alert=True)
+        return
+    await callback.answer()
+    if await stars.cancel_subscription(subscription_id):
+        await message.edit_reply_markup(reply_markup=None)
+        await message.answer(
+            "✅ Автопродление отключено. Звёзды больше не будут списываться; "
+            "оплаченный срок сохраняется. Проверить: /status."
+        )
+    else:
+        await message.answer(
+            "⚠️ Telegram не подтвердил отключение. Попробуйте позже или отключите "
+            "подписку в настройках Telegram; вопрос по оплате: /paysupport."
+        )
+
+
+@router.message(Command("autorenew"))
+async def cmd_autorenew(message: Message, services: Services) -> None:
+    if message.from_user is None:
+        return
+    stars = services.stars
+    sub = (
+        await stars.active_subscription(message.from_user.id)
+        if stars is not None
+        else None
+    )
+    if sub is None:
+        hint = (
+            "Включить: «💳 Оплата» → «⭐ Telegram Stars» → тариф → "
+            "«🔁 Каждый месяц с автопродлением»."
+            if autorenew_available(services)
+            else "Автопродление сейчас не предлагается; продлевайте в «💳 Оплата»."
+        )
+        await message.answer(f"🔁 Автопродление не включено.\n\n{hint}")
+        return
+    tier = TIERS.get(str(sub["tier"]))
+    title = tier.title if tier else str(sub["tier"])
+    state = (
+        "⚠️ последнее списание не прошло — пополните звёзды в Telegram"
+        if sub["status"] == "failed"
+        else "включено"
+    )
+    when = (
+        f"\nСледующее списание: около {format_date(int(sub['next_charge_at']))}"
+        if sub["next_charge_at"]
+        else ""
+    )
+    await message.answer(
+        f"🔁 <b>Автопродление {state}</b>\nТариф: {title}, "
+        f"{sub['amount']} ⭐ каждые 30 дней.{when}",
+        reply_markup=autorenew_cancel_kb(str(sub["subscription_id"])),
+    )
+
+
+@router.subscription()
+async def stars_subscription_updated(
+    update: BotSubscriptionUpdated, services: Services
+) -> None:
+    """Telegram reports when the user cancels, re-enables or a charge fails."""
+    if services.stars is None:
+        return
+    status = await services.stars.subscription_changed(
+        payload=update.invoice_payload, from_id=update.user.id, state=update.state
+    )
+    if status == "failed":
+        await services.notifier.telegram(
+            update.user.id,
+            "⚠️ Не удалось списать звёзды за автопродление. Пополните баланс звёзд "
+            "в Telegram или продлите подписку вручную в «💳 Оплата».",
+        )

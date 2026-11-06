@@ -30,6 +30,10 @@ class FakeMarzban:
         self.panel_usage: list[dict[str, Any]] = []
         self.fail_modify_once: dict[str, Exception] = {}
         self.fail_disable_once: Exception | None = None
+        self.core_started = True
+        self.core_error: Exception | None = None
+        self.nodes: list[dict[str, Any]] = []
+        self.nodes_error: Exception | None = None
 
     def _payload(self, username: str) -> dict[str, Any]:
         user = self.users[username]
@@ -40,7 +44,7 @@ class FakeMarzban:
             "links": [
                 f"vless://{username}@node.example.com:443?security=reality{suffix}"
             ],
-            "subscription_url": f"/sub/{username}",
+            "subscription_url": f"/sub/{username}{suffix.replace('&', '-')}",
         }
 
     async def create_user(
@@ -126,6 +130,16 @@ class FakeMarzban:
 
     async def get_users_usage(self) -> list[dict[str, Any]]:
         return self.panel_usage
+
+    async def get_core(self) -> dict[str, Any]:
+        if self.core_error is not None:
+            raise self.core_error
+        return {"version": "1.8.24", "started": self.core_started}
+
+    async def get_nodes(self) -> list[dict[str, Any]]:
+        if self.nodes_error is not None:
+            raise self.nodes_error
+        return self.nodes
 
     async def close(self) -> None:
         return None

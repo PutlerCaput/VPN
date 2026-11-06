@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import { endpoints, formatTraffic, isApiError, type Status } from "../api/client";
 import { QRCode } from "../components/QRCode";
+import { ServersCard } from "../components/ServersCard";
 import { formatDate, ru } from "../i18n/ru";
 import { haptic, openBotPayment } from "../telegram";
 import styles from "../styles/Dashboard.module.css";
@@ -104,6 +105,8 @@ export function DashboardPage() {
       </section>
 
       {sub.data?.status === "suspended" && <section className={ui.card}>{ru.dashboard.suspended}</section>}
+
+      <ServersCard />
 
       {active && (
         <section className={ui.card}>

@@ -234,6 +234,25 @@ async def config(request: web.Request) -> web.Response:
     )
 
 
+@routes.get("/servers")
+async def servers(request: web.Request) -> web.Response:
+    """Locations and their state; names only, nothing about other users."""
+    services = request.app[SERVICES_KEY]
+    if services.health is None:
+        return json_error(503, "unavailable")
+    report = await services.health.current()
+    return web.json_response(
+        {
+            "checked_at": report.checked_at,
+            "panel_ok": report.panel_ok,
+            "subscription": services.settings.config_delivery == "subscription",
+            "locations": [
+                {"name": item.name, "online": item.online} for item in report.locations
+            ],
+        }
+    )
+
+
 # --------------------------------------------------------------- payments
 @routes.get("/tariffs")
 async def tariffs(request: web.Request) -> web.Response:

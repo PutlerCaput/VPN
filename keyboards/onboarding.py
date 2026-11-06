@@ -14,6 +14,13 @@ def setup_kb() -> InlineKeyboardMarkup:
     ]
     rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
     rows.append(
+        [
+            InlineKeyboardButton(
+                text="🛡 Защита при обрыве", callback_data="setup:killswitch"
+            )
+        ]
+    )
+    rows.append(
         [InlineKeyboardButton(text="Не получается", callback_data="setup:help")]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)

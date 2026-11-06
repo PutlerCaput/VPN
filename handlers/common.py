@@ -94,9 +94,15 @@ def status_text(
 async def send_config(message: Message, link: str, expires_at: int | None) -> None:
     if message.chat.type != "private":
         return
+    kind = (
+        "Ссылка-подписка: в ней все доступные серверы, клиент сам обновляет "
+        "их список (нажмите, чтобы скопировать):\n"
+        if link.startswith("https://")
+        else "Ссылка для импорта (нажмите, чтобы скопировать):\n"
+    )
     await message.answer(
         "🔐 <b>Ваша конфигурация подключения</b>\n\n"
-        "Ссылка для импорта (нажмите, чтобы скопировать):\n"
+        f"{kind}"
         f"<code>{html_escape(link)}</code>\n\n"
         f"Активна до: <b>{format_date(expires_at)}</b>\n\n{APPS_HINT}\n\n"
         "⚠️ Не передавайте ссылку третьим лицам: она привязана к вашему аккаунту.",

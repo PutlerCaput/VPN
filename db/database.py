@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS {table} (
     provider_id TEXT,
     paid_at INTEGER,
     tier TEXT NOT NULL DEFAULT 'basic',
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    subscription_id TEXT
 );
 """
 PAYMENTS_INDEXES_SQL = """
@@ -47,7 +48,7 @@ CREATE INDEX IF NOT EXISTS idx_payments_pending ON payments(status, created_at);
 """
 PAYMENTS_COLUMNS = (
     "payment_id, telegram_id, amount, currency, months, method, status, "
-    "provider_id, paid_at, tier, created_at"
+    "provider_id, paid_at, tier, created_at, subscription_id"
 )
 
 SCHEMA = (
@@ -224,6 +225,24 @@ CREATE TABLE IF NOT EXISTS support_messages (
     created_at INTEGER NOT NULL
 );
 
+-- Monthly Telegram Stars subscriptions (auto-renewal). Each charge becomes
+-- its own row in payments, so every renewal is credited exactly once.
+CREATE TABLE IF NOT EXISTS star_subscriptions (
+    subscription_id TEXT PRIMARY KEY,
+    telegram_id INTEGER NOT NULL,
+    tier TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'active', 'canceled', 'failed', 'ended')),
+    first_charge_id TEXT,
+    last_charge_id TEXT,
+    next_charge_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_star_subscriptions_user
+    ON star_subscriptions(telegram_id, status);
+
 -- Quota notices are sent once per traffic window and threshold. window_start
 -- is the traffic counted before the current window (lifetime minus current
 -- usage); it changes exactly when the panel resets the counter. No history
@@ -244,6 +263,7 @@ MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("users", "receipt_email", "TEXT"),
     ("users", "tier", "TEXT NOT NULL DEFAULT 'basic'"),
     ("payments", "tier", "TEXT NOT NULL DEFAULT 'basic'"),
+    ("payments", "subscription_id", "TEXT"),
 )
 HEX_KEY_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -915,6 +935,118 @@ class Database:
             )
             row = await cur.fetchone()
         return row is not None and row[0] == provider_id
+
+    # ------------------------------------------------------ star subscriptions
+    async def create_star_subscription(
+        self, subscription_id: str, telegram_id: int, tier: str, amount: int
+    ) -> None:
+        timestamp = now()
+        await self._execute(
+            "INSERT INTO star_subscriptions (subscription_id, telegram_id, tier, "
+            "amount, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 'pending', ?, ?)",
+            (subscription_id, telegram_id, tier, amount, timestamp, timestamp),
+        )
+
+    async def get_star_subscription(
+        self, subscription_id: str
+    ) -> dict[str, Any] | None:
+        return await self._fetchone(
+            "SELECT * FROM star_subscriptions WHERE subscription_id = ?",
+            (subscription_id,),
+        )
+
+    async def user_star_subscriptions(self, telegram_id: int) -> list[dict[str, Any]]:
+        """Every subscription of a user, newest first; callers filter by status."""
+        return await self._fetchall(
+            "SELECT * FROM star_subscriptions WHERE telegram_id = ? "
+            "ORDER BY created_at DESC",
+            (telegram_id,),
+        )
+
+    async def open_star_subscription(
+        self, telegram_id: int, tier: str, since: int
+    ) -> dict[str, Any] | None:
+        return await self._fetchone(
+            "SELECT * FROM star_subscriptions WHERE telegram_id = ? AND tier = ? "
+            "AND status = 'pending' AND created_at >= ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (telegram_id, tier, since),
+        )
+
+    async def record_subscription_charge(
+        self,
+        *,
+        subscription_id: str,
+        payment_id: str,
+        provider_id: str,
+        next_charge_at: int,
+    ) -> str:
+        """Store one subscription charge as a pending payment; returns its ID.
+
+        A charge delivered twice (update + reconciliation) maps to the same
+        payment through the unique provider_id.
+        """
+        timestamp = now()
+        async with self.transaction() as conn:
+            cur = await conn.execute(
+                "SELECT payment_id FROM payments WHERE provider_id = ?",
+                (provider_id,),
+            )
+            existing = await cur.fetchone()
+            if existing is not None:
+                return str(existing[0])
+            cur = await conn.execute(
+                "SELECT telegram_id, tier, amount FROM star_subscriptions "
+                "WHERE subscription_id = ?",
+                (subscription_id,),
+            )
+            sub = await cur.fetchone()
+            if sub is None:
+                raise RuntimeError("subscription is missing")
+            await conn.execute(
+                "INSERT INTO payments (payment_id, telegram_id, amount, currency, "
+                "months, method, status, provider_id, tier, created_at, "
+                "subscription_id) VALUES (?, ?, ?, 'XTR', 1, 'stars', 'pending', "
+                "?, ?, ?, ?)",
+                (
+                    payment_id,
+                    sub[0],
+                    sub[2],
+                    provider_id,
+                    sub[1],
+                    timestamp,
+                    subscription_id,
+                ),
+            )
+            charge_id = provider_id.split(":", 1)[-1]
+            await conn.execute(
+                "UPDATE star_subscriptions SET status = 'active', "
+                "first_charge_id = COALESCE(first_charge_id, ?), "
+                "last_charge_id = ?, "
+                "next_charge_at = MAX(COALESCE(next_charge_at, 0), ?), "
+                "updated_at = ? WHERE subscription_id = ?",
+                (charge_id, charge_id, next_charge_at, timestamp, subscription_id),
+            )
+        return payment_id
+
+    async def set_star_subscription_status(
+        self, subscription_id: str, status: str
+    ) -> None:
+        await self._execute(
+            "UPDATE star_subscriptions SET status = ?, updated_at = ? "
+            "WHERE subscription_id = ?",
+            (status, now(), subscription_id),
+        )
+
+    async def end_lapsed_star_subscriptions(self, before: int) -> int:
+        """Active subscriptions whose renewal never arrived are no longer active."""
+        return await self._execute(
+            "UPDATE star_subscriptions SET status = 'ended', updated_at = ? "
+            "WHERE status IN ('active', 'failed') AND next_charge_at IS NOT NULL "
+            "AND next_charge_at < ?",
+            (now(), before),
+        )
 
     async def mark_payment_refunded(self, payment_id: str) -> bool:
         """paid -> refunded, once. Refunded orders never count as paid again."""

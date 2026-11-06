@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { ApiError, endpoints, formatDate, formatTraffic, type Me } from "../api/client";
+import { ServersCard } from "../components/ServersCard";
 import { InstallHint } from "../components/InstallHint";
 import { QRCode } from "../components/QRCode";
 import { useAppStore } from "../store";
@@ -132,6 +133,7 @@ export function DashboardPage() {
       {sub.data?.status === "suspended" && (
         <section className="card warn">Подключение приостановлено из-за аномального трафика. Напишите в поддержку в боте.</section>
       )}
+      <ServersCard />
       <InstallHint />
     </main>
   );

@@ -10,6 +10,7 @@ from config import Settings
 from db.database import Database
 from services.billing import BillingService
 from services.cryptopay import CryptoPayClient
+from services.health import ServiceHealth
 from services.marzban import MarzbanClient
 from services.notifier import Notifier
 from services.provisioning import ProvisioningService
@@ -36,4 +37,5 @@ class Services:
     monitor: AnomalyMonitor
     yookassa: YooKassaClient | None = None
     stars: StarsPayments | None = None
+    health: ServiceHealth | None = None
     limiters: list[SlidingWindowLimiter] = field(default_factory=list)

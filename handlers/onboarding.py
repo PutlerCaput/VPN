@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, Message
 from handlers.profile import deliver_config
 from keyboards.main_menu import BTN_SETUP
 from keyboards.onboarding import guide_kb, help_kb, setup_kb
-from services.connection_guide import GUIDES, HELP_TEXT
+from services.connection_guide import GUIDES, HELP_TEXT, KILL_SWITCH_TEXT
 from services.container import Services
 
 router = Router(name="onboarding")
@@ -66,6 +66,9 @@ async def setup_action(
     elif action == "setup:choose":
         await callback.answer()
         await start_setup(message, state)
+    elif action == "setup:killswitch":
+        await callback.answer()
+        await message.answer(KILL_SWITCH_TEXT, reply_markup=help_kb())
     elif action == "setup:help":
         await callback.answer()
         await show_help(message, state)

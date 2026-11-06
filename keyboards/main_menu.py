@@ -139,8 +139,22 @@ def tariffs_kb(
     method: str,
     tier: str = DEFAULT_TIER,
     rub_per_star: Decimal = DEFAULT_RUB_PER_STAR,
+    *,
+    autorenew: bool = False,
 ) -> InlineKeyboardMarkup:
     rows = []
+    if autorenew and method == "stars" and 1 in TIER_PRICES_RUB[tier]:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=(
+                        f"🔁 Каждый месяц с автопродлением — "
+                        f"{price_text('stars', tier, 1, rub_per_star)}"
+                    ),
+                    callback_data=f"autorenew:{tier}",
+                )
+            ]
+        )
     for months in sorted(TIER_PRICES_RUB[tier]):
         price = price_text(method, tier, months, rub_per_star)
         badge = savings_percent(tier, months)
@@ -197,6 +211,27 @@ def revoke_confirm_kb() -> InlineKeyboardMarkup:
                 )
             ],
             [InlineKeyboardButton(text="Отмена", callback_data="cfg:revoke:no")],
+        ],
+    )
+
+
+def subscription_link_kb(link: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⭐ Оформить автопродление", url=link)]
+        ],
+    )
+
+
+def autorenew_cancel_kb(subscription_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Отключить автопродление",
+                    callback_data=f"autorenew:cancel:{subscription_id}",
+                )
+            ]
         ],
     )
 
