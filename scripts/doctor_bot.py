@@ -89,7 +89,20 @@ async def check_yookassa(s: Any) -> None:
         line("FAIL", f"YooKassa API via {egress}: {type(exc).__name__}")
         return
     if response.status_code != 200:
-        line("FAIL", f"YooKassa API via {egress}: HTTP {response.status_code}")
+        try:
+            code = str(response.json().get("code", ""))
+        except (ValueError, AttributeError):
+            code = ""
+        status_text = f"HTTP {response.status_code}" + (f" {code}" if code else "")
+        hint = ""
+        if response.status_code in (401, 403):
+            hint = (
+                ". Fix: the shop ID (.env, YOOKASSA_SHOP_ID) and the key "
+                "(secrets/yookassa_secret_key.txt, a Docker secret that "
+                "overrides .env) must belong to the same shop. "
+                "See docs/FINISH_RUNBOOK.md, «Ключи ЮKassa»"
+            )
+        line("FAIL", f"YooKassa API via {egress}: {status_text}{hint}")
         return
     line("OK", f"YooKassa API reachable via {egress}")
     data = response.json()
