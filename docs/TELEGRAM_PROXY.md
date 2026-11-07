@@ -27,7 +27,6 @@ http_access deny all
 access_log none
 cache deny all
 forwarded_for delete
-via off
 ```
 
 Проверить синтаксис и перезапустить:
