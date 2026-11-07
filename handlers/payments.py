@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from decimal import Decimal
 from urllib.parse import urlsplit
 
@@ -43,7 +44,11 @@ from keyboards.main_menu import (
 from services.billing import BillingError
 from services.container import Services
 from services.cryptopay import is_valid_invoice_url
-from services.payment_creation import CreationReviewRequired, YooKassaCreationService
+from services.payment_creation import (
+    CreationReviewRequired,
+    CreationVoided,
+    YooKassaCreationService,
+)
 from services.payment_reconciliation import PaymentReconciler
 from services.provisioning import format_date
 from services.qr import render_qr_png
@@ -126,6 +131,10 @@ BILLING_ERRORS = {
     "payment_method_unavailable": (
         "Оплата через СБП сейчас недоступна. Напишите в «💬 Поддержка», "
         "мы поможем оплатить."
+    ),
+    "stuck_voided": (
+        "Неоплаченный счёт не получил ссылку на оплату и отменён. Нажмите "
+        "«💳 Оплата» и выберите срок ещё раз."
     ),
     "creation_review": ("Счёт проверяется. Напишите в «💬 Поддержка», мы поможем."),
     "too_many_pending": (
@@ -831,9 +840,18 @@ async def show_open_payment(
     message: Message, telegram_id: int, services: Services
 ) -> None:
     """One unpaid order at a time: show it with the next step for it."""
+    shop = str(services.settings.yookassa_shop_id or "")
+    voided = 0
+    if shop:
+        # Orders stuck before their link cannot be paid: void them first.
+        voided = await services.db.void_stuck_orders(int(time.time()), shop)
     order = await services.db.open_payment(telegram_id)
     if order is None:
-        await message.answer(BILLING_ERRORS["too_many_pending"])
+        await message.answer(
+            BILLING_ERRORS["stuck_voided"]
+            if voided
+            else BILLING_ERRORS["too_many_pending"]
+        )
         return
     tier = TIERS.get(str(order["tier"]))
     amount = (
@@ -845,10 +863,19 @@ async def show_open_payment(
     )
     state = order.get("state")
     url = order.get("confirmation_url")
+    # A link of another YooKassa shop cannot be paid here: offer cancel only.
+    foreign = bool(url) and str(order.get("shop_id") or "") != shop
+    if foreign:
+        url = None
     if state == "review":
         hint = (
             "Счёт проверяется. Если оплата не проходит, напишите в "
             "«💬 Поддержка» с номером счёта."
+        )
+    elif foreign:
+        hint = (
+            "Этот счёт выставлен прежним магазином ЮKassa, оплатить его здесь "
+            "нельзя. Отмените его и выберите срок заново."
         )
     elif state == "pending" and not url:
         hint = (
@@ -950,6 +977,9 @@ async def cb_retry_payment_creation(
         await YooKassaCreationService(services.db, yookassa).issue(
             {"payment_id": payment_id}
         )
+    except CreationVoided:
+        await callback.answer(BILLING_ERRORS["stuck_voided"], show_alert=True)
+        return
     except CreationReviewRequired:
         await callback.answer(BILLING_ERRORS["creation_review"], show_alert=True)
         return

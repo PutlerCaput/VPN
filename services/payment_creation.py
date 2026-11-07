@@ -2,12 +2,15 @@
 
 The order and immutable request are committed before a provider request. Unknown
 outcomes are retried with the same body/key for at most 23 hours (YooKassa keeps
-idempotency keys for 24 hours); older outcomes need operator reconciliation.
+idempotency keys for 24 hours). An order that never received a checkout link
+cannot have been paid, so it is voided and the customer gets a fresh order. An
+order that already received a link is never reissued here.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import time
 from decimal import Decimal, DecimalException
 from typing import Any
@@ -26,6 +29,13 @@ RETRY_WINDOW_SECONDS = 23 * 3600
 
 class CreationReviewRequired(YooKassaError):
     pass
+
+
+class CreationVoided(YooKassaError):
+    """The order never received a link and was cancelled: order again."""
+
+
+logger = logging.getLogger(__name__)
 
 
 class ReceiptEmailRequired(YooKassaError):
@@ -97,7 +107,9 @@ class YooKassaCreationService:
         email: str | None,
         max_pending: int,
     ) -> dict[str, Any]:
-        existing = await self.db.open_yookassa_creation(telegram_id, months, tier)
+        existing = await self.db.open_yookassa_creation(
+            telegram_id, months, tier, self.client.shop_id
+        )
         if existing is not None:
             return existing
         if self.client.requires_email and not email:
@@ -124,6 +136,18 @@ class YooKassaCreationService:
             max_pending=max_pending,
         )
 
+    async def _unissued(
+        self, payment_id: str, job: dict[str, Any], reason: str, message: str
+    ) -> None:
+        """Void an order that never received a link. A link already sent is kept."""
+        if job["state"] == "ready":
+            raise CreationReviewRequired(message)
+        if await self.db.void_unissued_creation(payment_id, int(time.time())):
+            logger.warning("payment_creation_voided", extra={"reason": reason})
+            raise CreationVoided(reason)
+        # A request for this order is still in flight: its outcome is not known.
+        raise YooKassaError("creation already in progress")
+
     async def issue(self, job: dict[str, Any]) -> dict[str, Any]:
         payment_id = str(job["payment_id"])
         current = await self.db.get_yookassa_creation(payment_id)
@@ -131,13 +155,15 @@ class YooKassaCreationService:
             raise YooKassaError("creation request missing")
         job = current
         if job["shop_id"] != self.client.shop_id:
-            await self.db.review_yookassa_creation(payment_id)
-            raise CreationReviewRequired("creation merchant changed")
+            await self._unissued(
+                payment_id, job, "merchant_changed", "creation merchant changed"
+            )
         if job["state"] == "ready":
             return job
         if job["state"] == "review" or int(time.time()) >= int(job["retry_until"]):
-            await self.db.review_yookassa_creation(payment_id)
-            raise CreationReviewRequired("creation idempotency window ended")
+            await self._unissued(
+                payment_id, job, "retry_window", "creation idempotency window ended"
+            )
         if not await self.db.claim_yookassa_creation(payment_id, int(time.time())):
             # Another request may have completed while this caller waited for
             # the DB lock. Otherwise the existing lease/retry preserves its job.

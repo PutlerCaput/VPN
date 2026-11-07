@@ -24,6 +24,7 @@ from services.cryptopay import CryptoPayClient, CryptoPayError
 from services.metrics import PAYMENTS_CREATED
 from services.payment_creation import (
     CreationReviewRequired,
+    CreationVoided,
     ReceiptEmailRequired,
     YooKassaCreationService,
 )
@@ -372,47 +373,62 @@ class BillingService:
     ) -> tuple[str, dict[str, Any]]:
         assert self.yookassa is not None  # nosec B101
         creation = YooKassaCreationService(self.db, self.yookassa)
-        try:
-            job = await creation.prepare(
-                payment_id=payment_id,
-                telegram_id=telegram_id,
-                amount_rub=TIER_PRICES_RUB[tier][months],
-                months=months,
-                email=user.get("receipt_email"),
-                tier=tier,
-                tier_title=TIERS[tier].title,
-                max_pending=MAX_PENDING_PAYMENTS,
-            )
-            created = await creation.issue(job)
-        except ReceiptEmailRequired:
-            raise BillingError("receipt_email_required") from None
-        except PendingPaymentLimitError:
-            raise BillingError("too_many_pending") from None
-        except CreationReviewRequired:
-            raise BillingError("creation_review") from None
-        except YooKassaError as exc:
-            permanent = isinstance(exc, YooKassaRejected)
-            logger.error(
-                "yookassa_create_failed",
-                extra={
-                    "status_code": exc.status_code or 0,
-                    "provider_code": exc.provider_code or "",
-                    "failure": exc.failure or "",
-                    "permanent": permanent,
-                },
-            )
-            code = "payment_method_unavailable" if permanent else "provider_error"
-            raise BillingError(code) from None
-        if not created["confirmation_url"]:
-            # A completed invoice can legitimately have no checkout URL. Its
-            # durable provider ID will be verified by the callback/poller.
-            # Do not report an outage or suggest paying a second time.
-            raise BillingError("payment_processing")
-        return str(created["payment_id"]), {
-            "qr_url": created["confirmation_url"],
-            "payment_url": created["confirmation_url"],
-            "amount_rub": int(created["amount"]) // 100,
-            "manual": False,
-            "provider": "yookassa",
-            "receipt": created["receipt_mode"],
-        }
+        for attempt in range(3):
+            # The first attempt keeps the customer's order id. An order that was
+            # voided (it never got a link) is replaced by a fresh one, so the
+            # customer gets a payment link at once.
+            order_id = payment_id if attempt == 0 else uuid.uuid4().hex
+            try:
+                job = await creation.prepare(
+                    payment_id=order_id,
+                    telegram_id=telegram_id,
+                    amount_rub=TIER_PRICES_RUB[tier][months],
+                    months=months,
+                    email=user.get("receipt_email"),
+                    tier=tier,
+                    tier_title=TIERS[tier].title,
+                    max_pending=MAX_PENDING_PAYMENTS,
+                )
+                created = await creation.issue(job)
+            except ReceiptEmailRequired:
+                raise BillingError("receipt_email_required") from None
+            except PendingPaymentLimitError:
+                # A stuck order must not block the customer: void the stuck
+                # orders and try once more.
+                voided = await self.db.void_stuck_orders(
+                    int(time.time()), self.yookassa.shop_id
+                )
+                if attempt == 0 and voided:
+                    continue
+                raise BillingError("too_many_pending") from None
+            except CreationVoided:
+                continue
+            except CreationReviewRequired:
+                raise BillingError("creation_review") from None
+            except YooKassaError as exc:
+                permanent = isinstance(exc, YooKassaRejected)
+                logger.error(
+                    "yookassa_create_failed",
+                    extra={
+                        "status_code": exc.status_code or 0,
+                        "provider_code": exc.provider_code or "",
+                        "failure": exc.failure or "",
+                        "permanent": permanent,
+                    },
+                )
+                code = "payment_method_unavailable" if permanent else "provider_error"
+                raise BillingError(code) from None
+            if not created["confirmation_url"]:
+                # A completed invoice can legitimately have no checkout URL. Its
+                # durable provider ID will be verified by the callback/poller.
+                # Do not report an outage or suggest paying a second time.
+                raise BillingError("payment_processing")
+            return str(created["payment_id"]), {
+                "qr_url": created["confirmation_url"],
+                "payment_url": created["confirmation_url"],
+                "amount_rub": int(created["amount"]) // 100,
+                "manual": False,
+                "provider": "yookassa",
+                "receipt": created["receipt_mode"],
+            }
+        raise BillingError("provider_error")

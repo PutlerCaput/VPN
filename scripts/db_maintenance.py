@@ -12,6 +12,7 @@ The key is read from the Docker secret and is never printed.
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from datetime import UTC, datetime
@@ -39,7 +40,8 @@ def main(argv: list[str]) -> None:
     if command == "report":
         conn = open_encrypted(path, key)
         try:
-            for label, value in report(conn, now).items():
+            shop = os.environ.get("YOOKASSA_SHOP_ID")
+            for label, value in report(conn, now, shop).items():
                 print(f"{label}: {value}")
         finally:
             conn.close()

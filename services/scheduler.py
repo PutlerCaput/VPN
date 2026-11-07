@@ -443,7 +443,11 @@ class Jobs:
             limiter.prune()
 
     async def cancel_unpaid(self) -> None:
-        await self.db.cancel_stale_payments(int(time.time()) - UNPAID_ORDER_TTL_SECONDS)
+        now = int(time.time())
+        await self.db.cancel_stale_payments(now - UNPAID_ORDER_TTL_SECONDS)
+        if self.settings.yookassa_shop_id:
+            # Orders stuck before their link: in review, expired, or for another shop.
+            await self.db.void_stuck_orders(now, str(self.settings.yookassa_shop_id))
 
     async def payment_activation_retry(self) -> None:
         await self.provisioning.retry_paid_activations()

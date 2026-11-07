@@ -45,6 +45,15 @@ TECHNICAL: dict[str, tuple[str, str]] = {
 }
 
 
+# Orders stuck before their link; the bot's five-minute job voids them.
+STUCK_ORDERS = (
+    "SELECT COUNT(*) FROM payments WHERE status = 'pending' AND provider_id IS NULL "
+    "AND payment_id IN (SELECT c.payment_id FROM yookassa_creations c "
+    "WHERE c.state != 'ready' AND c.confirmation_url IS NULL AND c.lease_until <= ? "
+    "AND (c.state = 'review' OR c.retry_until <= ? OR c.shop_id != ?))"
+)
+
+
 def _cutoff(now: int) -> int:
     return now - FINISHED_ORDER_SECONDS
 
@@ -101,7 +110,7 @@ def _backlog(conn: Any, now: int) -> dict[str, int]:
     }
 
 
-def report(conn: Any, now: int) -> dict[str, int]:
+def report(conn: Any, now: int, shop_id: str | None = None) -> dict[str, int]:
     """Row counts, reclaimable space and what would be removed. Changes nothing."""
     page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
     free_pages = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
@@ -114,6 +123,9 @@ def report(conn: Any, now: int) -> dict[str, int]:
         result[f"technical, removed by clean: {label}"] = int(count)
     for label, value in _backlog(conn, now).items():
         result[f"housekeeping backlog: {label}"] = value
+    if shop_id is not None:
+        stuck = conn.execute(STUCK_ORDERS, (now, now, shop_id)).fetchone()[0]
+        result["housekeeping backlog: orders stuck before a link"] = int(stuck)
     return result
 
 

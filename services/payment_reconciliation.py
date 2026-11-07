@@ -16,7 +16,11 @@ from typing import Any, Literal
 from db.database import UNPAID_ORDER_TTL_SECONDS, Database
 from services.cryptopay import CryptoPayClient, CryptoPayError
 from services.metrics import JOB_FAILURES
-from services.payment_creation import CreationReviewRequired, YooKassaCreationService
+from services.payment_creation import (
+    CreationReviewRequired,
+    CreationVoided,
+    YooKassaCreationService,
+)
 from services.provisioning import ProvisioningService
 from services.yookassa import YooKassaClient, YooKassaError, verify_payment
 
@@ -165,6 +169,8 @@ class PaymentReconciler:
                     return
                 try:
                     await YooKassaCreationService(self.db, self.yookassa).issue(job)
+                except CreationVoided:
+                    JOB_FAILURES.labels(job="payment_creation_voided").inc()
                 except CreationReviewRequired:
                     JOB_FAILURES.labels(job="payment_creation_review").inc()
                     logger.error("payment_creation_review_required")

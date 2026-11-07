@@ -195,8 +195,13 @@ async def test_retry_never_reopens_a_cancelled_order(services: Any) -> None:
     assert len(calls) == 1
 
 
-async def test_reviewed_order_shows_support_and_no_buttons(services: Any) -> None:
+async def test_stuck_review_order_is_voided_and_the_customer_is_told(
+    services: Any,
+) -> None:
     await _buyer(services)
+    services.settings = services.settings.model_copy(
+        update={"yookassa_shop_id": "123456"}
+    )
     calls: list[str] = []
     provider = client(accepting(calls, fail_first=True))
     services.billing.yookassa = provider
@@ -212,8 +217,9 @@ async def test_reviewed_order_shows_support_and_no_buttons(services: Any) -> Non
         await payments_handlers.show_open_payment(message, USER, services)
     finally:
         await provider.close()
-    assert message.answer.await_args.kwargs["reply_markup"] is None
-    assert "проверяется" in message.answer.await_args.args[0]
+    # Nobody could have paid an order that never got a link: it is cancelled.
+    assert "отменён" in message.answer.await_args.args[0]
+    assert await services.db.open_payment(USER) is None
 
 
 async def test_log_line_carries_status_and_code_but_not_the_text(
