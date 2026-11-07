@@ -326,6 +326,7 @@ class Database:
         self._traffic_memory: OrderedDict[tuple[str, str], dict[str, Any]] = (
             OrderedDict()
         )
+        self._traffic_memory_day: str | None = None
         self.path = path
         self._key = key
         self._conn: aiosqlite.Connection | None = None
@@ -1635,9 +1636,12 @@ class Database:
         last_online_at: str | None,
     ) -> None:
         if not self.activity_logging_enabled:
-            for key in list(self._traffic_memory):
-                if key[1] < day:
-                    del self._traffic_memory[key]
+            if day != self._traffic_memory_day:
+                # The poll writes once per user. Scanning for older days on every
+                # write made a poll quadratic in the number of users.
+                for stale in [key for key in self._traffic_memory if key[1] < day]:
+                    del self._traffic_memory[stale]
+                self._traffic_memory_day = day
             key = (node_username, day)
             previous = self._traffic_memory.get(key, {})
             self._traffic_memory[key] = {
@@ -1654,6 +1658,9 @@ class Database:
             "INSERT INTO traffic_daily (node_username, day, baseline_bytes, "
             "last_bytes, last_online_at) VALUES (?, ?, ?, ?, ?) "
             "ON CONFLICT(node_username, day) DO UPDATE SET "
+            # After a counter reset in the panel the caller passes a new
+            # baseline; keeping the old one zeroed the rest of the day.
+            "baseline_bytes = excluded.baseline_bytes, "
             "last_bytes = excluded.last_bytes, "
             "last_online_at = excluded.last_online_at",
             (node_username, day, baseline_bytes, last_bytes, last_online_at),

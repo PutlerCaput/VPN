@@ -177,6 +177,11 @@ class PaymentReconciler:
                 except YooKassaError:
                     JOB_FAILURES.labels(job="payment_creation_api").inc()
                     logger.warning("payment_creation_api_unavailable")
+                except Exception:
+                    # Inside the task group an escaped error would cancel the
+                    # other customers' jobs of this run.
+                    JOB_FAILURES.labels(job="payment_creation_unexpected").inc()
+                    logger.exception("payment_creation_failed")
 
         async def check(payment: dict[str, Any]) -> None:
             async with slots:
@@ -214,6 +219,14 @@ class PaymentReconciler:
                 except (YooKassaError, CryptoPayError):
                     JOB_FAILURES.labels(job="payment_reconciliation_api").inc()
                     logger.warning("payment_reconciliation_api_unavailable")
+                except Exception:
+                    # One broken order must not cancel the checks of the others:
+                    # its next check is already scheduled above.
+                    JOB_FAILURES.labels(job="payment_reconciliation_unexpected").inc()
+                    logger.exception(
+                        "payment_reconciliation_failed",
+                        extra={"payment_id": payment["payment_id"]},
+                    )
 
         try:
             async with asyncio.timeout(CHECK_BUDGET_SECONDS):
