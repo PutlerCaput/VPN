@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from services.billing import BillingError
-from services.payment_creation import CreationReviewRequired, YooKassaCreationService
+from services.payment_creation import CreationVoided, YooKassaCreationService
 from services.payment_reconciliation import PaymentReconciler
 from services.yookassa import YooKassaClient
 
@@ -184,30 +184,33 @@ async def test_concurrent_invoice_creation_produces_one_order(ready: Any) -> Non
     assert len(await services.db.payment_history(910001)) == 1
 
 
-async def test_expired_idempotence_window_requires_review_without_new_invoice(
+async def test_expired_window_voids_the_order_and_a_new_one_gets_a_link(
     ready: Any,
 ) -> None:
-    services, provider, client = ready
-    provider.lose_first_response = True
-    with pytest.raises(BillingError):
-        await services.billing.create(910001, 1, "sbp")
-    await services.db._execute("UPDATE yookassa_creations SET retry_until=0")
-    job = await services.db.open_yookassa_creation(910001, 1, "basic")
-    with pytest.raises(CreationReviewRequired):
-        await YooKassaCreationService(services.db, client).issue(job)
-    assert len(provider.calls) == 1
-    assert (await services.db.get_yookassa_creation(job["payment_id"]))[
-        "state"
-    ] == "review"
-    assert await services.db.cancel_stale_payments(2**40) == 0
-
-
-async def test_store_change_does_not_replay_old_order(ready: Any) -> None:
     services, provider, _ = ready
     provider.lose_first_response = True
     with pytest.raises(BillingError):
         await services.billing.create(910001, 1, "sbp")
-    job = await services.db.open_yookassa_creation(910001, 1, "basic")
+    lost = await services.db.open_payment(910001)
+    assert lost is not None
+    await services.db._execute("UPDATE yookassa_creations SET retry_until=0")
+    created = await services.billing.create(910001, 1, "sbp")
+    # The first order never got a link, so nobody could have paid it.
+    assert created.payment_id != lost["payment_id"]
+    assert created.data["payment_url"]
+    assert (await services.db.get_payment(lost["payment_id"]))["status"] == "cancelled"
+    assert len(provider.calls) == 2
+
+
+async def test_store_change_voids_the_old_order_and_never_replays_it(
+    ready: Any,
+) -> None:
+    services, provider, _ = ready
+    provider.lose_first_response = True
+    with pytest.raises(BillingError):
+        await services.billing.create(910001, 1, "sbp")
+    job = await services.db.open_yookassa_creation(910001, 1, "basic", "123456")
+    assert job is not None
     other = YooKassaClient(
         "999999",
         "test_key",
@@ -215,8 +218,9 @@ async def test_store_change_does_not_replay_old_order(ready: Any) -> None:
         transport=httpx.MockTransport(provider.handle),
     )
     try:
-        with pytest.raises(CreationReviewRequired):
+        with pytest.raises(CreationVoided):
             await YooKassaCreationService(services.db, other).issue(job)
         assert len(provider.calls) == 1
     finally:
         await other.close()
+    assert (await services.db.get_payment(job["payment_id"]))["status"] == "cancelled"

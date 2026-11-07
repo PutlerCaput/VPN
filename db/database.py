@@ -805,15 +805,17 @@ class Database:
         )
 
     async def open_yookassa_creation(
-        self, telegram_id: int, months: int, tier: str
+        self, telegram_id: int, months: int, tier: str, shop_id: str
     ) -> dict[str, Any] | None:
+        """The customer's open order for this plan, if it belongs to this shop."""
         return await self._fetchone(
             "SELECT p.*, c.shop_id, c.request_body, c.receipt_mode, c.state, "
             "c.confirmation_url, c.retry_until FROM payments p "
             "JOIN yookassa_creations c ON c.payment_id = p.payment_id "
             "WHERE p.telegram_id = ? AND p.months = ? AND p.tier = ? "
-            "AND p.status = 'pending' ORDER BY p.created_at LIMIT 1",
-            (telegram_id, months, tier),
+            "AND c.shop_id = ? AND p.status = 'pending' "
+            "ORDER BY p.created_at LIMIT 1",
+            (telegram_id, months, tier, shop_id),
         )
 
     async def prepare_yookassa_creation(
@@ -831,7 +833,9 @@ class Database:
         max_pending: int,
     ) -> dict[str, Any]:
         async with self.transaction() as conn:
-            existing = await self.open_yookassa_creation(telegram_id, months, tier)
+            existing = await self.open_yookassa_creation(
+                telegram_id, months, tier, shop_id
+            )
             if existing is not None:
                 return existing
             if await self.count_pending_payments(telegram_id) >= max_pending:
@@ -1352,7 +1356,7 @@ class Database:
     async def open_payment(self, telegram_id: int) -> dict[str, Any] | None:
         """The customer's newest unpaid order with its payment page, if any."""
         return await self._fetchone(
-            "SELECT p.*, c.confirmation_url, c.state FROM payments p "
+            "SELECT p.*, c.confirmation_url, c.state, c.shop_id FROM payments p "
             "LEFT JOIN yookassa_creations c ON c.payment_id = p.payment_id "
             "WHERE p.telegram_id = ? AND p.status = 'pending' "
             "ORDER BY p.created_at DESC, p.payment_id DESC LIMIT 1",
@@ -1420,6 +1424,44 @@ class Database:
             "UPDATE payments SET status = 'cancelled' WHERE payment_id = ? "
             "AND status = 'pending' AND provider_id IS NULL",
             (payment_id,),
+        )
+
+    async def void_unissued_creation(self, payment_id: str, at: int) -> bool:
+        """Cancel an order whose checkout link was never delivered.
+
+        The link is returned only to us and reaches the customer only after it
+        is stored, so such an order cannot have been paid. A creation leased by
+        a request in flight is left alone.
+        """
+        async with self.transaction() as conn:
+            cursor = await conn.execute(
+                "UPDATE payments SET status = 'cancelled' WHERE payment_id = ? "
+                "AND status = 'pending' AND provider_id IS NULL AND EXISTS "
+                "(SELECT 1 FROM yookassa_creations c "
+                "WHERE c.payment_id = payments.payment_id AND c.state != 'ready' "
+                "AND c.confirmation_url IS NULL AND c.lease_until <= ?)",
+                (payment_id, at),
+            )
+            voided = cursor.rowcount == 1
+            if voided:
+                await conn.execute(
+                    "UPDATE yookassa_creations SET state = 'review', lease_until = 0 "
+                    "WHERE payment_id = ?",
+                    (payment_id,),
+                )
+        return voided
+
+    async def void_stuck_orders(self, at: int, shop_id: str) -> int:
+        """Cancel orders stuck before their link: in review, past their retry
+        window, or created for another YooKassa shop. Orders with a link are
+        never touched: the customer may have paid them."""
+        return await self._execute(
+            "UPDATE payments SET status = 'cancelled' WHERE status = 'pending' "
+            "AND provider_id IS NULL AND payment_id IN (SELECT c.payment_id "
+            "FROM yookassa_creations c WHERE c.state != 'ready' "
+            "AND c.confirmation_url IS NULL AND c.lease_until <= ? "
+            "AND (c.state = 'review' OR c.retry_until <= ? OR c.shop_id != ?))",
+            (at, at, shop_id),
         )
 
     async def cancel_confirmed_payment(self, payment_id: str) -> None:

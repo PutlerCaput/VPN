@@ -40,7 +40,7 @@ class JsonFormatter(logging.Formatter):
             if isinstance(value, int | float) and not isinstance(value, bool):
                 payload[key] = value
         # Fixed YooKassa codes and exception class names only, never free text.
-        for key in ("provider_code", "failure"):
+        for key in ("provider_code", "failure", "reason"):
             value = record.__dict__.get(key)
             if isinstance(value, str) and re.fullmatch(r"[A-Za-z_]{0,60}", value):
                 payload[key] = value
