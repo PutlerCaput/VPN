@@ -64,8 +64,9 @@ def check_settings(s: Any) -> bool:
     if getattr(s, "crypto_pay_token", None):
         line(
             "WARN",
-            "USDT (Crypto Pay) is on: it is not in the offer, and 259-FZ forbids "
-            "residents to take crypto for services. Turn off: --disable-usdt",
+            "USDT (Crypto Pay) is on. It is not in the offer. Whether residents may "
+            "take crypto for services under 259-FZ needs a lawyer. Turn off: "
+            "--disable-usdt",
         )
     else:
         line("OK", "USDT (Crypto Pay): off")

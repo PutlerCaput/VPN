@@ -324,6 +324,16 @@ class Settings(BaseSettings):
     # offer allows (SELLABLE_TIERS), whatever an older .env says.
     enabled_tiers_csv: str = Field("standard", validation_alias="enabled_tiers")
 
+    @field_validator("crypto_pay_token", mode="before")
+    @classmethod
+    def _blank_token_means_no_token(cls, value: object) -> object:
+        # An emptied secret file turns USDT payments off: nothing else is read.
+        if isinstance(value, str) and not value.strip():
+            return None
+        if isinstance(value, SecretStr) and not value.get_secret_value().strip():
+            return None
+        return value
+
     @field_validator("public_base_url")
     @classmethod
     def _public_base_url_is_real_https(cls, value: str) -> str:
