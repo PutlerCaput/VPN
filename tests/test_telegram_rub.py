@@ -93,6 +93,9 @@ async def test_order_is_in_kopecks_and_reused(
         "telegram",
     )
     assert (await _order(services, 3)).payment_id == first.payment_id
+    with pytest.raises(BillingError, match="too_many_pending"):
+        await _order(services, 2)
+    assert await services.db.cancel_own_payment(BUYER, first.payment_id)
     assert (await _order(services, 2)).payment_id != first.payment_id
     with pytest.raises(BillingError, match="invalid_months"):
         await services.billing.create_telegram_rub(BUYER, 12, "standard")
@@ -192,34 +195,17 @@ def _message() -> Any:
     return message
 
 
-async def test_bot_sends_a_yookassa_invoice_in_rubles(
+async def test_new_ruble_orders_never_open_a_card_checkout(
     services: Any, rub: TelegramRubPayments
 ) -> None:
-    from handlers.payments import bot_methods, create_and_show
-
-    assert "sbp" in bot_methods(services)
-    await _buyer(services)
-    message = _message()
-    await create_and_show(message, BUYER, "sbp", 4, services, AsyncMock(), "standard")
-    kwargs = message.answer_invoice.await_args.kwargs
-    assert kwargs["currency"] == "RUB"
-    assert kwargs["provider_token"] == LIVE_TOKEN
-    assert kwargs["prices"][0].amount == 99900
-    assert kwargs["payload"].startswith("yk:")
-    assert "need_email" not in kwargs  # self-employed: receipt made by YooKassa
-    assert "тестовый" not in message.answer.await_args.args[0]
-
-
-async def test_test_token_is_announced(services: Any) -> None:
+    """Rubles are SBP only: a Telegram invoice would ask for a bank card."""
     from handlers.payments import create_and_show
 
-    services.telegram_rub = TelegramRubPayments(
-        services.db, services.provisioning, 1, "381764678:TEST:100500"
-    )
     await _buyer(services)
-    message = _message()
-    await create_and_show(message, BUYER, "sbp", 1, services, AsyncMock(), "standard")
-    assert "тестовый" in message.answer.await_args.args[0]
+    message = AsyncMock()
+    await create_and_show(message, BUYER, "sbp", 4, services, AsyncMock(), "standard")
+    message.answer_invoice.assert_not_awaited()
+    assert message.answer.await_count + message.answer_photo.await_count > 0
 
 
 async def test_pre_checkout_and_success_handlers(

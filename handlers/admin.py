@@ -141,6 +141,22 @@ async def cmd_refund(
     await message.answer(REFUND_RESULTS.get(result, result))
 
 
+@router.message(Command("cancel_unpaid"), CanManage())
+async def cmd_cancel_unpaid(message: Message, services: Services) -> None:
+    """Cancel every unpaid order. A payment that still arrives is credited."""
+    count = await services.db.cancel_all_unpaid()
+    await audit(
+        services.db,
+        message.from_user.id if message.from_user else None,
+        "admin_cancel_unpaid",
+        str(count),
+    )
+    await message.answer(
+        f"🧹 Отменено неоплаченных счетов: <b>{count}</b>. Если по какому-то из "
+        "них всё же придёт оплата, бот её зачислит."
+    )
+
+
 @router.message(Command("unsuspend"), CanManage())
 async def cmd_unsuspend(
     message: Message, command: CommandObject, services: Services

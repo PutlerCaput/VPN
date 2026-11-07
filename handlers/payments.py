@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from decimal import Decimal
+from urllib.parse import urlsplit
 
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
@@ -19,12 +20,14 @@ from aiogram.types import (
     BotSubscriptionUpdated,
     BufferedInputFile,
     CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     LabeledPrice,
     Message,
     PreCheckoutQuery,
 )
 
-from config import DEFAULT_TIER, TIER_PRICES_RUB, TIERS
+from config import DEFAULT_TIER, TIER_PRICES_RUB, TIERS, savings_percent
 from keyboards.main_menu import (
     BTN_PAY,
     autorenew_cancel_kb,
@@ -49,8 +52,6 @@ from services.stars import (
     subscription_payload,
 )
 from services.telegram_rub import CHECKOUT_ERRORS as RUB_CHECKOUT_ERRORS
-from services.telegram_rub import invoice_options
-from services.telegram_rub import payload_for as rub_payload_for
 from services.telegram_rub import payment_id_from as rub_payment_id_from
 from services.yookassa import is_valid_email
 
@@ -94,16 +95,24 @@ def tiers_text(
 ) -> str:
     """Tier overview: only what the service really provides today."""
     title = METHOD_TITLES.get(method, method)
-    blocks = [f"⭐ <b>Выберите тариф</b> ({title})"]
+    blocks = [f"🛡 <b>Выберите тариф</b> ({title})"]
     for key, tier in TIERS.items():
         if key not in enabled:
             continue
-        features = "\n".join(f"• {item}" for item in tier.features)
+        features = "\n".join(f"✓ {item}" for item in tier.features)
         price = price_text(method, key, 1, rub_per_star)
-        blocks.append(f"<b>{tier.title}</b> — от {price}/мес\n{features}")
+        line = f"<b>{tier.title}</b> — {price} за месяц"
+        best = max(TIER_PRICES_RUB[key], key=lambda m: savings_percent(key, m))
+        if method == "sbp" and savings_percent(key, best) > 0:
+            per_month = round(TIER_PRICES_RUB[key][best] / best)
+            line += (
+                f"\nВыгоднее сразу на {best} мес.: ≈{per_month} ₽/мес, "
+                f"экономия {savings_percent(key, best)}%"
+            )
+        blocks.append(f"{line}\n\n{features}")
     blocks.append(
-        "Тариф действует на весь оплаченный период. Лимит устройств — условие "
-        "оферты (п. 3.4). Чем дольше период, тем выгоднее."
+        "Срок продлевается сразу после оплаты. Передумали — напишите в /paysupport, "
+        "вернём деньги за неиспользованные дни (п. 6.3 оферты)."
     )
     return "\n\n".join(blocks)
 
@@ -112,7 +121,10 @@ BILLING_ERRORS = {
     "invalid_tier": "Этот тариф недоступен. Выберите другой.",
     "offer_not_accepted": "Сначала примите оферту: нажмите /start.",
     "banned": "⛔️ Доступ заблокирован.",
-    "too_many_pending": "У вас слишком много неоплаченных счетов. Попробуйте позже.",
+    "too_many_pending": (
+        "У вас уже есть неоплаченный счёт. Оплатите его или отмените, чтобы "
+        "выбрать другой срок. Неоплаченный счёт отменяется сам через час."
+    ),
     "usdt_unavailable": "Оплата USDT временно недоступна.",
     "ruble_payments_unavailable": "Оплата через ЮKassa временно недоступна.",
     "stars_unavailable": "Оплата Telegram Stars временно недоступна.",
@@ -147,7 +159,8 @@ def bot_methods(services: Services) -> list[str]:
             continue
         if (
             method == "sbp"
-            and services.telegram_rub is None
+            # Rubles go through SBP only: the YooKassa API with the SBP method,
+            # never a Telegram invoice whose checkout asks for a bank card.
             and billing.yookassa is None
             and not (billing.allow_legacy_sbp and billing.sbp.has_real_links)
         ):
@@ -398,23 +411,6 @@ async def create_and_show(
     state: FSMContext,
     tier: str = DEFAULT_TIER,
 ) -> None:
-    if (
-        method == "sbp"
-        and services.telegram_rub is not None
-        and services.billing.yookassa is None
-    ):
-        # Fallback when no REST keys are set: the checkout opens inside Telegram.
-        try:
-            order = await services.billing.create_telegram_rub(
-                telegram_id, months, tier
-            )
-        except BillingError as exc:
-            await message.answer(
-                BILLING_ERRORS.get(exc.code, "Не удалось создать платёж.")
-            )
-            return
-        await send_rub_invoice(message, order.payment_id, order.data, services)
-        return
     try:
         payment = await services.billing.create(telegram_id, months, method, tier)
     except BillingError as exc:
@@ -422,6 +418,9 @@ async def create_and_show(
             await state.set_state(ReceiptEmailState.waiting)
             await state.update_data(method=method, months=months, tier=tier)
             await message.answer(EMAIL_PROMPT)
+            return
+        if exc.code == "too_many_pending":
+            await show_open_payment(message, telegram_id, services)
             return
         await message.answer(BILLING_ERRORS.get(exc.code, "Не удалось создать платёж."))
         return
@@ -539,49 +538,6 @@ async def send_stars_invoice(
         "Нажмите «Оплатить» в счёте выше. Подписка продлится автоматически "
         "один раз сразу после подтверждения Telegram. "
         "Вопросы по оплате: /paysupport."
-    )
-
-
-async def send_rub_invoice(
-    message: Message, payment_id: str, data: dict[str, object], services: Services
-) -> None:
-    rub = services.telegram_rub
-    amount = data.get("amount_kopecks")
-    if rub is None or not isinstance(amount, int) or amount <= 0:
-        await message.answer(BILLING_ERRORS["ruble_payments_unavailable"])
-        return
-    settings = services.settings
-    payment = await services.db.get_payment(payment_id)
-    tier = TIERS.get(str(payment["tier"])) if payment else None
-    extra = invoice_options(
-        receipt_mode=settings.yookassa_receipt_mode,
-        amount_kopecks=amount,
-        months=int(payment["months"]) if payment else 1,
-        tier_title=tier.title if tier else "",
-        vat_code=settings.yookassa_vat_code,
-        tax_system_code=settings.yookassa_tax_system_code,
-    )
-    await message.answer_invoice(
-        title=str(data["title"]),
-        description=str(data["description"]),
-        payload=rub_payload_for(payment_id),
-        currency="RUB",
-        prices=[LabeledPrice(label=str(data["label"]), amount=amount)],
-        provider_token=rub.provider_token,
-        **extra,
-    )
-    test_note = (
-        "\n\n🧪 Сейчас подключён <b>тестовый</b> магазин ЮKassa: деньги не "
-        "списываются, оплата проходит только тестовой картой."
-        if rub.test_mode
-        else ""
-    )
-    await message.answer(
-        f"Номер заказа: <code>{payment_id}</code>\n"
-        "Нажмите «Оплатить» в счёте выше: откроется оплата ЮKassa (банковская "
-        "карта, ЮMoney или SberPay). Подписка продлится автоматически один раз "
-        "сразу после подтверждения. Вопросы по оплате: /paysupport."
-        f"{test_note}"
     )
 
 
@@ -804,3 +760,74 @@ async def stars_subscription_updated(
             "⚠️ Не удалось списать звёзды за автопродление. Пополните баланс звёзд "
             "в Telegram или продлите подписку вручную в «💳 Оплата».",
         )
+
+
+def is_yookassa_page(url: str) -> bool:
+    """Only an HTTPS payment page of YooKassa/YooMoney is shown as a button."""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    host = (parts.hostname or "").lower()
+    return parts.scheme == "https" and any(
+        host == domain or host.endswith(f".{domain}")
+        for domain in ("yoomoney.ru", "yookassa.ru")
+    )
+
+
+def open_payment_kb(payment_id: str, url: str | None) -> InlineKeyboardMarkup:
+    rows = []
+    if url and is_yookassa_page(url):
+        rows.append([InlineKeyboardButton(text="💳 Оплатить через СБП", url=url)])
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="❌ Отменить счёт", callback_data=f"paycancel:{payment_id}"
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def show_open_payment(
+    message: Message, telegram_id: int, services: Services
+) -> None:
+    """One unpaid order at a time: show it with "pay" and "cancel"."""
+    order = await services.db.open_payment(telegram_id)
+    if order is None:
+        await message.answer(BILLING_ERRORS["too_many_pending"])
+        return
+    tier = TIERS.get(str(order["tier"]))
+    amount = (
+        f"{order['amount']} ⭐"
+        if order["currency"] == "XTR"
+        else f"{order['amount'] // 100} ₽"
+        if order["currency"] == "RUB"
+        else f"{order['amount'] / 100:.2f} {order['currency']}"
+    )
+    await message.answer(
+        "🧾 <b>У вас уже есть неоплаченный счёт</b>\n\n"
+        f"Тариф: <b>{tier.title if tier else order['tier']}</b>, "
+        f"срок: <b>{order['months']} мес.</b>, сумма: <b>{amount}</b>\n"
+        f"Номер: <code>{order['payment_id']}</code>\n\n"
+        "Оплатите его или отмените, чтобы выбрать другой срок. "
+        "Неоплаченный счёт отменяется сам через час.",
+        reply_markup=open_payment_kb(
+            str(order["payment_id"]), order.get("confirmation_url")
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("paycancel:"))
+async def cb_cancel_payment(callback: CallbackQuery, services: Services) -> None:
+    payment_id = (callback.data or "").removeprefix("paycancel:")
+    if not is_valid_payment_id(payment_id) or callback.from_user is None:
+        await callback.answer()
+        return
+    if not await services.db.cancel_own_payment(callback.from_user.id, payment_id):
+        await callback.answer("Счёт уже оплачен, отменён или обрабатывается.")
+        return
+    await callback.answer("Счёт отменён")
+    if isinstance(callback.message, Message):
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await show_channels(callback.message, services)

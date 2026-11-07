@@ -97,7 +97,8 @@ placeholder = "REPLACE_WITH" in (s.sbp_qr_url + s.sbp_payment_url).upper()
 menu = []
 if s.stars_enabled:
     menu.append("stars")
-if s.yookassa_in_bot and (token or rest or (s.sbp_provider == "manual" and not placeholder)):
+# Rubles are SBP only: the Telegram invoice (card form) no longer counts.
+if s.yookassa_in_bot and (rest or (s.sbp_provider == "manual" and not placeholder)):
     menu.append("yookassa")
 req = urllib.request.Request("http://127.0.0.1:8080/yookassa/webhook", data=b"{}",
                              headers={"Content-Type": "application/json"}, method="POST")

@@ -39,23 +39,69 @@ async def _status(services: Any, payment_id: str) -> str:
     return str(row["status"])
 
 
-async def test_at_most_two_open_orders(services: Any) -> None:
+async def test_one_open_order_and_the_customer_can_cancel_it(services: Any) -> None:
     await _buyer(services)
-    await services.billing.create_telegram_rub(USER, 1, "standard")
-    await services.billing.create_telegram_rub(USER, 2, "standard")
+    first = await services.billing.create_telegram_rub(USER, 1, "standard")
     with pytest.raises(BillingError, match="too_many_pending"):
-        await services.billing.create_telegram_rub(USER, 3, "standard")
+        await services.billing.create_telegram_rub(USER, 2, "standard")
+    open_order = await services.db.open_payment(USER)
+    assert open_order is not None
+    assert open_order["payment_id"] == first.payment_id
+    # Someone else's id or an already cancelled order cannot be cancelled.
+    assert not await services.db.cancel_own_payment(USER + 1, first.payment_id)
+    assert await services.db.cancel_own_payment(USER, first.payment_id)
+    assert not await services.db.cancel_own_payment(USER, first.payment_id)
+    assert await services.db.open_payment(USER) is None
+    second = await services.billing.create_telegram_rub(USER, 2, "standard")
+    assert await _status(services, second.payment_id) == "pending"
+
+
+async def test_owner_cancels_every_unpaid_order(services: Any) -> None:
+    await _buyer(services)
+    created = await services.billing.create_telegram_rub(USER, 1, "standard")
+    assert await services.db.cancel_all_unpaid() == 1
+    assert await _status(services, created.payment_id) == "cancelled"
+    assert await services.db.cancel_all_unpaid() == 0
 
 
 async def test_unpaid_order_is_cancelled_after_an_hour(services: Any) -> None:
     await _buyer(services)
     old = await services.billing.create_telegram_rub(USER, 1, "standard")
-    fresh = await services.billing.create_telegram_rub(USER, 2, "standard")
     await _age(services, old.payment_id, 2 * HOUR)
-    cancelled = await services.db.cancel_stale_payments(int(time.time()) - HOUR)
-    assert cancelled == 1
+    assert await services.db.cancel_stale_payments(int(time.time()) - HOUR) == 1
     assert await _status(services, old.payment_id) == "cancelled"
+    fresh = await services.billing.create_telegram_rub(USER, 2, "standard")
+    assert await services.db.cancel_stale_payments(int(time.time()) - HOUR) == 0
     assert await _status(services, fresh.payment_id) == "pending"
+
+
+async def test_bot_shows_the_open_order_with_pay_and_cancel(services: Any) -> None:
+    from unittest.mock import AsyncMock
+
+    from handlers.payments import cb_cancel_payment, open_payment_kb, show_open_payment
+
+    await _buyer(services)
+    created = await services.billing.create_telegram_rub(USER, 3, "standard")
+    message = AsyncMock()
+    await show_open_payment(message, USER, services)
+    text = message.answer.await_args.args[0]
+    assert "неоплаченный счёт" in text
+    assert "799 ₽" in text
+    rows = message.answer.await_args.kwargs["reply_markup"].inline_keyboard
+    assert rows[-1][0].callback_data == f"paycancel:{created.payment_id}"
+    # A YooKassa page becomes a pay button; any other link is never shown.
+    page = "https://yoomoney.ru/checkout/payments/v2/contract?orderId=1"
+    assert open_payment_kb("a" * 32, page).inline_keyboard[0][0].url == page
+    assert (
+        len(open_payment_kb("a" * 32, "https://evil.example/pay").inline_keyboard) == 1
+    )
+
+    callback = AsyncMock()
+    callback.data = f"paycancel:{created.payment_id}"
+    callback.from_user.id = USER
+    callback.message = None
+    await cb_cancel_payment(callback, services)
+    assert await _status(services, created.payment_id) == "cancelled"
 
 
 async def test_late_telegram_payment_of_cancelled_order_is_credited(

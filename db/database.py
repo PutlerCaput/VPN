@@ -1347,6 +1347,38 @@ class Database:
         )
         return int(row["n"]) if row else 0
 
+    # A YooKassa payment still being created is never cancelled here: the
+    # provider call may finish later and the reconciler would issue it.
+    async def open_payment(self, telegram_id: int) -> dict[str, Any] | None:
+        """The customer's newest unpaid order with its payment page, if any."""
+        return await self._fetchone(
+            "SELECT p.*, c.confirmation_url FROM payments p "
+            "LEFT JOIN yookassa_creations c ON c.payment_id = p.payment_id "
+            "WHERE p.telegram_id = ? AND p.status = 'pending' "
+            "ORDER BY p.created_at DESC, p.payment_id DESC LIMIT 1",
+            (telegram_id,),
+        )
+
+    async def cancel_own_payment(self, telegram_id: int, payment_id: str) -> bool:
+        """The customer drops an unpaid order. A late payment is still credited."""
+        rowcount = await self._execute(
+            "UPDATE payments SET status = 'cancelled' WHERE payment_id = ? "
+            "AND telegram_id = ? AND status = 'pending' AND "
+            "NOT EXISTS (SELECT 1 FROM yookassa_creations c "
+            "WHERE c.payment_id = payments.payment_id AND c.state != 'ready')",
+            (payment_id, telegram_id),
+        )
+        return rowcount == 1
+
+    async def cancel_all_unpaid(self) -> int:
+        """Owner command: cancel every unpaid order. Late payments still count."""
+        return await self._execute(
+            "UPDATE payments SET status = 'cancelled' WHERE status = 'pending' AND "
+            "NOT EXISTS (SELECT 1 FROM yookassa_creations c "
+            "WHERE c.payment_id = payments.payment_id AND c.state != 'ready')",
+            (),
+        )
+
     async def cancel_stale_payments(self, older_than: int) -> int:
         """Cancel unpaid orders that never reached a payment provider.
 

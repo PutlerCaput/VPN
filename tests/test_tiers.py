@@ -156,6 +156,7 @@ async def test_payment_stores_tier_and_price(services: Any) -> None:
     stored = await services.db.get_payment(payment.payment_id)
     assert stored["tier"] == "complete"
     assert stored["amount"] == 2200 * 100
+    assert await services.db.cancel_own_payment(770001, payment.payment_id)
     usdt_payment = await services.billing.create(770001, 3, "sbp", "prime")
     assert (await services.db.get_payment(usdt_payment.payment_id))[
         "amount"
