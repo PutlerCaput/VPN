@@ -22,6 +22,8 @@ from pydantic_settings import SettingsError
 from config import Settings, get_settings
 from db.database import Database, DatabaseKeyError
 from handlers import build_root_router
+from handlers.payments import PAYCHECK_LIMIT
+from handlers.profile import REVOKE_LIMITER
 from logging_setup import setup_logging
 from middlewares import BannedMiddleware, ThrottlingMiddleware
 from services.awg import AwgAgent, AwgService
@@ -169,7 +171,8 @@ def build_dispatcher(services: Services) -> Dispatcher:
     dp = Dispatcher(storage=MemoryStorage())
     dp["services"] = services
     throttling = ThrottlingMiddleware()
-    services.limiters.append(throttling.limiter)
+    # Housekeeping prunes these hourly; a limiter left out keeps every key forever.
+    services.limiters.extend((throttling.limiter, PAYCHECK_LIMIT, REVOKE_LIMITER))
     for observer in (dp.message, dp.callback_query):
         observer.outer_middleware(throttling)
         observer.outer_middleware(BannedMiddleware(services.db))
