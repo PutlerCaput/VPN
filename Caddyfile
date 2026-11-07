@@ -49,6 +49,19 @@
 		file_server
 	}
 
+	# The privacy policy must be public too (152-FZ, art. 18.1 part 2).
+	@public_privacy path /privacy /privacy.md
+	handle @public_privacy {
+		root * /srv/legal
+		rewrite * /privacy.md
+		header {
+			Content-Type "text/markdown; charset=utf-8"
+			Content-Disposition "inline; filename=politika-personalnyh-dannyh.md"
+			Cache-Control "public, max-age=3600"
+		}
+		file_server
+	}
+
 	@backend path /api/* /cryptopay/* /sbp/* /yookassa/* /telegram/* /healthz
 	handle @backend {
 		reverse_proxy {$BOT_UPSTREAM:bot:8080} {

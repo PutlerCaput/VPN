@@ -1604,6 +1604,21 @@ class Database:
             (node_username, day),
         )
 
+    async def purge_retained_records(self, now_ts: int) -> int:
+        """Retention from the privacy policy (legal/privacy.md, section 7)."""
+        year = 365 * 86400
+        removed = await self._execute(
+            "DELETE FROM support_messages WHERE created_at < ?", (now_ts - year,)
+        )
+        # Incidents and the admin audit trail: the 3-year limitation period.
+        removed += await self._execute(
+            "DELETE FROM anomalies WHERE created_at < ?", (now_ts - 3 * year,)
+        )
+        removed += await self._execute(
+            "DELETE FROM audit_log WHERE created_at < ?", (now_ts - 3 * year,)
+        )
+        return removed
+
     async def purge_traffic_days(self, before_day: str) -> int:
         return await self._execute(
             "DELETE FROM traffic_daily WHERE day < ?",

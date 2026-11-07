@@ -33,7 +33,7 @@ from config import (
     savings_percent,
     stars_price,
 )
-from handlers.legal import offer_text
+from handlers.legal import offer_text, privacy_text
 from handlers.payments import bot_methods, channel_text
 from keyboards.main_menu import channel_kb
 from services.billing import BillingError
@@ -423,6 +423,13 @@ async def referral(request: web.Request) -> web.Response:
 @routes.get("/legal/offer")
 async def legal_offer(request: web.Request) -> web.Response:
     response = web.json_response({"text": offer_text()})
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    return response
+
+
+@routes.get("/legal/privacy")
+async def legal_privacy(request: web.Request) -> web.Response:
+    response = web.json_response({"text": privacy_text()})
     response.headers["Cache-Control"] = "public, max-age=3600"
     return response
 
