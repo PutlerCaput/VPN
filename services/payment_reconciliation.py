@@ -24,8 +24,26 @@ logger = logging.getLogger(__name__)
 CheckResult = Literal["paid", "cancelled", "pending", "mismatch"]
 CHECK_LIMIT = 25
 CHECK_CONCURRENCY = 3
-CHECK_BUDGET_SECONDS = 45
-CHECK_RETRY_SECONDS = 120
+# The job runs every 15 seconds; one run never takes longer than that.
+CHECK_BUDGET_SECONDS = 12
+# Payments do not depend on provider notifications (webhooks): a customer who
+# has just paid is confirmed within seconds by this poll, so a broken
+# notification route only removes a shortcut.
+FRESH_ORDER_SECONDS = 15 * 60
+FRESH_RETRY_SECONDS = 15
+OPEN_RETRY_SECONDS = 60
+LATE_RETRY_SECONDS = 600
+CheckNowResult = Literal["paid", "pending", "cancelled", "not_found", "unavailable"]
+
+
+def retry_delay(payment: dict[str, Any], now: int) -> int:
+    """How soon the order is asked about again."""
+    if payment["status"] != "pending":
+        # Cancelled, inside the late-payment window: a rare event, check rarely.
+        return LATE_RETRY_SECONDS
+    if now - int(payment["created_at"]) < FRESH_ORDER_SECONDS:
+        return FRESH_RETRY_SECONDS
+    return OPEN_RETRY_SECONDS
 
 
 async def reconcile_yookassa(
@@ -105,6 +123,31 @@ class PaymentReconciler:
         self.yookassa = yookassa
         self.cryptopay = cryptopay
 
+    async def check_now(self, telegram_id: int, payment_id: str) -> CheckNowResult:
+        """The customer's "check payment" button: ask the provider right away."""
+        payment = await self.db.get_payment(payment_id)
+        if payment is None or int(payment["telegram_id"]) != telegram_id:
+            return "not_found"
+        if payment["status"] == "paid":
+            return "paid"
+        provider = str(payment["provider_id"] or "")
+        try:
+            if provider.startswith("yookassa:") and self.yookassa is not None:
+                await reconcile_yookassa(
+                    self.db, self.yookassa, self.provisioning, dict(payment)
+                )
+            elif provider.startswith("cryptopay:") and self.cryptopay is not None:
+                await reconcile_cryptopay(
+                    self.db, self.cryptopay, self.provisioning, dict(payment)
+                )
+        except (YooKassaError, CryptoPayError):
+            return "unavailable"
+        fresh = await self.db.get_payment(payment_id)
+        status = str(fresh["status"]) if fresh is not None else "pending"
+        if status == "paid":
+            return "paid"
+        return "cancelled" if status == "cancelled" else "pending"
+
     async def poll(self) -> None:
         if self.yookassa is None and self.cryptopay is None:
             return
@@ -133,8 +176,9 @@ class PaymentReconciler:
             async with slots:
                 # Persist before network I/O. A failing oldest invoice cannot
                 # starve the queue, even if the process is restarted.
+                now = int(time.time())
                 await self.db.schedule_payment_check(
-                    payment["payment_id"], int(time.time()) + CHECK_RETRY_SECONDS
+                    payment["payment_id"], now + retry_delay(payment, now)
                 )
                 try:
                     result: CheckResult = "pending"

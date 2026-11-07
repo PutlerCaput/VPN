@@ -43,9 +43,10 @@ from keyboards.main_menu import (
 from services.billing import BillingError
 from services.container import Services
 from services.cryptopay import is_valid_invoice_url
+from services.payment_reconciliation import PaymentReconciler
 from services.provisioning import format_date
 from services.qr import render_qr_png
-from services.security import is_valid_payment_id
+from services.security import SlidingWindowLimiter, is_valid_payment_id
 from services.stars import (
     CHECKOUT_ERRORS,
     SUBSCRIPTION_PERIOD_SECONDS,
@@ -440,7 +441,7 @@ async def create_and_show(
                 if data.get("receipt") == "fiscal"
                 else "Чек самозанятого формируется в «Мой налог» автоматически."
             ),
-            reply_markup=yookassa_payment_kb(data["payment_url"]),
+            reply_markup=yookassa_payment_kb(data["payment_url"], payment.payment_id),
         )
     elif method == "sbp":
         manual_hint = (
@@ -779,6 +780,13 @@ def open_payment_kb(payment_id: str, url: str | None) -> InlineKeyboardMarkup:
     rows = []
     if url and is_yookassa_page(url):
         rows.append([InlineKeyboardButton(text="💳 Оплатить через СБП", url=url)])
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🔄 Проверить оплату", callback_data=f"paycheck:{payment_id}"
+                )
+            ]
+        )
     rows.append(
         [
             InlineKeyboardButton(
@@ -831,3 +839,40 @@ async def cb_cancel_payment(callback: CallbackQuery, services: Services) -> None
     if isinstance(callback.message, Message):
         await callback.message.edit_reply_markup(reply_markup=None)
         await show_channels(callback.message, services)
+
+
+# A customer may press "check" a few times; the provider is asked at most
+# this often per person.
+PAYCHECK_LIMIT = SlidingWindowLimiter(6, 60)
+PAYCHECK_ANSWERS = {
+    "paid": "✅ Оплата получена, подписка продлена.",
+    "pending": (
+        "⏳ Оплата пока не поступила. Если вы уже оплатили, подождите немного: "
+        "бот пришлёт подтверждение сам."
+    ),
+    "cancelled": (
+        "Счёт отменён. Если вы всё же оплатили его, бот зачислит оплату "
+        "автоматически; вопросы — /paysupport."
+    ),
+    "not_found": "Счёт не найден.",
+    "unavailable": "Платёжный сервис не ответил. Попробуйте через минуту.",
+}
+
+
+@router.callback_query(F.data.startswith("paycheck:"))
+async def cb_check_payment(callback: CallbackQuery, services: Services) -> None:
+    payment_id = (callback.data or "").removeprefix("paycheck:")
+    if not is_valid_payment_id(payment_id) or callback.from_user is None:
+        await callback.answer()
+        return
+    if not PAYCHECK_LIMIT.hit(str(callback.from_user.id)):
+        await callback.answer("Слишком часто. Попробуйте через минуту.")
+        return
+    reconciler = PaymentReconciler(
+        services.db,
+        services.provisioning,
+        services.billing.yookassa,
+        services.cryptopay,
+    )
+    result = await reconciler.check_now(callback.from_user.id, payment_id)
+    await callback.answer(PAYCHECK_ANSWERS[result], show_alert=result != "paid")

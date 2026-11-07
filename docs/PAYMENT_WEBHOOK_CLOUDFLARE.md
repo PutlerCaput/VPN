@@ -1,5 +1,10 @@
 # Cloudflare 1010 на платёжном webhook
 
+> **Устарело 7 ноября 2026.** Уведомления ЮKassa больше не используются, а
+> Cloudflare Tunnel на RU выводится из работы: бот сам опрашивает API ЮKassa
+> каждые 15 секунд по свежим счетам. Порядок действий — в
+> [FINISH_RUNBOOK.md](FINISH_RUNBOOK.md). Текст ниже оставлен для истории.
+
 Последняя внешняя проверка GET `/` и POST `{}` на
 `https://pay.cyberdefency.com/yookassa/webhook` вернула HTTP 403 и Cloudflare
 error 1010. Это блокировка по сигнатуре клиента (Browser Integrity Check),
