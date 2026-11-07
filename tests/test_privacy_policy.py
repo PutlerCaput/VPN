@@ -36,7 +36,7 @@ async def test_usdt_remains_available_through_separate_command(services: Any) ->
     await cmd_usdt(message, services)
     keyboard = message.answer.call_args.kwargs["reply_markup"]
     assert any(
-        b.callback_data == "tier:usdt:basic"
+        b.callback_data == "tier:usdt:standard"
         for row in keyboard.inline_keyboard
         for b in row
     )

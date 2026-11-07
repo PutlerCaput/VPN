@@ -25,7 +25,7 @@ class PaymentCreateIn(StrictModel):
     months: int = Field(ge=1, le=12, strict=True)
     # Telegram Stars are sold only inside the bot, never through this API.
     method: Literal["sbp", "usdt"]
-    tier: Literal["standard", "basic", "complete", "prime"] = "basic"
+    tier: Literal["standard", "basic", "complete", "prime"] = "standard"
     # Receipt email (54-ФЗ) for YooKassa; saved to the profile when given.
     email: str | None = Field(default=None, max_length=254)
 

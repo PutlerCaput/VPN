@@ -42,7 +42,7 @@ async def test_trial_gets_the_configured_quota_and_first_tier_on_sale(
 
 async def test_default_trial_stays_unlimited(services: Any, marzban: Any) -> None:
     user = await _trial(services, 610002)
-    assert user["tier"] == "basic"
+    assert user["tier"] == "standard"
     assert marzban.users[user["node_username"]]["data_limit"] == 0
 
 
