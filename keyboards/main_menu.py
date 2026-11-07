@@ -261,10 +261,19 @@ def autorenew_cancel_kb(subscription_id: str) -> InlineKeyboardMarkup:
     )
 
 
-def yookassa_payment_kb(payment_url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="💳 Оплатить", url=payment_url)]],
-    )
+def yookassa_payment_kb(
+    payment_url: str, payment_id: str | None = None
+) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text="💳 Оплатить через СБП", url=payment_url)]]
+    if payment_id:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🔄 Проверить оплату", callback_data=f"paycheck:{payment_id}"
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def usdt_payment_kb(pay_url: str) -> InlineKeyboardMarkup:

@@ -498,7 +498,8 @@ def build_scheduler(jobs: Jobs) -> AsyncIOScheduler:
     )
     scheduler.add_job(
         _guarded("payment_reconciliation", jobs.payment_reconciliation),
-        IntervalTrigger(minutes=1, timezone=UTC),
+        # Fresh orders are re-checked every 15 s (payment_reconciliation.py).
+        IntervalTrigger(seconds=15, timezone=UTC),
         id="payment_reconciliation",
         **defaults,
     )

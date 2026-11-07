@@ -8,6 +8,9 @@
 #   bash update_bot.sh --set CONFIG_DELIVERY=subscription STARS_AUTORENEW_ENABLED=true
 #   bash update_bot.sh --set-secret TELEGRAM_PAYMENT_TOKEN   # typed hidden on the server
 #   bash update_bot.sh --payment-status                       # what can take payments now
+#   bash update_bot.sh --doctor                               # read-only check of everything
+#   bash update_bot.sh --disable-usdt                         # turn the /usdt payments off
+#   bash update_bot.sh --set-public-url https://app.example.com  # site address for links
 #
 # Optional with --apply: --env-add appends the new settings that are missing
 # from .env (STARS_ENABLED, STARS_RUB_PER_STAR, YOOKASSA_IN_BOT,
@@ -82,7 +85,7 @@ fi
 SETTABLE_KEYS="ENABLED_TIERS CONFIG_DELIVERY SUBSCRIPTION_BASE_URL MAIN_LOCATION_NAME \
 STARS_ENABLED STARS_AUTORENEW_ENABLED STARS_RUB_PER_STAR YOOKASSA_IN_BOT TRIAL_TRAFFIC_GB \
 AWG_ENABLED AWG_AGENT_URL AWG_AGENT_TOKEN TELEGRAM_PAYMENT_TOKEN \
-YOOKASSA_RECEIPT_MODE"
+YOOKASSA_RECEIPT_MODE ACTIVITY_LOGGING_ENABLED AUTOBAN_MODE"
 
 if [[ "${1:-}" == "--payment-status" ]]; then
   # Safe summary only: which payment paths are configured, never any value.
@@ -124,6 +127,92 @@ PY
   exit $?
 fi
 
+if [[ "${1:-}" == "--doctor" ]]; then
+  # Read-only: settings, payments, panel, Telegram, site and web container.
+  ok=0 warn=0 bad=0
+  report() {
+    case "$1" in OK) ok=$((ok + 1)) ;; WARN) warn=$((warn + 1)) ;; *) bad=$((bad + 1)) ;; esac
+    printf '%-4s %s\n' "$1" "$2"
+  }
+  state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$CONTAINER")"
+  [[ "$state" == healthy ]] && report OK "bot container: healthy" || report FAIL "bot container: $state"
+  checks="$(docker exec -i "$CONTAINER" python3 - <"$(dirname "$SELF")/doctor_bot.py" 2>/dev/null)" \
+    || report FAIL "checks inside the bot container did not finish"
+  while IFS= read -r row; do
+    case "$row" in OK\ * | WARN\ * | FAIL\ *) report "${row%% *}" "${row#* }" ;; esac
+  done <<<"$checks"
+
+  web="$(docker ps -a --filter label=com.docker.compose.project=node-rental-web-local \
+    --filter label=com.docker.compose.service=app-web --format '{{.Names}}' | head -n1)"
+  if [[ -z "$web" ]]; then
+    report FAIL "web container (site and Mini App) not found"
+  else
+    web_state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$web")"
+    [[ "$web_state" == healthy ]] && report OK "web container: healthy" || report FAIL "web container: $web_state"
+  fi
+
+  site="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" | sed -n 's/^PUBLIC_BASE_URL=//p' | head -n1)"
+  site="${site%/}"
+  if [[ -z "$site" ]]; then
+    report FAIL "PUBLIC_BASE_URL is not set"
+  else
+    for path in /healthz /oferta /privacy /tma/; do
+      code="$(curl --silent --max-time 10 --output /dev/null --write-out '%{http_code}' "$site$path" || true)"
+      [[ "$code" =~ ^[1-5][0-9][0-9]$ ]] || code="no answer"
+      if [[ "$code" == 200 ]]; then
+        report OK "$site$path"
+      else
+        report FAIL "$site$path: $code. Bot links (offer, privacy policy, Mini App) lead here"
+      fi
+    done
+  fi
+  say "DOCTOR: $ok ok, $warn warnings, $bad problems"
+  exit $((bad > 0 ? 1 : 0))
+fi
+
+if [[ "${1:-}" == "--set-public-url" ]]; then
+  # The bot builds the Mini App, offer and privacy links from this address, so
+  # it is switched only after the site answers there.
+  url="${2:-}"
+  url="${url%/}"
+  [[ "$url" =~ ^https://[a-z0-9-]+(\.[a-z0-9-]+)+$ ]] \
+    || fail "usage: --set-public-url https://app.cyberdefency.com"
+  for path in /healthz /oferta /privacy /tma/; do
+    code="$(curl --silent --max-time 10 --output /dev/null --write-out '%{http_code}' "$url$path" || true)"
+    [[ "$code" =~ ^[1-5][0-9][0-9]$ ]] || code="no answer"
+    [[ "$code" == 200 ]] \
+      || fail "$url$path: $code; the address is unchanged. Update the site first: bash scripts/update_web.sh <folder> --apply"
+  done
+  ALLOW_PUBLIC_URL=1
+  set -- --set "PUBLIC_BASE_URL=$url"
+fi
+
+if [[ "${1:-}" == "--disable-usdt" ]]; then
+  # USDT is not in the offer. Removing the Crypto Pay token turns the /usdt
+  # entry point off; the .env copy allows a rollback.
+  ENV_FILE="$WORKDIR/.env"
+  [[ -f "$ENV_FILE" ]] || fail "$ENV_FILE not found"
+  if ! grep -q '^CRYPTO_PAY_TOKEN=' "$ENV_FILE"; then
+    say "USDT_ALREADY_OFF"
+    exit 0
+  fi
+  ENV_BACKUP="$ENV_FILE.before-usdt-off-$STAMP"
+  cp -p "$ENV_FILE" "$ENV_BACKUP"
+  grep -v '^CRYPTO_PAY_TOKEN=' "$ENV_FILE" >"$ENV_FILE.tmp-$STAMP" || true
+  cat "$ENV_FILE.tmp-$STAMP" >"$ENV_FILE"  # keeps owner and permissions
+  rm -f "$ENV_FILE.tmp-$STAMP"
+  say "ENV_BACKUP $ENV_BACKUP"
+  recreate
+  if wait_healthy; then
+    say "USDT_OFF"
+    exit 0
+  fi
+  cp -p "$ENV_BACKUP" "$ENV_FILE"
+  recreate
+  wait_healthy && fail "bot did not start without the token; previous .env restored (healthy)" \
+    || fail "previous .env restored, but the bot is not healthy"
+fi
+
 if [[ "${1:-}" == "--set-secret" ]]; then
   # The value is typed on the server, hidden; it never appears in the chat,
   # the command line, shell history or the output.
@@ -156,10 +245,17 @@ if [[ "${1:-}" == "--set" ]]; then
   for pair in "$@"; do
     key="${pair%%=*}"
     value="${pair#*=}"
-    [[ "$pair" == *=* && " $SETTABLE_KEYS " == *" $key "* ]] \
+    [[ "$pair" == *=* && ( " $SETTABLE_KEYS " == *" $key "* \
+      || ( "$key" == PUBLIC_BASE_URL && "${ALLOW_PUBLIC_URL:-0}" == 1 ) ) ]] \
       || fail "not allowed: $key (allowed: $SETTABLE_KEYS)"
     [[ -n "$value" && "$value" != *$'\n'* && "$value" != *[\"\'\\\$\`]* ]] \
       || fail "invalid value for $key"
+    if [[ "$key" == ACTIVITY_LOGGING_ENABLED && ! "$value" =~ ^(true|false)$ ]]; then
+      fail "usage: --set ACTIVITY_LOGGING_ENABLED=false"
+    fi
+    if [[ "$key" == AUTOBAN_MODE && ! "$value" =~ ^(review|automatic)$ ]]; then
+      fail "usage: --set AUTOBAN_MODE=review"
+    fi
     if [[ "$key" == ENABLED_TIERS ]]; then
       [[ "$value" =~ ^(standard|basic|complete|prime)(,(standard|basic|complete|prime))*$ ]] \
         || fail "usage: --set ENABLED_TIERS=standard  (standard, basic, complete, prime)"
