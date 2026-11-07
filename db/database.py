@@ -19,6 +19,11 @@ from typing import Any
 import aiosqlite
 
 MINIMUM_REMINDER_PERIOD_SECONDS = 3 * 24 * 60 * 60
+# An unpaid order is cancelled after this long; a provider-bound order is
+# cancelled only once the provider confirms it is still unpaid.
+UNPAID_ORDER_TTL_SECONDS = 60 * 60
+# A cancelled order still counts as a possible late payment for this long.
+LATE_PAYMENT_WINDOW_SECONDS = 24 * 60 * 60
 
 # Kept separate so an old database can be rebuilt with the same definition:
 # SQLite cannot change CHECK constraints in place. XTR is Telegram Stars
@@ -925,7 +930,7 @@ class Database:
         """Atomically moves pending -> paid. False if already processed."""
         rowcount = await self._execute(
             "UPDATE payments SET status = 'paid', paid_at = ? "
-            "WHERE payment_id = ? AND status = 'pending'",
+            "WHERE payment_id = ? AND status IN ('pending', 'cancelled')",
             (now(), payment_id),
         )
         return rowcount == 1
@@ -1343,27 +1348,30 @@ class Database:
         return int(row["n"]) if row else 0
 
     async def cancel_stale_payments(self, older_than: int) -> int:
+        """Cancel unpaid orders that never reached a payment provider.
+
+        Provider-bound orders are not cancelled by a timer: the reconciler asks
+        the provider first, because a timer alone never proves nobody paid.
+        """
         return await self._execute(
-            "UPDATE payments SET status = 'cancelled' "
-            "WHERE status = 'pending' AND created_at < ? "
-            "AND (provider_id IS NULL OR (provider_id NOT LIKE 'yookassa:%' "
-            "AND provider_id NOT LIKE 'cryptopay:%' "
-            "AND provider_id NOT LIKE 'tgstars:%' "
-            "AND provider_id NOT LIKE 'tgyk:%')) "
+            "UPDATE payments SET status = 'cancelled' WHERE status = 'pending' "
+            "AND created_at < ? AND provider_id IS NULL "
             "AND NOT EXISTS (SELECT 1 FROM yookassa_creations c "
-            "WHERE c.payment_id = payments.payment_id)",
+            "WHERE c.payment_id = payments.payment_id AND c.state != 'ready')",
             (older_than,),
         )
 
     async def payments_to_check(self, at: int, limit: int = 25) -> list[dict[str, Any]]:
+        """Open orders, plus recently cancelled ones a late payment can still hit."""
         return await self._fetchall(
             "SELECT p.* FROM payments p LEFT JOIN payment_checks c "
-            "ON c.payment_id = p.payment_id WHERE p.status = 'pending' "
+            "ON c.payment_id = p.payment_id WHERE (p.status = 'pending' "
+            "OR (p.status = 'cancelled' AND p.paid_at IS NULL AND p.created_at >= ?)) "
             "AND (p.provider_id LIKE 'yookassa:%' OR "
             "p.provider_id LIKE 'cryptopay:%') "
             "AND (c.next_check_at IS NULL OR c.next_check_at <= ?) "
             "ORDER BY COALESCE(c.next_check_at, 0), p.created_at, p.payment_id LIMIT ?",
-            (at, limit),
+            (at - LATE_PAYMENT_WINDOW_SECONDS, at, limit),
         )
 
     async def schedule_payment_check(self, payment_id: str, at: int) -> None:

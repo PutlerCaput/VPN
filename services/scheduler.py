@@ -14,7 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from config import Settings, format_gb
-from db.database import Database
+from db.database import UNPAID_ORDER_TTL_SECONDS, Database
 from services.awg import AwgService, combined_usage
 from services.health import ServiceHealth
 from services.marzban import MarzbanClient, MarzbanError
@@ -428,7 +428,6 @@ class Jobs:
 
     async def housekeeping(self) -> None:
         current = int(time.time())
-        await self.db.cancel_stale_payments(current - 48 * 3600)
         await self.db.purge_refresh_tokens(current)
         retention = self.settings.conn_log_retention_days * 86400
         await self.db.purge_conn_logs(current - retention)
@@ -439,6 +438,9 @@ class Jobs:
             await self.stars.end_lapsed()
         for limiter in self.limiters:
             limiter.prune()
+
+    async def cancel_unpaid(self) -> None:
+        await self.db.cancel_stale_payments(int(time.time()) - UNPAID_ORDER_TTL_SECONDS)
 
     async def payment_activation_retry(self) -> None:
         await self.provisioning.retry_paid_activations()
@@ -507,6 +509,12 @@ def build_scheduler(jobs: Jobs) -> AsyncIOScheduler:
         _guarded("health_check", jobs.health_check),
         IntervalTrigger(minutes=2, timezone=UTC),
         id="health_check",
+        **defaults,
+    )
+    scheduler.add_job(
+        _guarded("cancel_unpaid", jobs.cancel_unpaid),
+        IntervalTrigger(minutes=5, timezone=UTC),
+        id="cancel_unpaid",
         **defaults,
     )
     scheduler.add_job(
