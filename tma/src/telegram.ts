@@ -51,16 +51,29 @@ export function initWebApp(): TelegramWebApp | null {
   return app;
 }
 
-const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME;
+const BOT_NAME = /^[A-Za-z0-9_]{5,32}$/;
 
-/** Payments live in the bot: the Mini App only opens the bot chat. */
-export function openBotPayment(tier?: string, months?: number): void {
-  // Deep link formats the bot understands: pay, pay_<tier>, pay_<tier>_<months>.
-  const suffix = tier && months ? `pay_${tier}_${months}` : tier ? `pay_${tier}` : "pay";
-  const url = `https://t.me/${BOT_USERNAME}?start=${suffix}`;
+// The server reports the bot's name in /me; the build-time value is only a fallback.
+let botUsername: string = import.meta.env.VITE_BOT_USERNAME ?? "";
+
+export function setBotUsername(name: string | null | undefined): void {
+  if (name && BOT_NAME.test(name)) botUsername = name;
+}
+
+/** Opens the bot chat, optionally with a /start parameter. False when the name is unknown. */
+export function openBotChat(start?: string): boolean {
+  if (!BOT_NAME.test(botUsername)) return false;
+  const url = `https://t.me/${botUsername}${start ? `?start=${encodeURIComponent(start)}` : ""}`;
   const app = getWebApp();
   if (app) app.openTelegramLink(url);
   else window.open(url, "_blank", "noopener,noreferrer");
+  return true;
+}
+
+export function notify(message: string): void {
+  const app = getWebApp();
+  if (app) app.showAlert(message);
+  else window.alert(message);
 }
 
 export function closeApp(): void {

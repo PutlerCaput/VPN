@@ -1,16 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 
 import { endpoints } from "../api/client";
 import { WhyUs } from "../components/WhyUs";
 import { ru } from "../i18n/ru";
-import { openBotPayment } from "../telegram";
+import { startPayment } from "../payments";
 import styles from "../styles/Payment.module.css";
 import ui from "../styles/components.module.css";
 
-/** Tariffs come from the API (single source of truth). Purchase happens in the bot. */
+/** Tariffs come from the API (single source of truth). The bot takes the payment. */
 export function PaymentPage() {
   const tariffs = useQuery({ queryKey: ["tariffs"], queryFn: endpoints.tariffs, staleTime: 3_600_000 });
   const tiers = tariffs.data?.tiers ?? [];
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const pay = (tier: string, months: number) => {
+    if (busy) return;
+    setBusy(`${tier}:${months}`);
+    void startPayment(tier, months).finally(() => setBusy(null));
+  };
 
   return (
     <main className={ui.page}>
@@ -46,9 +54,10 @@ export function PaymentPage() {
               <button
                 type="button"
                 className={`${ui.btn} ${ui.primary}`}
-                onClick={() => openBotPayment(tier.key, price.months)}
+                disabled={busy !== null}
+                onClick={() => pay(tier.key, price.months)}
               >
-                {ru.payment.button}
+                {busy === `${tier.key}:${price.months}` ? ru.payment.opening : ru.payment.button}
               </button>
             </div>
           ))}

@@ -5,7 +5,8 @@ import { endpoints, formatTraffic, isApiError, type Status } from "../api/client
 import { QRCode } from "../components/QRCode";
 import { ServersCard } from "../components/ServersCard";
 import { formatDate, ru } from "../i18n/ru";
-import { haptic, openBotPayment } from "../telegram";
+import { startPayment } from "../payments";
+import { haptic } from "../telegram";
 import styles from "../styles/Dashboard.module.css";
 import ui from "../styles/components.module.css";
 
@@ -34,6 +35,7 @@ export function DashboardPage() {
   const [showConfig, setShowConfig] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  const [paying, setPaying] = useState(false);
   const sub = useQuery({ queryKey: ["subscription"], queryFn: endpoints.subscription });
   const active = sub.data?.status === "active";
   const config = useQuery({
@@ -99,8 +101,16 @@ export function DashboardPage() {
         <button type="button" className={ui.btn} disabled={sub.isFetching} onClick={() => void sub.refetch()}>
           🔄 {sub.isFetching ? ru.dashboard.checking : ru.dashboard.checkStatus}
         </button>
-        <button type="button" className={`${ui.btn} ${ui.primary}`} onClick={() => openBotPayment()}>
-          💳 {active ? ru.dashboard.renew : ru.dashboard.subscribe}
+        <button
+          type="button"
+          className={`${ui.btn} ${ui.primary}`}
+          disabled={paying}
+          onClick={() => {
+            setPaying(true);
+            void startPayment().finally(() => setPaying(false));
+          }}
+        >
+          💳 {paying ? ru.payment.opening : active ? ru.dashboard.renew : ru.dashboard.subscribe}
         </button>
       </section>
 

@@ -6,6 +6,7 @@ import logging
 import time
 from typing import Any
 
+from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
 from aiohttp import web
 from pydantic import ValidationError
 
@@ -24,7 +25,7 @@ from api.middleware import (
     json_error,
     unauthorized,
 )
-from api.schemas import LogoutIn, PaymentCreateIn, RefreshIn
+from api.schemas import LogoutIn, PaymentCreateIn, PaymentInBotIn, RefreshIn
 from config import (
     TIER_PRICES_RUB,
     TIER_PRICES_USDT,
@@ -33,6 +34,8 @@ from config import (
     stars_price,
 )
 from handlers.legal import offer_text
+from handlers.payments import bot_methods, channel_text
+from keyboards.main_menu import channel_kb
 from services.billing import BillingError
 from services.marzban import MarzbanError
 from services.provisioning import ProvisioningError
@@ -322,6 +325,52 @@ async def payments_create(request: web.Request) -> web.Response:
     return web.json_response(
         {"payment_id": payment.payment_id, **payment.data}, status=201
     )
+
+
+@routes.post("/payments/in-bot")
+async def payments_in_bot(request: web.Request) -> web.Response:
+    """Mini App: the bot sends its payment menu to the user's chat.
+
+    Payments stay in the bot. A t.me deep link no longer closes the Mini App
+    (Bot API 7.0+), so the chat opened underneath it and the button looked
+    dead. The Mini App closes itself once this call succeeds.
+    """
+    services = request.app[SERVICES_KEY]
+    telegram_id = request["telegram_id"]
+    try:
+        body = PaymentInBotIn.model_validate(await request.json())
+    except (ValueError, ValidationError):
+        return json_error(400, "invalid_body")
+    tier: str | None = body.tier
+    months = body.months
+    if months is not None and tier is None:
+        tier = services.settings.default_tier
+    if tier is not None and tier not in services.settings.enabled_tiers:
+        return json_error(400, "invalid_tier")
+    if tier is not None and months is not None and months not in TIER_PRICES_RUB[tier]:
+        return json_error(400, "invalid_months")
+    if not await services.db.has_accepted_offer(telegram_id):
+        return json_error(409, "offer_not_accepted")
+    methods = bot_methods(services)
+    if not methods:
+        return json_error(503, "payments_unavailable")
+    limiter = request.app[LIMITS_KEY]["bot_message_user"]
+    if not limiter.hit(str(telegram_id)):
+        retry = str(max(1, int(limiter.retry_after(str(telegram_id))) + 1))
+        return json_error(429, "rate_limited", {"Retry-After": retry})
+    try:
+        await services.bot.send_message(
+            telegram_id,
+            channel_text(methods),
+            reply_markup=channel_kb(months, tier, methods),
+        )
+    except TelegramForbiddenError:
+        # The user never started the bot or blocked it: the deep link helps.
+        return json_error(409, "bot_unreachable")
+    except TelegramAPIError:
+        logger.warning("payment_menu_send_failed")
+        return json_error(502, "telegram_unavailable")
+    return web.json_response({"sent": True}, status=202)
 
 
 @routes.get("/payments/history")
