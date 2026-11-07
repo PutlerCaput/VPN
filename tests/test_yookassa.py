@@ -312,7 +312,9 @@ async def test_self_employed_payment_has_no_fiscal_receipt(
     body = api.created[0]
     assert "receipt" not in body
     # The description is the service name on the «Мой налог» receipt.
-    assert body["description"] == "Аренда удалённого технического узла, 1 мес."
+    assert body["description"] == (
+        "Информационно-техническая услуга «Сервис защищённого доступа», 1 мес."
+    )
     assert body["metadata"] == {"payment_id": "b" * 32}
 
 

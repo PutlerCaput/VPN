@@ -24,11 +24,14 @@ from typing import Any
 import httpx
 
 API_BASE_URL = "https://api.yookassa.ru/v3"
-RECEIPT_ITEM_DESCRIPTION = "Аренда удалённого технического узла, {months} мес."
-RECEIPT_ITEM_TIER_DESCRIPTION = (
-    "Аренда удалённого технического узла, тариф {tier}, {months} мес."
+RECEIPT_ITEM_DESCRIPTION = (
+    "Информационно-техническая услуга «Сервис защищённого доступа», {months} мес."
 )
-PAYMENT_DESCRIPTION = "Аренда узла, {months} мес. Платёж {payment_id}"
+RECEIPT_ITEM_TIER_DESCRIPTION = (
+    "Информационно-техническая услуга «Сервис защищённого доступа», "
+    "тариф {tier}, {months} мес."
+)
+PAYMENT_DESCRIPTION = "Сервис защищённого доступа, {months} мес. Платёж {payment_id}"
 
 
 def receipt_item_description(months: int, tier_title: str | None) -> str:
