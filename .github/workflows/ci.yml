@@ -8,9 +8,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   python:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     env:
       SECRETS_DIR: /nonexistent
     steps:
@@ -31,8 +36,8 @@ jobs:
         run: mypy .
       - name: Bandit
         run: bandit -r . -c pyproject.toml -q
-      - name: Dependency audit (pip-audit)
-        run: pip-audit -r requirements.txt
+      - name: Dependency audit (pip-audit, runtime + dev)
+        run: pip-audit -r requirements-dev.txt
       - name: Pytest
         run: pytest -q
       - name: Tests on SQLCipher
@@ -40,6 +45,7 @@ jobs:
 
   frontends:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     strategy:
       matrix:
         app: [pwa, tma]
@@ -62,6 +68,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     needs: [python, frontends]
     steps:
       - uses: actions/checkout@v4
