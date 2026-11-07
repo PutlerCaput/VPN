@@ -131,8 +131,9 @@ VPN-вход на RU (DNAT 443) и WireGuard/Squid для запросов к AP
 docker logs --since 30m node-rental-bot-1 2>&1 | grep yookassa_create_failed | tail -1
 ```
 
-- `HTTP 401` или `HTTP 403` — ключи ЮKassa не подходят к магазину. Проверьте
-  `YOOKASSA_SHOP_ID` и `YOOKASSA_SECRET_KEY` (боевой ключ начинается с `live_`).
+- `HTTP 401` или `HTTP 403` — ID магазина и ключ не от одного магазина, либо
+  ключ тестовый. Ключ лежит в файле `secrets/yookassa_secret_key.txt`, а не в
+  `.env`: правка `.env` его не меняет. Порядок — раздел «Ключи ЮKassa» ниже.
 - `HTTP 400 invalid_request: …` — ЮKassa не принимает запрос. Если в тексте
   есть «sbp» или «method», включите СБП: кабинет ЮKassa → Настройки → Способы
   оплаты. Текст после кода покажет точную причину.
@@ -144,3 +145,41 @@ docker logs --since 30m node-rental-bot-1 2>&1 | grep yookassa_create_failed | t
 Отклонённый ЮKassa счёт отменяется сразу, и клиент может выбрать другой срок.
 Счёт, по которому ЮKassa не ответила больше суток, отмечается «проверяется»:
 такие случаи разбираем вручную по номеру счёта в кабинете ЮKassa.
+
+## Ключи ЮKassa
+
+Ключ берётся из файла `secrets/yookassa_secret_key.txt`: это Docker Secret, и он
+важнее `.env`. ID магазина (`YOOKASSA_SHOP_ID`) хранится в `.env`. Оба значения
+должны быть от одного магазина: кабинет ЮKassa → Интеграция → Ключи API.
+
+Значения вводятся на сервере скрыто. В чат их не присылайте.
+
+```bash
+WORKDIR=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' node-rental-bot-1)
+PROJECT=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' node-rental-bot-1)
+SERVICE=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' node-rental-bot-1)
+
+( umask 077
+  read -r -p "ID магазина ЮKassa (только цифры): " SHOP
+  [[ "$SHOP" =~ ^[0-9]{3,20}$ ]] || { echo "ID магазина выглядит неверно"; exit 1; }
+  grep -v '^YOOKASSA_SHOP_ID=' "$WORKDIR/.env" > "$WORKDIR/.env.tmp"
+  printf 'YOOKASSA_SHOP_ID=%s\n' "$SHOP" >> "$WORKDIR/.env.tmp"
+  cat "$WORKDIR/.env.tmp" > "$WORKDIR/.env" && rm -f "$WORKDIR/.env.tmp"
+)
+
+( umask 077
+  read -rs -p "Боевой секретный ключ ЮKassa (live_…), ввод скрыт: " KEY; echo
+  [[ "$KEY" =~ ^(live|test)_[A-Za-z0-9_-]{20,200}$ ]] || { echo "Ключ не похож на ключ ЮKassa"; exit 1; }
+  cp -p "$WORKDIR/secrets/yookassa_secret_key.txt" "$WORKDIR/secrets/yookassa_secret_key.txt.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+  printf '%s' "$KEY" > "$WORKDIR/secrets/yookassa_secret_key.txt"
+  unset KEY
+)
+
+cd "$WORKDIR" && docker compose -p "$PROJECT" up -d --no-deps --no-build --force-recreate "$SERVICE"
+```
+
+Проверка: выполните блок из раздела «Если клиенты не могут создать оплату»
+(`HTTP 401` → проверка `/v3/me`). Ожидаем `HTTP 200`, `shop status: enabled`,
+`test shop: False`, `shop id matches: True` и `sbp` в `payment methods`. Затем
+удалите резервные копии ключа: `rm -f "$WORKDIR"/secrets/yookassa_secret_key.txt.bak-*`.
+Если в `.env` осталась строка `YOOKASSA_SECRET_KEY=`, её можно удалить: бот её не читает.
