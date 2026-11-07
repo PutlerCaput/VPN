@@ -7,6 +7,7 @@ from aiogram import F, Router
 from handlers import (
     admin,
     amnezia,
+    faq,
     legal,
     onboarding,
     payments,
@@ -31,4 +32,6 @@ def build_root_router() -> Router:
     root.include_router(amnezia.router)
     root.include_router(referral.router)
     root.include_router(support.router)
+    # Last on purpose: its catch-all fallback must see only what is left.
+    root.include_router(faq.router)
     return root
