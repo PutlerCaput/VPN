@@ -21,6 +21,10 @@ def faq_topics_kb() -> InlineKeyboardMarkup:
     ]
     rows = [buttons[i : i + _PER_ROW] for i in range(0, len(buttons), _PER_ROW)]
     rows.append(
-        [InlineKeyboardButton(text="💬 Поддержка", callback_data="support:write")]
+        [
+            InlineKeyboardButton(
+                text="✍️ Написать человеку", callback_data="support:write"
+            )
+        ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)

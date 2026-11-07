@@ -12,6 +12,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 from config import TIERS
+from keyboards.faq import faq_topics_kb
 from keyboards.main_menu import BTN_SUPPORT, main_menu_kb
 from services.container import Services
 from services.security import html_escape
@@ -24,19 +25,33 @@ class SupportState(StatesGroup):
     waiting = State()
 
 
+SUPPORT_MENU_TEXT = (
+    "💬 <b>Поддержка</b>\n\n"
+    "Выберите тему: частые вопросы разбираются сразу. Если ответа нет, нажмите "
+    "«✍️ Написать человеку» — ответит живой человек в этом чате."
+)
+
+
 @router.message(F.text == BTN_SUPPORT)
 @router.message(Command("support"))
 async def support_start(message: Message, state: FSMContext) -> None:
+    """FAQ topics first; a person is one button away."""
+    await state.clear()
+    await message.answer(SUPPORT_MENU_TEXT, reply_markup=faq_topics_kb())
+
+
+async def support_ask(message: Message, state: FSMContext) -> None:
+    """From here the user's next message goes to the owner."""
     await state.set_state(SupportState.waiting)
     await message.answer(
-        "💬 <b>Поддержка</b>\n\n"
+        "💬 <b>Напишите человеку</b>\n\n"
         "Опишите вопрос одним сообщением — ответит живой человек, прямо в этот чат.\n\n"
         "Чтобы решить быстрее, укажите:\n"
         "• для подключения — устройство, приложение, сеть и текст ошибки;\n"
         "• для оплаты — номер заказа и время.\n\n"
         "Скриншот можно приложить, закрыв личные данные. Не присылайте ссылку "
         "подключения, QR-код, пароли и ключи.\n\n"
-        "Частые вопросы — /help. Отмена — /cancel.",
+        "Отмена — /cancel.",
     )
 
 
@@ -116,7 +131,7 @@ async def support_callback(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Откройте личный чат с ботом.")
         return
     await callback.answer()
-    await support_start(callback.message, state)
+    await support_ask(callback.message, state)
 
 
 @router.message(Command("cancel"), StateFilter(SupportState.waiting))
