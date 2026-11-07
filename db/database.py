@@ -889,8 +889,20 @@ class Database:
 
     async def complete_yookassa_creation(
         self, payment_id: str, provider_id: str, confirmation_url: str | None
-    ) -> None:
+    ) -> bool:
+        """Store the checkout link of a pending creation.
+
+        Returns False if the creation is no longer pending. It was voided while
+        its request was in flight, and a voided order must never receive a link.
+        """
         async with self.transaction() as conn:
+            cursor = await conn.execute(
+                "UPDATE yookassa_creations SET state = 'ready', confirmation_url = ?, "
+                "lease_until = 0 WHERE payment_id = ? AND state = 'pending'",
+                (confirmation_url, payment_id),
+            )
+            if cursor.rowcount != 1:
+                return False
             await conn.execute(
                 "UPDATE payments SET provider_id = ? WHERE payment_id = ? "
                 "AND provider_id IS NULL",
@@ -899,11 +911,7 @@ class Database:
             saved = await self.get_payment(payment_id)
             if saved is None or saved["provider_id"] != provider_id:
                 raise RuntimeError("payment provider binding conflict")
-            await conn.execute(
-                "UPDATE yookassa_creations SET state = 'ready', confirmation_url = ?, "
-                "lease_until = 0 WHERE payment_id = ?",
-                (confirmation_url, payment_id),
-            )
+        return True
 
     async def yookassa_creations_to_retry(
         self, at: int, limit: int = 5
@@ -1369,7 +1377,7 @@ class Database:
             "UPDATE payments SET status = 'cancelled' WHERE payment_id = ? "
             "AND telegram_id = ? AND status = 'pending' AND "
             "NOT EXISTS (SELECT 1 FROM yookassa_creations c "
-            "WHERE c.payment_id = payments.payment_id AND c.state != 'ready')",
+            "WHERE c.payment_id = payments.payment_id AND c.state = 'pending')",
             (payment_id, telegram_id),
         )
         return rowcount == 1
@@ -1379,7 +1387,7 @@ class Database:
         return await self._execute(
             "UPDATE payments SET status = 'cancelled' WHERE status = 'pending' AND "
             "NOT EXISTS (SELECT 1 FROM yookassa_creations c "
-            "WHERE c.payment_id = payments.payment_id AND c.state != 'ready')",
+            "WHERE c.payment_id = payments.payment_id AND c.state = 'pending')",
             (),
         )
 
@@ -1393,7 +1401,7 @@ class Database:
             "UPDATE payments SET status = 'cancelled' WHERE status = 'pending' "
             "AND created_at < ? AND provider_id IS NULL "
             "AND NOT EXISTS (SELECT 1 FROM yookassa_creations c "
-            "WHERE c.payment_id = payments.payment_id AND c.state != 'ready')",
+            "WHERE c.payment_id = payments.payment_id AND c.state = 'pending')",
             (older_than,),
         )
 
