@@ -43,6 +43,7 @@ from keyboards.main_menu import (
 from services.billing import BillingError
 from services.container import Services
 from services.cryptopay import is_valid_invoice_url
+from services.payment_creation import CreationReviewRequired, YooKassaCreationService
 from services.payment_reconciliation import PaymentReconciler
 from services.provisioning import format_date
 from services.qr import render_qr_png
@@ -54,7 +55,7 @@ from services.stars import (
 )
 from services.telegram_rub import CHECKOUT_ERRORS as RUB_CHECKOUT_ERRORS
 from services.telegram_rub import payment_id_from as rub_payment_id_from
-from services.yookassa import is_valid_email
+from services.yookassa import YooKassaError, YooKassaRejected, is_valid_email
 
 logger = logging.getLogger(__name__)
 router = Router(name="payments")
@@ -122,6 +123,11 @@ BILLING_ERRORS = {
     "invalid_tier": "Этот тариф недоступен. Выберите другой.",
     "offer_not_accepted": "Сначала примите оферту: нажмите /start.",
     "banned": "⛔️ Доступ заблокирован.",
+    "payment_method_unavailable": (
+        "Оплата через СБП сейчас недоступна. Напишите в «💬 Поддержка», "
+        "мы поможем оплатить."
+    ),
+    "creation_review": ("Счёт проверяется. Напишите в «💬 Поддержка», мы поможем."),
     "too_many_pending": (
         "У вас уже есть неоплаченный счёт. Оплатите его или отмените, чтобы "
         "выбрать другой срок. Неоплаченный счёт отменяется сам через час."
@@ -776,31 +782,55 @@ def is_yookassa_page(url: str) -> bool:
     )
 
 
-def open_payment_kb(payment_id: str, url: str | None) -> InlineKeyboardMarkup:
-    rows = []
+def open_payment_kb(
+    payment_id: str, url: str | None, state: str | None = None
+) -> InlineKeyboardMarkup | None:
+    """Buttons for the open order. Cancel only when no checkout is in progress."""
+    if state == "review":
+        return None
     if url and is_yookassa_page(url):
-        rows.append([InlineKeyboardButton(text="💳 Оплатить через СБП", url=url)])
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="🔄 Проверить оплату", callback_data=f"paycheck:{payment_id}"
-                )
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💳 Оплатить через СБП", url=url)],
+                [
+                    InlineKeyboardButton(
+                        text="🔄 Проверить оплату",
+                        callback_data=f"paycheck:{payment_id}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="❌ Отменить счёт", callback_data=f"paycancel:{payment_id}"
+                    )
+                ],
             ]
         )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="❌ Отменить счёт", callback_data=f"paycancel:{payment_id}"
-            )
+    if state == "pending":
+        # The provider has not returned a checkout link yet: only a retry is safe.
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔄 Повторить", callback_data=f"paycreate:{payment_id}"
+                    )
+                ]
+            ]
+        )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="❌ Отменить счёт", callback_data=f"paycancel:{payment_id}"
+                )
+            ]
         ]
     )
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def show_open_payment(
     message: Message, telegram_id: int, services: Services
 ) -> None:
-    """One unpaid order at a time: show it with "pay" and "cancel"."""
+    """One unpaid order at a time: show it with the next step for it."""
     order = await services.db.open_payment(telegram_id)
     if order is None:
         await message.answer(BILLING_ERRORS["too_many_pending"])
@@ -813,16 +843,29 @@ async def show_open_payment(
         if order["currency"] == "RUB"
         else f"{order['amount'] / 100:.2f} {order['currency']}"
     )
+    state = order.get("state")
+    url = order.get("confirmation_url")
+    if state == "review":
+        hint = (
+            "Счёт проверяется. Если оплата не проходит, напишите в "
+            "«💬 Поддержка» с номером счёта."
+        )
+    elif state == "pending" and not url:
+        hint = (
+            "Ссылка на оплату ещё формируется: сервис платежей отвечает "
+            "медленно. Нажмите «🔄 Повторить»."
+        )
+    else:
+        hint = (
+            "Оплатите его или отмените, чтобы выбрать другой срок. "
+            "Неоплаченный счёт отменяется сам через час."
+        )
     await message.answer(
         "🧾 <b>У вас уже есть неоплаченный счёт</b>\n\n"
         f"Тариф: <b>{tier.title if tier else order['tier']}</b>, "
         f"срок: <b>{order['months']} мес.</b>, сумма: <b>{amount}</b>\n"
-        f"Номер: <code>{order['payment_id']}</code>\n\n"
-        "Оплатите его или отмените, чтобы выбрать другой срок. "
-        "Неоплаченный счёт отменяется сам через час.",
-        reply_markup=open_payment_kb(
-            str(order["payment_id"]), order.get("confirmation_url")
-        ),
+        f"Номер: <code>{order['payment_id']}</code>\n\n{hint}",
+        reply_markup=open_payment_kb(str(order["payment_id"]), url, state),
     )
 
 
@@ -876,3 +919,51 @@ async def cb_check_payment(callback: CallbackQuery, services: Services) -> None:
     )
     result = await reconciler.check_now(callback.from_user.id, payment_id)
     await callback.answer(PAYCHECK_ANSWERS[result], show_alert=result != "paid")
+
+
+@router.callback_query(F.data.startswith("paycreate:"))
+async def cb_retry_payment_creation(
+    callback: CallbackQuery, services: Services
+) -> None:
+    """Ask YooKassa again for the checkout link of the customer's open order."""
+    payment_id = (callback.data or "").removeprefix("paycreate:")
+    if not is_valid_payment_id(payment_id) or callback.from_user is None:
+        await callback.answer()
+        return
+    if not PAYCHECK_LIMIT.hit(str(callback.from_user.id)):
+        await callback.answer("Слишком часто. Попробуйте через минуту.")
+        return
+    order = await services.db.get_payment(payment_id)
+    yookassa = services.billing.yookassa
+    if (
+        order is None
+        or int(order["telegram_id"]) != callback.from_user.id
+        or yookassa is None
+    ):
+        await callback.answer("Счёт не найден.")
+        return
+    if order["status"] != "pending":
+        # Never create a checkout for an order that is already cancelled or paid.
+        await callback.answer("Счёт уже не активен.", show_alert=True)
+        return
+    try:
+        await YooKassaCreationService(services.db, yookassa).issue(
+            {"payment_id": payment_id}
+        )
+    except CreationReviewRequired:
+        await callback.answer(BILLING_ERRORS["creation_review"], show_alert=True)
+        return
+    except YooKassaRejected:
+        await callback.answer(
+            BILLING_ERRORS["payment_method_unavailable"], show_alert=True
+        )
+        return
+    except YooKassaError:
+        await callback.answer(
+            "Платёжный сервис пока не ответил. Попробуйте через минуту.",
+            show_alert=True,
+        )
+        return
+    await callback.answer("Ссылка на оплату готова")
+    if isinstance(callback.message, Message):
+        await show_open_payment(callback.message, callback.from_user.id, services)

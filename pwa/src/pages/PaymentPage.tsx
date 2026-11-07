@@ -6,6 +6,7 @@ import { ApiError, endpoints, type SbpPayment } from "../api/client";
 const ERRORS: Record<string, string> = {
   offer_not_accepted: "Сначала примите оферту.",
   too_many_pending: "У вас уже есть неоплаченный счёт. Оплатите его или отмените в боте; неоплаченный счёт отменяется сам через час.",
+  payment_method_unavailable: "Оплата через СБП сейчас недоступна. Напишите в поддержку бота.",
   ruble_payments_unavailable: "Оплата через ЮKassa временно недоступна.",
   payment_processing: "Заказ уже обрабатывается. Не оплачивайте повторно. Через минуту обновите статус подписки; если он не изменился, обратитесь в поддержку.",
   banned: "Доступ заблокирован.",
