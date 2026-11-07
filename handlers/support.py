@@ -146,12 +146,3 @@ async def support_forward(
         "✅ Сообщение получено. Ответим в этот чат, как только разберёмся.",
         reply_markup=main_menu_kb(),
     )
-
-
-@router.message()
-async def fallback(message: Message) -> None:
-    await message.answer(
-        "Не понял сообщение 🙂 Выберите действие в меню ниже или напишите "
-        "в «💬 Поддержка».",
-        reply_markup=main_menu_kb(),
-    )
