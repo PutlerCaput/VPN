@@ -91,7 +91,13 @@ def test_only_delivered_features_are_advertised() -> None:
 
 
 def test_enabled_tiers_setting_is_validated(settings: Settings) -> None:
-    assert settings.enabled_tiers == ["basic", "complete", "prime"]
+    assert settings.enabled_tiers == ["standard"]
+    # An older .env still lists tiers the offer no longer has: they are not sold.
+    old_env = Settings(
+        **{**settings.model_dump(), "enabled_tiers": "basic,complete,prime"}
+    )  # type: ignore[arg-type]
+    assert old_env.enabled_tiers == ["standard"]
+    assert old_env.default_tier == "standard"
     with pytest.raises(ValueError, match="enabled_tiers"):
         Settings(**{**settings.model_dump(), "enabled_tiers": "gold"})  # type: ignore[arg-type]
 
@@ -170,7 +176,7 @@ async def test_unknown_or_disabled_tier_is_rejected(services: Any) -> None:
 
 async def test_paid_tier_applies_to_the_user_and_the_panel(services: Any) -> None:
     await _paying_user(services, 770003)
-    assert (await services.db.get_user(770003))["tier"] == "basic"
+    assert (await services.db.get_user(770003))["tier"] == "standard"
     payment = await services.billing.create(770003, 1, "sbp", "complete")
     assert await services.provisioning.process_paid_payment(payment.payment_id)
     user = await services.db.get_user(770003)
@@ -242,25 +248,26 @@ async def test_api_lists_enabled_tiers_and_creates_tiered_payments(
         tiers = (await (await client.get("/api/v1/tariffs", headers=headers)).json())[
             "tiers"
         ]
-        assert [t["key"] for t in tiers] == ["basic", "complete", "prime"]
-        prime = tiers[2]
-        assert prime["devices"] == 15
-        assert prime["prices"][-1] == {
-            "months": 12,
-            "rub": 6000,
-            "usdt": "64.50",
-            "stars": None,  # Stars are off in this configuration
-            "save_percent": 29,
-        }
+        assert [t["key"] for t in tiers] == ["standard"]
+        standard = tiers[0]
+        assert standard["devices"] == 2
+        assert [p["rub"] for p in standard["prices"]] == [
+            299,
+            549,
+            799,
+            999,
+            1199,
+            1399,
+        ]
 
         await client.post("/api/v1/legal/accept", headers=headers)
         created = await client.post(
             "/api/v1/payments/create",
-            json={"months": 3, "method": "sbp", "tier": "complete"},
+            json={"months": 3, "method": "sbp", "tier": "standard"},
             headers=headers,
         )
         assert created.status == 201
-        assert (await created.json())["amount_rub"] == 1200
+        assert (await created.json())["amount_rub"] == 799
         bad = await client.post(
             "/api/v1/payments/create",
             json={"months": 3, "method": "sbp", "tier": "gold"},
@@ -268,20 +275,14 @@ async def test_api_lists_enabled_tiers_and_creates_tiered_payments(
         )
         assert bad.status == 400
 
-        services.billing.enabled_tiers = ["basic"]
-        services.settings = services.settings.model_copy(
-            update={"enabled_tiers_csv": "basic"}
-        )
-        only_basic = (
-            await (await client.get("/api/v1/tariffs", headers=headers)).json()
-        )["tiers"]
-        assert [t["key"] for t in only_basic] == ["basic"]
-        disabled = await client.post(
+        # Tiers removed from the offer are not sold, as in production.
+        services.billing.enabled_tiers = services.settings.enabled_tiers
+        archived = await client.post(
             "/api/v1/payments/create",
             json={"months": 1, "method": "sbp", "tier": "prime"},
             headers=headers,
         )
-        assert disabled.status == 400
+        assert archived.status == 400
 
 
 def test_bot_keyboards_offer_every_enabled_tier_and_fit_callback_limits() -> None:

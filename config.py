@@ -66,6 +66,9 @@ TIER_PRICES_USDT: dict[str, dict[int, Decimal]] = {
     },
 }
 DEFAULT_TIER = "basic"
+# Tiers the public offer (legal/oferta.md, clause 3) lets us sell. Other tiers stay
+# defined only for subscribers who paid for them earlier, until their period ends.
+SELLABLE_TIERS: tuple[str, ...] = ("standard",)
 
 
 GIB = 1024**3
@@ -314,11 +317,10 @@ class Settings(BaseSettings):
     referral_inviter_bonus_days: int = 15
     referral_invitee_bonus_days: int = 3
     support_username: str | None = None
-    # Comma-separated tier keys offered for sale (e.g. "basic,complete"); plain str
-    # for the same reason as cors_origins_csv. Use the ``enabled_tiers`` property.
-    enabled_tiers_csv: str = Field(
-        "basic,complete,prime", validation_alias="enabled_tiers"
-    )
+    # Comma-separated tier keys offered for sale; plain str for the same reason as
+    # cors_origins_csv. Use the ``enabled_tiers`` property: it keeps only tiers the
+    # offer allows (SELLABLE_TIERS), whatever an older .env says.
+    enabled_tiers_csv: str = Field("standard", validation_alias="enabled_tiers")
 
     @field_validator("public_base_url")
     @classmethod
@@ -494,7 +496,9 @@ class Settings(BaseSettings):
             problems.append("db_key must be 64 hex characters")
         if self.vapid_private and not self.vapid_public:
             problems.append("vapid_public is required when vapid_private is set")
-        keys = self.enabled_tiers
+        keys = [
+            k.strip().lower() for k in self.enabled_tiers_csv.split(",") if k.strip()
+        ]
         if not keys or any(key not in TIERS for key in keys):
             problems.append(f"enabled_tiers must list tiers from: {', '.join(TIERS)}")
         if self.telegram_payment_token is not None and not re.fullmatch(
@@ -547,7 +551,8 @@ class Settings(BaseSettings):
     @property
     def enabled_tiers(self) -> list[str]:
         items = (item.strip().lower() for item in self.enabled_tiers_csv.split(","))
-        return [item for item in items if item]
+        sellable = [item for item in items if item in SELLABLE_TIERS]
+        return sellable or list(SELLABLE_TIERS)
 
     @property
     def default_tier(self) -> str:
