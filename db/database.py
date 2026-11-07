@@ -1182,6 +1182,15 @@ class Database:
             (now(), before),
         )
 
+    async def end_cancelled_star_subscriptions(self, before: int) -> int:
+        """Cancelled subscriptions end once the period they paid for is used up."""
+        return await self._execute(
+            "UPDATE star_subscriptions SET status = 'ended', updated_at = ? "
+            "WHERE status = 'canceled' AND next_charge_at IS NOT NULL "
+            "AND next_charge_at < ?",
+            (now(), before),
+        )
+
     async def create_telegram_rub_order(
         self,
         *,

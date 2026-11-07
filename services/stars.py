@@ -297,16 +297,26 @@ class StarsPayments:
         """Telegram reported a subscription change (canceled/active/failed)."""
         subscription_id = subscription_id_from(payload)
         if subscription_id is None:
+            logger.warning(
+                "stars_subscription_update_unmatched", extra={"reason": "payload"}
+            )
             return None
         sub = await self.db.get_star_subscription(subscription_id)
         if sub is None or int(sub["telegram_id"]) != from_id:
+            logger.warning(
+                "stars_subscription_update_unmatched", extra={"reason": "not_found"}
+            )
             return None
         status = {"canceled": "canceled", "active": "active", "failed": "failed"}.get(
             state
         )
         if status is None:
+            logger.warning(
+                "stars_subscription_update_unmatched", extra={"reason": "state"}
+            )
             return None
         await self.db.set_star_subscription_status(subscription_id, status)
+        logger.info("stars_subscription_updated", extra={"reason": status})
         return status
 
     async def active_subscription(self, telegram_id: int) -> dict[str, Any] | None:
@@ -316,9 +326,14 @@ class StarsPayments:
         return None
 
     async def end_lapsed(self) -> int:
-        return await self.db.end_lapsed_star_subscriptions(
-            int(time.time()) - SUBSCRIPTION_GRACE_SECONDS
+        now = int(time.time())
+        # A late renewal of an active subscription gets the grace period. A
+        # cancelled one has no renewal coming: it ends as soon as the period it
+        # paid for is used up.
+        ended = await self.db.end_lapsed_star_subscriptions(
+            now - SUBSCRIPTION_GRACE_SECONDS
         )
+        return ended + await self.db.end_cancelled_star_subscriptions(now)
 
     # ---------------------------------------------------------- reconciliation
     async def _reconcile_transaction(self, tx: StarTransaction) -> bool:
