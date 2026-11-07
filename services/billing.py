@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -93,6 +95,10 @@ class BillingService:
         self.allow_legacy_sbp = allow_legacy_sbp
         # None = Telegram Stars are not sold.
         self.stars_rub_per_star = stars_rub_per_star
+        # A double tap sends two updates that are handled concurrently. Without
+        # a per-user lock both pass the open-order check and two invoices are
+        # issued, so the customer can pay twice.
+        self._locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     async def create(
         self,
@@ -100,6 +106,16 @@ class BillingService:
         months: int,
         method: str,
         tier: str = DEFAULT_TIER,
+    ) -> CreatedPayment:
+        async with self._locks[telegram_id]:
+            return await self._create(telegram_id, months, method, tier)
+
+    async def _create(
+        self,
+        telegram_id: int,
+        months: int,
+        method: str,
+        tier: str,
     ) -> CreatedPayment:
         if tier not in TIERS or (
             self.enabled_tiers is not None and tier not in self.enabled_tiers
@@ -199,6 +215,12 @@ class BillingService:
         self, telegram_id: int, months: int, tier: str
     ) -> CreatedPayment:
         """A ruble order paid inside Telegram through YooKassa (BotFather token)."""
+        async with self._locks[telegram_id]:
+            return await self._create_telegram_rub(telegram_id, months, tier)
+
+    async def _create_telegram_rub(
+        self, telegram_id: int, months: int, tier: str
+    ) -> CreatedPayment:
         if tier not in TIERS or (
             self.enabled_tiers is not None and tier not in self.enabled_tiers
         ):
@@ -263,6 +285,12 @@ class BillingService:
         Returns the subscription ID as ``payment_id``; each charge later becomes
         its own payment. The price is the tier's one-month price in stars.
         """
+        async with self._locks[telegram_id]:
+            return await self._create_stars_subscription(telegram_id, tier)
+
+    async def _create_stars_subscription(
+        self, telegram_id: int, tier: str
+    ) -> CreatedPayment:
         if self.stars_rub_per_star is None:
             raise BillingError("stars_unavailable")
         if tier not in TIERS or (
