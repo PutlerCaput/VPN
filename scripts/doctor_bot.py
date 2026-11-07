@@ -150,7 +150,10 @@ async def check_telegram(s: Any) -> None:
 
     base = f"https://api.telegram.org/bot{s.bot_token.get_secret_value()}"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(
+            timeout=10,
+            proxy=getattr(s, "telegram_proxy_url", None),
+        ) as client:
             me = (await client.get(f"{base}/getMe")).json().get("result") or {}
             name = me.get("username")
             if name == s.bot_username:
