@@ -197,10 +197,11 @@ async def test_bonus_days_keep_the_current_tier(services: Any) -> None:
 
 def test_receipt_description_names_the_tier() -> None:
     assert receipt_item_description(3, "Complete") == (
-        "Аренда удалённого технического узла, тариф Complete, 3 мес."
+        "Информационно-техническая услуга «Сервис защищённого доступа», "
+        "тариф Complete, 3 мес."
     )
     assert receipt_item_description(3, None) == (
-        "Аренда удалённого технического узла, 3 мес."
+        "Информационно-техническая услуга «Сервис защищённого доступа», 3 мес."
     )
 
 
