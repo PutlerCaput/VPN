@@ -88,8 +88,12 @@ VPN-вход на RU (DNAT 443) и WireGuard/Squid для запросов к AP
 1. Cloudflare → Zero Trust → Networks → Tunnels: удалите оба туннеля
    (старый `payments-ru` и новый).
 2. Cloudflare → `cyberdefency.com` → DNS: удалите запись `pay` (CNAME на
-   `…cfargotunnel.com`). Проверьте записи с лишним `.com` в имени (раньше
-   встречалось `app.cyberdefency.com.com`) и удалите их.
+   `…cfargotunnel.com`). Ошибочными считаются только записи, у которых `.com`
+   в полном имени стоит дважды, например `app.cyberdefency.com.com`.
+   **Не удаляйте** `app` (A → `89.125.210.172`, DNS only): на нём работают
+   Mini App, оферта и политика. Не трогайте `panel`, `sub`, корень `@`, `www`
+   и почтовые записи. Если `app` удалили, создайте её заново: тип `A`, имя
+   `app`, адрес `89.125.210.172`, Proxy status **DNS only**, TTL Auto.
 3. Кабинет ЮKassa → Интеграция → HTTP-уведомления: удалите адрес
    `https://pay.cyberdefency.com/yookassa/webhook` или снимите все события.
 
