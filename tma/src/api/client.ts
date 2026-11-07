@@ -125,8 +125,10 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response = await request(path, init, sent);
   if (response.status === 401) {
     const current = getAccessToken();
-    const refreshed = current !== null && current !== sent ? true : await refresh();
-    if (!refreshed) throw { status: 401, message: "unauthorized" } satisfies ApiError;
+    const refreshed = current !== null && current !== sent ? "ok" : await refresh();
+    // Only a rejected refresh means "logged out"; an outage stays a network error.
+    if (refreshed === "unavailable") throw { status: 0, message: "network" } satisfies ApiError;
+    if (refreshed !== "ok") throw { status: 401, message: "unauthorized" } satisfies ApiError;
     response = await request(path, init, getAccessToken());
   }
   if (!response.ok) throw await toError(response);

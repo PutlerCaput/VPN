@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 
 import { endpoints, isApiError } from "./api/client";
 import { bootstrapSession } from "./auth/initData";
@@ -17,13 +17,18 @@ import ui from "./styles/components.module.css";
 export function App() {
   const { auth, route, setAuth } = useSession();
 
+  const boot = useCallback(() => {
+    setAuth("booting");
+    void bootstrapSession().then(setAuth);
+  }, [setAuth]);
+
   useEffect(() => {
     if (!getWebApp()?.initData) {
       setAuth("outside");
       return;
     }
-    void bootstrapSession().then((ok) => setAuth(ok ? "ready" : "expired"));
-  }, [setAuth]);
+    boot();
+  }, [boot, setAuth]);
 
   const me = useQuery({ queryKey: ["me"], queryFn: endpoints.me, enabled: auth === "ready" });
 
@@ -35,6 +40,16 @@ export function App() {
 
   if (auth === "booting") return <div className={ui.center}>{ru.common.loading}</div>;
   if (auth === "outside") return <div className={ui.center}>{ru.session.outside}</div>;
+  if (auth === "offline") {
+    return (
+      <div className={ui.center}>
+        <p>{ru.session.offline}</p>
+        <button type="button" className={`${ui.btn} ${ui.primary}`} onClick={boot}>
+          {ru.common.retry}
+        </button>
+      </div>
+    );
+  }
   if (auth === "expired") {
     return (
       <div className={ui.center}>
