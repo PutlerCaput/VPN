@@ -30,6 +30,12 @@ class PaymentCreateIn(StrictModel):
     email: str | None = Field(default=None, max_length=254)
 
 
+class PaymentInBotIn(StrictModel):
+    # Payment happens in the bot chat; tier and period only pre-select its menu.
+    tier: Literal["standard", "basic", "complete", "prime"] | None = None
+    months: int | None = Field(default=None, ge=1, le=12, strict=True)
+
+
 class PushKeys(StrictModel):
     p256dh: str = Field(min_length=16, max_length=256)
     auth: str = Field(min_length=8, max_length=64)

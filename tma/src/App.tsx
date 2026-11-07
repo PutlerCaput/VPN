@@ -11,7 +11,7 @@ import { PaymentPage } from "./pages/PaymentPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { ReferralPage } from "./pages/ReferralPage";
 import { useSession } from "./store/session";
-import { closeApp, getWebApp } from "./telegram";
+import { closeApp, getWebApp, setBotUsername } from "./telegram";
 import ui from "./styles/components.module.css";
 
 export function App() {
@@ -30,6 +30,8 @@ export function App() {
   useEffect(() => {
     if (isApiError(me.error) && me.error.status === 401) setAuth("expired");
   }, [me.error, setAuth]);
+
+  useEffect(() => setBotUsername(me.data?.bot_username), [me.data?.bot_username]);
 
   if (auth === "booting") return <div className={ui.center}>{ru.common.loading}</div>;
   if (auth === "outside") return <div className={ui.center}>{ru.session.outside}</div>;

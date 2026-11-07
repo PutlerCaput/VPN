@@ -23,6 +23,8 @@ export interface Me {
   offer_accepted: boolean;
   referral_link: string;
   referral_enabled: boolean;
+  /** The bot's @name from the server settings: used for chat links. */
+  bot_username?: string;
 }
 
 export interface Subscription {
@@ -139,6 +141,12 @@ export const endpoints = {
   config: () => api<NodeConfig>("/config"),
   tariffs: () => api<{ tiers: Tier[] }>("/tariffs"),
   history: () => api<PaymentRow[]>("/payments/history"),
+  /** The bot sends its payment menu (tier/period pre-selected) to the user's chat. */
+  payInBot: (tier?: string, months?: number) =>
+    api<{ sent: boolean }>("/payments/in-bot", {
+      method: "POST",
+      body: JSON.stringify({ ...(tier ? { tier } : {}), ...(months ? { months } : {}) }),
+    }),
   referral: () => api<Referral>("/referral"),
   offer: () => api<{ text: string }>("/legal/offer"),
   accept: () => api<{ accepted: boolean; trial: string }>("/legal/accept", { method: "POST", body: "{}" }),

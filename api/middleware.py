@@ -46,6 +46,8 @@ def build_limiters() -> dict[str, SlidingWindowLimiter]:
         "public_ip": SlidingWindowLimiter(30, 60),
         "user": SlidingWindowLimiter(60, 60),
         "config_user": SlidingWindowLimiter(10, 60),
+        # Each call sends a message to the user's chat.
+        "bot_message_user": SlidingWindowLimiter(5, 60),
     }
 
 
