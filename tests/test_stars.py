@@ -107,6 +107,10 @@ async def test_order_is_priced_in_whole_stars_and_reused(
     # A repeated tap re-sends the same unpaid order instead of a new one.
     again = await _order(services, 3)
     assert again.payment_id == first.payment_id
+    # One unpaid order at a time: another plan needs the first one cancelled.
+    with pytest.raises(BillingError, match="too_many_pending"):
+        await _order(services, 2)
+    assert await services.db.cancel_own_payment(BUYER, first.payment_id)
     other = await _order(services, 2)
     assert other.payment_id != first.payment_id
 

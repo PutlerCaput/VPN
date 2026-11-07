@@ -155,10 +155,19 @@ def tariffs_kb(
                 )
             ]
         )
+    best = max(TIER_PRICES_RUB[tier], key=lambda m: savings_percent(tier, m))
     for months in sorted(TIER_PRICES_RUB[tier]):
         price = price_text(method, tier, months, rub_per_star)
         badge = savings_percent(tier, months)
-        label = f"{months} мес. — {price}" + (f" · выгода {badge}%" if badge else "")
+        label = f"{months} мес. — {price}"
+        if method == "sbp" and months > 1:
+            # Short form for narrow phone screens: price per month and the discount.
+            label += f" · {round(TIER_PRICES_RUB[tier][months] / months)} ₽/мес"
+            label += f" · −{badge}%" if badge else ""
+        elif badge:
+            label += f" · выгода {badge}%"
+        if badge and months == best:
+            label = f"🔥 {label}"
         rows.append(
             [
                 InlineKeyboardButton(

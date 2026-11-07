@@ -28,7 +28,7 @@ from services.yookassa import YooKassaClient, YooKassaError
 
 logger = logging.getLogger(__name__)
 
-MAX_PENDING_PAYMENTS = 2
+MAX_PENDING_PAYMENTS = 1
 # An unpaid Stars order of the same plan is reused for a repeated tap instead
 # of filling the pending-order limit.
 STARS_REUSE_SECONDS = 24 * 3600
