@@ -795,8 +795,6 @@ def open_payment_kb(
     payment_id: str, url: str | None, state: str | None = None
 ) -> InlineKeyboardMarkup | None:
     """Buttons for the open order. Cancel only when no checkout is in progress."""
-    if state == "review":
-        return None
     if url and is_yookassa_page(url):
         return InlineKeyboardMarkup(
             inline_keyboard=[

@@ -123,6 +123,73 @@ async def test_stuck_order_does_not_block_a_new_one(
     assert len(provider.calls) == 1
 
 
+async def test_order_voided_in_flight_never_gets_a_link(services: Any) -> None:
+    """The sweeper may void an order whose request outlived its lease. The late
+    answer must not give that order a link: the customer gets a fresh order."""
+    await _buyer(services)
+    services.settings = services.settings.model_copy(
+        update={"yookassa_shop_id": "123456"}
+    )
+    payment_ids: list[str] = []
+
+    async def late(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        payment_id = str(body["metadata"]["payment_id"])
+        if not payment_ids:
+            # The lease runs out while the first request is in flight.
+            at = int(time.time()) + 120
+            await services.db.void_unissued_creation(payment_id, at)
+        payment_ids.append(payment_id)
+        return httpx.Response(
+            200,
+            json={
+                "id": str(uuid.UUID(payment_id)),
+                "status": "pending",
+                "paid": False,
+                "amount": body["amount"],
+                "metadata": body["metadata"],
+                "confirmation": {"type": "redirect", "confirmation_url": PAGE},
+            },
+        )
+
+    client = YooKassaClient(
+        "123456",
+        "test_key",
+        return_url="https://app.test",
+        transport=httpx.MockTransport(late),
+    )
+    services.billing.yookassa = client
+    try:
+        created = await services.billing.create(USER, 1, "sbp", "standard")
+    finally:
+        await client.close()
+    first, second = payment_ids
+    assert created.data["payment_url"] == PAGE
+    assert await _status(services, first) == "cancelled"
+    row = await services.db.get_payment(first)
+    assert row is not None
+    assert row["provider_id"] is None
+    creation = await services.db.get_yookassa_creation(first)
+    assert creation is not None
+    assert creation["confirmation_url"] is None
+    assert await _status(services, second) == "pending"
+
+
+async def test_voided_creation_cannot_be_completed(services: Any) -> None:
+    await _buyer(services)
+    order_id = uuid.uuid4().hex
+    await _order(services, order_id)
+    assert await services.db.void_unissued_creation(order_id, int(time.time()))
+    assert not await services.db.complete_yookassa_creation(
+        order_id, "yookassa:late", PAGE
+    )
+    creation = await services.db.get_yookassa_creation(order_id)
+    assert creation is not None
+    assert creation["state"] == "review"
+    assert creation["confirmation_url"] is None
+    assert await _status(services, order_id) == "cancelled"
+
+
 async def test_link_of_another_shop_is_never_offered(
     services: Any, provider: Any
 ) -> None:
@@ -183,3 +250,30 @@ def test_voided_orders_are_logged_with_a_fixed_reason(
     payload = json.loads(JsonFormatter().format(record))
     assert payload["event"] == "payment_creation_voided"
     assert payload["reason"] == "retry_window"
+
+
+async def test_customer_can_cancel_an_order_under_review(services: Any) -> None:
+    await _buyer(services)
+    order_id = uuid.uuid4().hex
+    await _order(services, order_id, state="review")
+    # A draft under review never delivered a link, so nobody could have paid it.
+    assert await services.db.cancel_own_payment(USER, order_id)
+    assert await _status(services, order_id) == "cancelled"
+
+
+async def test_draft_in_flight_cannot_be_cancelled(services: Any) -> None:
+    await _buyer(services)
+    order_id = uuid.uuid4().hex
+    await _order(services, order_id, state="pending", lease_until=int(time.time()) + 60)
+    assert not await services.db.cancel_own_payment(USER, order_id)
+    assert await _status(services, order_id) == "pending"
+
+
+def test_review_card_offers_cancel_only() -> None:
+    from handlers.payments import open_payment_kb
+
+    order_id = uuid.uuid4().hex
+    keyboard = open_payment_kb(order_id, None, "review")
+    assert keyboard is not None
+    buttons = [b.callback_data for row in keyboard.inline_keyboard for b in row]
+    assert buttons == [f"paycancel:{order_id}"]

@@ -179,7 +179,7 @@ class YooKassaCreationService:
             provider_id, confirmation_url = validated_response(
                 response, body, payment_id
             )
-            await self.db.complete_yookassa_creation(
+            stored = await self.db.complete_yookassa_creation(
                 payment_id, f"yookassa:{provider_id}", confirmation_url
             )
         except YooKassaRejected:
@@ -192,4 +192,11 @@ class YooKassaCreationService:
         saved = await self.db.get_yookassa_creation(payment_id)
         if saved is None:
             raise YooKassaError("creation request disappeared")
+        if not stored and saved["state"] != "ready":
+            # Voided while this request was in flight: no link was stored, so
+            # none is shown and the order cannot be paid.
+            logger.warning(
+                "payment_creation_voided", extra={"reason": "voided_in_flight"}
+            )
+            raise CreationVoided("voided_in_flight")
         return saved
