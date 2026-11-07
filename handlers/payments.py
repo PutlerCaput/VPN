@@ -83,9 +83,8 @@ def channel_text(methods: list[str]) -> str:
         )
     if "sbp" in methods:
         lines.append(
-            "💳 <b>ЮKassa</b> — оплата в рублях. Доступные способы (банковская "
-            "карта, ЮMoney, SberPay, СБП) определяются ЮKassa и вашим банком. "
-            "Чек формируется в установленном порядке."
+            "💳 <b>Оплата через СБП</b> — откроется приложение вашего банка. "
+            "Карту вводить не нужно. Чек формируется в установленном порядке."
         )
     return "\n\n".join(lines)
 
@@ -399,8 +398,12 @@ async def create_and_show(
     state: FSMContext,
     tier: str = DEFAULT_TIER,
 ) -> None:
-    if method == "sbp" and services.telegram_rub is not None:
-        # YooKassa connected through @BotFather: the checkout opens in Telegram.
+    if (
+        method == "sbp"
+        and services.telegram_rub is not None
+        and services.billing.yookassa is None
+    ):
+        # Fallback when no REST keys are set: the checkout opens inside Telegram.
         try:
             order = await services.billing.create_telegram_rub(
                 telegram_id, months, tier
@@ -431,7 +434,7 @@ async def create_and_show(
             f"🇷🇺 <b>Оплата в рублях</b>\n\n"
             f"{plan}\nСумма: <b>{data['amount_rub']} ₽</b>\n"
             f"Номер платежа: <code>{payment.payment_id}</code>\n\n"
-            "Нажмите кнопку ниже и оплатите через СБП или картой на странице ЮKassa. "
+            "Нажмите кнопку ниже: откроется приложение банка для оплаты через СБП. "
             "Узел продлится автоматически. "
             + (
                 "Кассовый чек придёт на ваш email."

@@ -85,6 +85,7 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
             vat_code=settings.yookassa_vat_code,
             tax_system_code=settings.yookassa_tax_system_code,
             proxy_url=settings.yookassa_proxy_url,
+            payment_method="sbp",
         )
         if settings.sbp_provider == "yookassa"
         and settings.yookassa_shop_id

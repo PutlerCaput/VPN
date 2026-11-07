@@ -33,7 +33,7 @@ export function PaymentPage() {
     <main className="page">
       <h1>Оплата аренды</h1>
       <section className="card">
-        <p>Оплата в рублях через ЮKassa: СБП или банковской картой. Доступные способы указаны на странице оплаты.</p>
+        <p>Оплата через СБП: откроется приложение вашего банка. Карту вводить не нужно.</p>
       </section>
 
       {tariffs.isError && <p className="error">Не удалось загрузить тарифы. Попробуйте ещё раз.</p>}
@@ -117,11 +117,11 @@ function YooKassaInstructions({ payment }: { payment: SbpPayment }) {
     <section className="card">
       <h2>Оплата в рублях: {payment.amount_rub} ₽</h2>
       <a className="btn primary" href={payment.payment_url} target="_blank" rel="noopener noreferrer">
-        💳 Перейти к оплате (ЮKassa)
+        🏦 Оплатить через СБП
       </a>
       <p>Номер платежа: <code>{payment.payment_id}</code></p>
       <p className="small">
-        Оплатите через СБП или картой. Аренда продлится после подтверждения платежа,{" "}
+        Оплатите в приложении банка через СБП. Аренда продлится после подтверждения платежа,{" "}
         {payment.receipt === "fiscal"
           ? "кассовый чек придёт на ваш email."
           : "при подключённой интеграции чек самозанятого формируется в «Мой налог» автоматически."}

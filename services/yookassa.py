@@ -133,9 +133,14 @@ class YooKassaClient:
         timeout: float = 15.0,
         transport: httpx.AsyncBaseTransport | None = None,
         proxy_url: str | None = None,
+        payment_method: str | None = None,
     ) -> None:
         if receipt_mode not in ("self_employed", "fiscal"):
             raise ValueError("receipt_mode must be self_employed or fiscal")
+        if payment_method not in (None, "sbp"):
+            raise ValueError("payment_method must be None or sbp")
+        # "sbp": the payer goes straight to the bank app, no card form.
+        self.payment_method = payment_method
         self.shop_id = shop_id
         self.return_url = return_url
         self.receipt_mode = receipt_mode
@@ -175,6 +180,8 @@ class YooKassaClient:
             "confirmation": {"type": "redirect", "return_url": self.return_url},
             "metadata": {"payment_id": payment_id},
         }
+        if self.payment_method is not None:
+            body["payment_method_data"] = {"type": self.payment_method}
         if self.receipt_mode == "self_employed":
             # Becomes the service name on the «Мой налог» receipt.
             body["description"] = receipt_item_description(months, tier_title)

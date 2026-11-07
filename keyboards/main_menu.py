@@ -26,7 +26,7 @@ from config import (
 DEFAULT_RUB_PER_STAR = Decimal("1.60")
 CHANNEL_BUTTONS = {
     "stars": "⭐ Telegram Stars",
-    "sbp": "💳 ЮKassa: карта и другие способы",
+    "sbp": "💳 Оплата через СБП",
 }
 
 BTN_CONFIG = "🔐 Моя конфигурация"
