@@ -73,3 +73,4 @@ COPY Caddyfile /etc/caddy/Caddyfile
 COPY --from=pwa-builder /pwa/dist /srv/pwa
 COPY --from=tma-builder /tma/dist /srv/tma
 COPY legal/oferta.md /srv/legal/oferta.md
+COPY legal/privacy.md /srv/legal/privacy.md

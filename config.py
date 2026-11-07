@@ -587,6 +587,10 @@ class Settings(BaseSettings):
         return f"{self.public_base_url.rstrip('/')}/oferta"
 
     @property
+    def privacy_url(self) -> str:
+        return f"{self.public_base_url.rstrip('/')}/privacy"
+
+    @property
     def yookassa_return(self) -> str:
         return self.yookassa_return_url or f"https://t.me/{self.bot_username}"
 

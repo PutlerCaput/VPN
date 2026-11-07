@@ -14,7 +14,14 @@ export function LegalPage({ accepted }: { accepted: boolean }) {
   const queryClient = useQueryClient();
   const navigate = useSession((s) => s.navigate);
   const [adult, setAdult] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
   const offer = useQuery({ queryKey: ["offer"], queryFn: endpoints.offer, staleTime: Infinity });
+  const privacy = useQuery({
+    queryKey: ["privacy"],
+    queryFn: endpoints.privacy,
+    staleTime: Infinity,
+    enabled: showPrivacy,
+  });
   const accept = useMutation({
     mutationFn: endpoints.accept,
     onSuccess: async () => {
@@ -41,6 +48,18 @@ export function LegalPage({ accepted }: { accepted: boolean }) {
       <section className={`${ui.card} ${styles.offer}`}>
         {offer.isLoading && <p className={ui.muted}>{ru.common.loading}</p>}
         {offer.data && <Markdown text={offer.data.text} />}
+      </section>
+      <section className={ui.card}>
+        <button type="button" className={ui.btn} onClick={() => setShowPrivacy((v) => !v)}>
+          🔒 {showPrivacy ? ru.legal.privacyHide : ru.legal.privacyShow}
+        </button>
+        {showPrivacy && privacy.isLoading && <p className={ui.muted}>{ru.common.loading}</p>}
+        {showPrivacy && privacy.isError && <p className={ui.error}>{ru.common.error}</p>}
+        {showPrivacy && privacy.data && (
+          <div className={styles.offer}>
+            <Markdown text={privacy.data.text} />
+          </div>
+        )}
       </section>
       {accepted ? (
         <button type="button" className={ui.btn} onClick={() => navigate("profile")}>

@@ -26,7 +26,13 @@ TOKENS_KEY = web.AppKey("tokens", TokenService)
 LIMITS_KEY = web.AppKey("limits", dict)
 
 PUBLIC_PATHS = frozenset(
-    {"/auth/telegram", "/auth/refresh", "/legal/offer", "/push/vapid-key"}
+    {
+        "/auth/telegram",
+        "/auth/refresh",
+        "/legal/offer",
+        "/legal/privacy",
+        "/push/vapid-key",
+    }
 )
 BANNED_ALLOWED = frozenset({"/me", "/auth/logout"})
 

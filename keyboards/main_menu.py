@@ -59,6 +59,14 @@ def accept_offer_kb(full_offer_url: str | None = None) -> InlineKeyboardMarkup:
             )
         ]
     )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="🔒 Политика обработки персональных данных",
+                callback_data="privacy:full",
+            )
+        ]
+    )
     if full_offer_url:
         rows.append(
             [InlineKeyboardButton(text="🌐 Оферта на сайте", url=full_offer_url)]

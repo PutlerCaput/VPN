@@ -435,6 +435,7 @@ class Jobs:
         await self.db.purge_conn_logs(current - retention)
         cutoff = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%d")
         await self.db.purge_traffic_days(cutoff)
+        await self.db.purge_retained_records(current)
         await self.db.purge_traffic_notices(current - TRAFFIC_NOTICE_RETENTION_SECONDS)
         if self.stars is not None:
             await self.stars.end_lapsed()

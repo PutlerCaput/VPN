@@ -149,6 +149,7 @@ export const endpoints = {
     }),
   referral: () => api<Referral>("/referral"),
   offer: () => api<{ text: string }>("/legal/offer"),
+  privacy: () => api<{ text: string }>("/legal/privacy"),
   accept: () => api<{ accepted: boolean; trial: string }>("/legal/accept", { method: "POST", body: "{}" }),
   logout: () => api<void>("/auth/logout", { method: "POST", body: "{}" }),
 };

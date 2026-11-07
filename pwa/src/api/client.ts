@@ -208,6 +208,7 @@ export const endpoints = {
   history: () => api<PaymentRow[]>("/payments/history"),
   referral: () => api<Referral>("/referral"),
   offer: () => api<{ text: string }>("/legal/offer"),
+  privacy: () => api<{ text: string }>("/legal/privacy"),
   acceptOffer: () => api<{ accepted: boolean; trial: string; expires_at: number | null }>("/legal/accept", { method: "POST" }),
   vapidKey: () => api<{ public_key: string }>("/push/vapid-key"),
   pushSubscribe: (subscription: PushSubscriptionJSON) =>
