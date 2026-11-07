@@ -17,7 +17,7 @@ from config import Settings, format_gb
 from db.database import UNPAID_ORDER_TTL_SECONDS, Database
 from services.awg import AwgService, combined_usage
 from services.health import ServiceHealth
-from services.marzban import MarzbanClient, MarzbanError
+from services.marzban import MarzbanClient
 from services.metrics import ACTIVE_USERS, JOB_FAILURES
 from services.notifier import Notifier
 from services.payment_reconciliation import PaymentReconciler
@@ -192,6 +192,9 @@ class AnomalyMonitor:
             if used < baseline:  # counter reset in the panel
                 baseline = used
                 previous = used
+            elif used == previous and record.get("last_online_at") == online_at:
+                # Most users are idle between polls: skip a write that changes nothing.
+                return 0, max(0, used - baseline) / GB
         await self.db.upsert_traffic_day(
             node,
             day,
@@ -372,7 +375,9 @@ class Jobs:
         for user in await self.db.users_to_expire(int(time.time())):
             try:
                 await self.provisioning.expire_user(user)
-            except MarzbanError:
+            except Exception:
+                # Any failure, not only Marzban's, must not hold back the users
+                # after this one: the next run retries it.
                 logger.exception(
                     "expire_failed", extra={"telegram_id": user["telegram_id"]}
                 )
@@ -381,33 +386,41 @@ class Jobs:
         current = int(time.time())
         reminder_deadline = current + SUBSCRIPTION_REMINDER_LEAD_SECONDS
         for user in await self.db.users_to_remind(current, reminder_deadline):
-            telegram_id = int(user["telegram_id"])
-            expires = int(user["expires_at"])
-            renewing = (
-                self.stars is not None
-                and (sub := await self.stars.active_subscription(telegram_id))
-                is not None
-                and sub["status"] == "active"
-            )
-            text = (
-                f"⏰ Оплаченный срок заканчивается <b>{format_date(expires)}</b>. "
-                "Автопродление через Telegram Stars включено: подписка продлится "
-                "сама, если на балансе хватит звёзд. Отключить: /autorenew."
-                if renewing
-                else f"⏰ Подписка заканчивается <b>{format_date(expires)}</b>.\n\n"
-                "Продлите заранее в разделе «💳 Оплата»: новый срок добавится к "
-                "текущему, ни один оплаченный день не пропадёт, а защита не "
-                "прервётся. Оплата через СБП занимает меньше минуты."
-            )
-            delivered = await self.notifier.notify(
-                telegram_id,
-                text,
-                push_title="Подписка скоро закончится",
-                push_body=f"Подписка активна до {format_date(expires)}",
-                url="/#/pay",
-            )
-            if delivered:
-                await self.db.mark_reminded(telegram_id, expires)
+            try:
+                await self._remind(user)
+            except Exception:
+                # Not marked as reminded, so the next run retries this user.
+                logger.exception(
+                    "expiry_reminder_failed", extra={"telegram_id": user["telegram_id"]}
+                )
+
+    async def _remind(self, user: dict[str, Any]) -> None:
+        telegram_id = int(user["telegram_id"])
+        expires = int(user["expires_at"])
+        renewing = (
+            self.stars is not None
+            and (sub := await self.stars.active_subscription(telegram_id)) is not None
+            and sub["status"] == "active"
+        )
+        text = (
+            f"⏰ Оплаченный срок заканчивается <b>{format_date(expires)}</b>. "
+            "Автопродление через Telegram Stars включено: подписка продлится "
+            "сама, если на балансе хватит звёзд. Отключить: /autorenew."
+            if renewing
+            else f"⏰ Подписка заканчивается <b>{format_date(expires)}</b>.\n\n"
+            "Продлите заранее в разделе «💳 Оплата»: новый срок добавится к "
+            "текущему, ни один оплаченный день не пропадёт, а защита не "
+            "прервётся. Оплата через СБП занимает меньше минуты."
+        )
+        delivered = await self.notifier.notify(
+            telegram_id,
+            text,
+            push_title="Подписка скоро закончится",
+            push_body=f"Подписка активна до {format_date(expires)}",
+            url="/#/pay",
+        )
+        if delivered:
+            await self.db.mark_reminded(telegram_id, expires)
 
     async def payment_reconciliation(self) -> None:
         if self.payment_reconciler is not None:
