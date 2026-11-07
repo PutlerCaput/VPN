@@ -183,3 +183,27 @@ cd "$WORKDIR" && docker compose -p "$PROJECT" up -d --no-deps --no-build --force
 `test shop: False`, `shop id matches: True` и `sbp` в `payment methods`. Затем
 удалите резервные копии ключа: `rm -f "$WORKDIR"/secrets/yookassa_secret_key.txt.bak-*`.
 Если в `.env` осталась строка `YOOKASSA_SECRET_KEY=`, её можно удалить: бот её не читает.
+
+## Очистка сервера
+
+Удаляется мусор: старые образы Docker, копии баз и секретов от обновлений,
+старые папки поставки, кэш сборки, журнал системы старше 14 дней. В базе
+удаляются только технические строки оконченных заказов (черновики и проверки
+ЮKassa). Платежи, согласия на оферту, журналы аудита, зашифрованные копии
+`backup.sh` и текущий ключ не трогаются. Перед удалением из базы делается
+проверенная копия.
+
+Порядок:
+
+1. Обновите бота: в нём есть инструменты очистки.
+   `cd /root/vpn-src && git pull --ff-only && bash scripts/update_bot.sh "$PWD" --apply`
+2. Отчёт без изменений: `bash scripts/server_cleanup.sh`. Прочитайте список.
+3. Удаление: `bash scripts/server_cleanup.sh --apply`.
+4. Проверка: `bash scripts/update_bot.sh --doctor` (ожидаем `0 problems`).
+
+Как читать отчёт базы (строки `rows`, `technical`, `housekeeping backlog`):
+
+- `reclaimable bytes` — место, которое вернёт `VACUUM`.
+- `technical, removed by clean` — строки, которые удалит `--apply`.
+- `housekeeping backlog` — строки, которые бот удаляет сам раз в час. Большое
+  число означает, что задача очистки в боте не работает: см. журнал бота.

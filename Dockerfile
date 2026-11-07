@@ -28,6 +28,7 @@ COPY --chown=1000:1000 api ./api
 COPY --chown=1000:1000 keyboards ./keyboards
 COPY --chown=1000:1000 legal ./legal
 COPY --chown=1000:1000 scripts/db_tool.py ./scripts/db_tool.py
+COPY --chown=1000:1000 scripts/db_maintenance.py ./scripts/db_maintenance.py
 RUN mkdir -p /app/data /app/logs && chown 1000:1000 /app/data /app/logs
 USER 1000:1000
 EXPOSE 8080
