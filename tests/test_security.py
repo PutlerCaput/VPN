@@ -10,7 +10,7 @@ from services.security import (
     html_escape,
     is_valid_node_username,
     is_valid_payment_id,
-    node_username_for,
+    pseudonymous_node_username,
     sanitize_username,
     verify_hmac_sha256,
 )
@@ -35,13 +35,33 @@ def test_sanitize_username(raw: str | None, expected: str | None) -> None:
 
 
 def test_node_username() -> None:
-    assert node_username_for(123456789) == "u123456789"
-    assert is_valid_node_username("u12345")
+    name = pseudonymous_node_username("s" * 64, 123456789)
+    assert len(name) == 21
+    assert name[0] == "n"
+    assert all(ch in "0123456789abcdef" for ch in name[1:])
+    assert "123456789" not in name
+    assert name == pseudonymous_node_username("s" * 64, 123456789)
+    assert name != pseudonymous_node_username("t" * 64, 123456789)
+    assert name != pseudonymous_node_username("s" * 64, 123456780)
+    assert is_valid_node_username(name)
+    assert is_valid_node_username("u12345")  # accounts made before the change
     assert not is_valid_node_username("u1234")
+    assert not is_valid_node_username("n" + "a" * 19)
     assert not is_valid_node_username("admin")
     assert not is_valid_node_username("u12345/../x")
-    with pytest.raises(ValueError, match="invalid"):
-        node_username_for(12)
+    with pytest.raises(ValueError, match="positive"):
+        pseudonymous_node_username("s" * 64, 0)
+
+
+def test_abuse_report_accepts_both_name_formats() -> None:
+    from pydantic import ValidationError
+
+    from api.schemas import AbuseReportIn
+
+    AbuseReportIn(node_username="u12345", kinds=["PORT_SCANNING"])
+    AbuseReportIn(node_username="n" + "a" * 20, kinds=["PORT_SCANNING"])
+    with pytest.raises(ValidationError):
+        AbuseReportIn(node_username="n" + "a" * 19, kinds=["PORT_SCANNING"])
 
 
 def test_payment_id() -> None:

@@ -71,9 +71,10 @@ async def test_review_mode_does_not_disable_high_confidence_user(services: Any) 
     services.settings.autoban_mode = "review"
     await services.db.create_user(987655, "ordinary", None)
     await services.provisioning.accept_offer_and_start_trial(987655)
-    assert not await services.monitor.handle_report("u987655", {"CYBERCRIME"}, {})
+    node = (await services.db.get_user(987655))["node_username"]
+    assert not await services.monitor.handle_report(node, {"CYBERCRIME"}, {})
     assert (await services.db.get_user(987655))["status"] == "active"
-    assert services.marzban.users["u987655"]["status"] == "active"
+    assert services.marzban.users[node]["status"] == "active"
     assert await services.db.list_anomalies(987655) == []
 
 
@@ -84,11 +85,12 @@ async def test_unconfirmed_ban_does_not_create_completed_evidence(
 
     await services.db.create_user(987656, "ordinary", None)
     await services.provisioning.accept_offer_and_start_trial(987656)
+    node = (await services.db.get_user(987656))["node_username"]
     services.marzban.fail_disable_once = MarzbanError("unavailable")
-    assert not await services.provisioning.autoban(987656, "u987656", "flags", {})
+    assert not await services.provisioning.autoban(987656, node, "flags", {})
     assert await services.db.list_anomalies(987656) == []
     assert await services.db.get_pending_ban(987656) is not None
-    assert await services.provisioning.autoban(987656, "u987656", "flags", {})
+    assert await services.provisioning.autoban(987656, node, "flags", {})
     rows = await services.db.list_anomalies(987656)
     assert [r["kind"] for r in rows] == ["AUTOBAN"]
 

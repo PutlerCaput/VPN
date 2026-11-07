@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
+from services.security import NODE_USERNAME_PATTERN
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_max_length=4096)
@@ -53,7 +55,7 @@ class PushUnsubscribeIn(BaseModel):
 
 
 class AbuseReportIn(StrictModel):
-    node_username: str = Field(pattern=r"^u\d{5,20}$")
+    node_username: str = Field(pattern=NODE_USERNAME_PATTERN)
     kinds: list[str] = Field(min_length=1, max_length=10)
     source: str = Field(default="ids", max_length=64)
     detail: str | None = Field(default=None, max_length=1000)

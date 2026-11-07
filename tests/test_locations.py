@@ -57,11 +57,12 @@ async def test_trial_and_config_use_the_subscription_link(
     _subscription_mode(services)
     await services.db.create_user(720001, "user", None)
     result = await services.provisioning.accept_offer_and_start_trial(720001)
-    assert result.config_link == f"{SUB_BASE}/sub/u720001"
+    node = (await services.db.get_user(720001))["node_username"]
+    assert result.config_link == f"{SUB_BASE}/sub/{node}"
     assert await services.provisioning.fresh_config(720001) == result.config_link
     # Resetting the link changes the subscription token too.
     new = await services.provisioning.revoke_link(720001)
-    assert new.startswith(f"{SUB_BASE}/sub/u720001")
+    assert new.startswith(f"{SUB_BASE}/sub/{node}")
     assert new != result.config_link
 
 

@@ -31,12 +31,15 @@ async def test_trial_requires_user_and_is_single_use(
     assert result.config_link.startswith("vless://")
     user = await db.get_user(100001)
     assert user["status"] == "active"
-    assert user["node_username"] == "u100001"
+    name = user["node_username"]
+    assert name.startswith("n")
+    assert len(name) == 21
+    assert "100001" not in name
     assert 86000 < user["expires_at"] - time.time() <= 86400
     assert await db.has_accepted_offer(100001)
     again = await provisioning.accept_offer_and_start_trial(100001)
     assert again.reason == "already_used"
-    assert [c for c in marzban.calls if c[0] == "create"] == [("create", "u100001")]
+    assert [c for c in marzban.calls if c[0] == "create"] == [("create", name)]
 
 
 async def test_payment_is_idempotent_and_extends(
@@ -75,7 +78,8 @@ async def test_paid_payment_retries_without_extending_twice(
         method="sbp",
     )
 
-    marzban.fail_modify_once["u210002"] = MarzbanError("temporary panel outage")
+    node = (await db.get_user(210002))["node_username"]
+    marzban.fail_modify_once[node] = MarzbanError("temporary panel outage")
     assert await provisioning.process_paid_payment(payment_id)
     activation = await db.get_payment_activation(payment_id)
     assert activation["status"] == "pending"
@@ -168,7 +172,8 @@ async def test_referral_bonus_retries_each_side_without_duplicate_days(
 
     # The payment itself provisions the invitee; fail only the inviter's
     # separate reward so the retry ledger must resume that side alone.
-    marzban.fail_modify_once["u310003"] = MarzbanError("temporary panel outage")
+    inviter_node = (await db.get_user(310003))["node_username"]
+    marzban.fail_modify_once[inviter_node] = MarzbanError("temporary panel outage")
     assert await provisioning.process_paid_payment("f" * 32)
     job = await db.get_referral_bonus_job(310004)
     assert job["status"] == "pending"
@@ -232,14 +237,15 @@ async def test_expiration_target_keeps_suspended_user_disabled(
     await _register(db, 330003)
     await provisioning.accept_offer_and_start_trial(330003)
     await db.set_user_status(330003, "suspended")
-    marzban.users["u330003"]["status"] = "disabled"
+    node = (await db.get_user(330003))["node_username"]
+    marzban.users[node]["status"] = "disabled"
 
     async with provisioning._lock(330003):
         await provisioning._apply_expiration_target(
             330003, int(time.time()) + 60 * 86400
         )
 
-    assert marzban.users["u330003"]["status"] == "disabled"
+    assert marzban.users[node]["status"] == "disabled"
     assert (await db.get_user(330003))["status"] == "suspended"
 
 
@@ -248,9 +254,10 @@ async def test_autoban_from_flags(
 ) -> None:
     await _register(db, 400004)
     await services.provisioning.accept_offer_and_start_trial(400004)
+    node = (await db.get_user(400004))["node_username"]
     marzban.panel_usage = [
         {
-            "username": "u400004",
+            "username": node,
             "status": "active",
             "used_traffic": 10,
             "note": "ids: PORT_SCANNING MALICIOUS_PROBE",
@@ -259,7 +266,7 @@ async def test_autoban_from_flags(
     await services.monitor.poll()
     user = await db.get_user(400004)
     assert user["status"] == "banned"
-    assert marzban.users["u400004"]["status"] == "disabled"
+    assert marzban.users[node]["status"] == "disabled"
     anomalies = await db.list_anomalies(400004)
     assert anomalies[0]["kind"] == "AUTOBAN"
     assert (400004, AUTOBAN_TEXT) in notifier.messages
@@ -270,40 +277,43 @@ async def test_autoban_remains_pending_until_marzban_confirms_disable(
 ) -> None:
     await _register(db, 410004)
     await provisioning.accept_offer_and_start_trial(410004)
+    node = (await db.get_user(410004))["node_username"]
     marzban.fail_disable_once = MarzbanError("temporary panel outage")
 
     assert not await provisioning.autoban(
-        410004, "u410004", "admin", {"flags": ["CONFIRMED_ABUSE"]}
+        410004, node, "admin", {"flags": ["CONFIRMED_ABUSE"]}
     )
     user = await db.get_user(410004)
     assert user["status"] == "active"
     pending = await db.get_pending_ban(410004)
     assert pending is not None
     assert pending["attempts"] == 1
-    assert marzban.users["u410004"]["status"] == "active"
+    assert marzban.users[node]["status"] == "active"
 
     await provisioning.retry_pending_bans()
     user = await db.get_user(410004)
     assert user["status"] == "banned"
     assert await db.get_pending_ban(410004) is None
-    assert marzban.users["u410004"]["status"] == "disabled"
+    assert marzban.users[node]["status"] == "disabled"
 
 
 async def test_autoban_on_traffic_and_soft_suspend(
     services: Any, db: Database, marzban: FakeMarzban
 ) -> None:
     gb = 1024**3
+    names: dict[int, str] = {}
     for tid in (500005, 500006):
         await _register(db, tid)
         await services.provisioning.accept_offer_and_start_trial(tid)
+        names[tid] = (await db.get_user(tid))["node_username"]
     marzban.panel_usage = [
-        {"username": "u500005", "status": "active", "used_traffic": 0},
-        {"username": "u500006", "status": "active", "used_traffic": 0},
+        {"username": names[500005], "status": "active", "used_traffic": 0},
+        {"username": names[500006], "status": "active", "used_traffic": 0},
     ]
     await services.monitor.poll()  # establishes today's baseline
     marzban.panel_usage = [
-        {"username": "u500005", "status": "active", "used_traffic": 2100 * gb},
-        {"username": "u500006", "status": "active", "used_traffic": 900 * gb},
+        {"username": names[500005], "status": "active", "used_traffic": 2100 * gb},
+        {"username": names[500006], "status": "active", "used_traffic": 900 * gb},
     ]
     await services.monitor.poll()
     assert (await db.get_user(500005))["status"] == "banned"
@@ -317,13 +327,14 @@ async def test_expire_user(
 ) -> None:
     await _register(db, 600006)
     await provisioning.accept_offer_and_start_trial(600006)
+    node = (await db.get_user(600006))["node_username"]
     await db.set_subscription(
-        600006, status="active", expires_at=1, node_username="u600006", config_link=None
+        600006, status="active", expires_at=1, node_username=node, config_link=None
     )
     for user in await db.users_to_expire(int(time.time())):
         await provisioning.expire_user(user)
     assert (await db.get_user(600006))["status"] == "expired"
-    assert marzban.users["u600006"]["status"] == "disabled"
+    assert marzban.users[node]["status"] == "disabled"
 
 
 async def test_banned_user_is_not_reactivated_by_payment(

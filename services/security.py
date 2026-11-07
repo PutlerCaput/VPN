@@ -9,7 +9,11 @@ import time
 from collections import deque
 
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{1,32}$")
-NODE_USERNAME_RE = re.compile(r"^u\d{5,20}$")
+# Panel names: u<telegram_id> for accounts made before the change, and
+# n + 20 hex characters for new accounts (see pseudonymous_node_username).
+NODE_USERNAME_PATTERN = r"^(?:u\d{5,20}|n[0-9a-f]{20})$"
+NODE_USERNAME_RE = re.compile(NODE_USERNAME_PATTERN)
+NODE_NAME_CONTEXT = b"node-username/v1"
 PAYMENT_ID_RE = re.compile(r"^[a-f0-9]{32}$")
 
 
@@ -21,11 +25,18 @@ def sanitize_username(value: str | None) -> str | None:
     return candidate if USERNAME_RE.fullmatch(candidate) else None
 
 
-def node_username_for(telegram_id: int) -> str:
-    name = f"u{telegram_id}"
-    if not NODE_USERNAME_RE.fullmatch(name):
-        raise ValueError("telegram_id produces an invalid node username")
-    return name
+def pseudonymous_node_username(secret: str, telegram_id: int) -> str:
+    """Panel name of a new account: n + 20 hex characters of a keyed hash.
+
+    The key is a subkey of the server secret, so the panel alone cannot map the
+    name back to the Telegram ID. The same ID always gives the same name, so a
+    retried creation finds its account instead of making a second one.
+    """
+    if telegram_id <= 0:
+        raise ValueError("telegram_id must be positive")
+    subkey = hmac.new(secret.encode(), NODE_NAME_CONTEXT, hashlib.sha256).digest()
+    digest = hmac.new(subkey, str(telegram_id).encode(), hashlib.sha256).hexdigest()
+    return "n" + digest[:20]
 
 
 def is_valid_node_username(value: str) -> bool:
