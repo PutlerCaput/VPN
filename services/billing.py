@@ -22,9 +22,13 @@ from db.database import Database, PendingPaymentLimitError
 from services.audit import audit
 from services.cryptopay import CryptoPayClient, CryptoPayError
 from services.metrics import PAYMENTS_CREATED
-from services.payment_creation import ReceiptEmailRequired, YooKassaCreationService
+from services.payment_creation import (
+    CreationReviewRequired,
+    ReceiptEmailRequired,
+    YooKassaCreationService,
+)
 from services.sbp import SbpService
-from services.yookassa import YooKassaClient, YooKassaError
+from services.yookassa import YooKassaClient, YooKassaError, YooKassaRejected
 
 logger = logging.getLogger(__name__)
 
@@ -384,9 +388,21 @@ class BillingService:
             raise BillingError("receipt_email_required") from None
         except PendingPaymentLimitError:
             raise BillingError("too_many_pending") from None
+        except CreationReviewRequired:
+            raise BillingError("creation_review") from None
         except YooKassaError as exc:
-            logger.error("yookassa_create_failed", extra={"error": str(exc)})
-            raise BillingError("provider_error") from None
+            permanent = isinstance(exc, YooKassaRejected)
+            logger.error(
+                "yookassa_create_failed",
+                extra={
+                    "status_code": exc.status_code or 0,
+                    "provider_code": exc.provider_code or "",
+                    "failure": exc.failure or "",
+                    "permanent": permanent,
+                },
+            )
+            code = "payment_method_unavailable" if permanent else "provider_error"
+            raise BillingError(code) from None
         if not created["confirmation_url"]:
             # A completed invoice can legitimately have no checkout URL. Its
             # durable provider ID will be verified by the callback/poller.

@@ -14,7 +14,12 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from db.database import Database
-from services.yookassa import YOOKASSA_ID_RE, YooKassaClient, YooKassaError
+from services.yookassa import (
+    YOOKASSA_ID_RE,
+    YooKassaClient,
+    YooKassaError,
+    YooKassaRejected,
+)
 
 RETRY_WINDOW_SECONDS = 23 * 3600
 
@@ -151,6 +156,11 @@ class YooKassaCreationService:
             await self.db.complete_yookassa_creation(
                 payment_id, f"yookassa:{provider_id}", confirmation_url
             )
+        except YooKassaRejected:
+            # Permanent refusal: YooKassa created nothing, so the order is void.
+            # The creation row is no longer retried because its order is cancelled.
+            await self.db.cancel_rejected_creation(payment_id)
+            raise
         finally:
             await self.db.release_yookassa_creation(payment_id)
         saved = await self.db.get_yookassa_creation(payment_id)

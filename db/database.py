@@ -1352,7 +1352,7 @@ class Database:
     async def open_payment(self, telegram_id: int) -> dict[str, Any] | None:
         """The customer's newest unpaid order with its payment page, if any."""
         return await self._fetchone(
-            "SELECT p.*, c.confirmation_url FROM payments p "
+            "SELECT p.*, c.confirmation_url, c.state FROM payments p "
             "LEFT JOIN yookassa_creations c ON c.payment_id = p.payment_id "
             "WHERE p.telegram_id = ? AND p.status = 'pending' "
             "ORDER BY p.created_at DESC, p.payment_id DESC LIMIT 1",
@@ -1412,6 +1412,14 @@ class Database:
             "ON CONFLICT(payment_id) DO UPDATE "
             "SET next_check_at = excluded.next_check_at",
             (payment_id, at),
+        )
+
+    async def cancel_rejected_creation(self, payment_id: str) -> None:
+        """YooKassa refused the order: void it so the customer can choose again."""
+        await self._execute(
+            "UPDATE payments SET status = 'cancelled' WHERE payment_id = ? "
+            "AND status = 'pending' AND provider_id IS NULL",
+            (payment_id,),
         )
 
     async def cancel_confirmed_payment(self, payment_id: str) -> None:

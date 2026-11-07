@@ -39,6 +39,11 @@ class JsonFormatter(logging.Formatter):
             value = record.__dict__.get(key)
             if isinstance(value, int | float) and not isinstance(value, bool):
                 payload[key] = value
+        # Fixed YooKassa codes and exception class names only, never free text.
+        for key in ("provider_code", "failure"):
+            value = record.__dict__.get(key)
+            if isinstance(value, str) and re.fullmatch(r"[A-Za-z_]{0,60}", value):
+                payload[key] = value
         if record.exc_info and record.exc_info[0]:
             payload["error_type"] = record.exc_info[0].__name__
         return json.dumps(payload, ensure_ascii=False, default=str)

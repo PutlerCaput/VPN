@@ -47,7 +47,45 @@ EMAIL_RE = re.compile(
 
 
 class YooKassaError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        provider_code: str | None = None,
+        failure: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        # Operational fields only, for the log: never the message text.
+        self.status_code = status_code
+        self.provider_code = provider_code
+        self.failure = failure
+
+
+class YooKassaRejected(YooKassaError):
+    """YooKassa refused the request for good: it created nothing."""
+
+
+# A retry cannot change these answers. 408, 425 and 429 are temporary, and 5xx
+# leave the outcome unknown, so those requests are retried with the same key.
+PERMANENT_STATUSES = frozenset({400, 401, 403, 404, 422})
+
+
+def _error_parts(response: httpx.Response) -> tuple[str | None, str]:
+    """YooKassa's error code and a short text. Never the request or a secret."""
+    try:
+        body = response.json()
+    except ValueError:
+        return None, ""
+    if not isinstance(body, dict):
+        return None, ""
+    code = body.get("code")
+    code = (
+        code if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,60}", code) else None
+    )
+    text = body.get("description")
+    clean = " ".join(text.split())[:160] if isinstance(text, str) else ""
+    return code, clean
 
 
 def is_valid_email(value: str) -> bool:
@@ -259,11 +297,25 @@ class YooKassaClient:
             response = await self._client.request(method, path, **kwargs)
         except httpx.HTTPError as exc:
             # Only the class name: the exception text may include the request URL.
+            failure = type(exc).__name__
             raise YooKassaError(
-                f"{path}: transport error {type(exc).__name__}"
+                f"{path}: transport error {failure}", failure=failure
             ) from None
         if not 200 <= response.status_code < 300:
-            raise YooKassaError(f"{path}: HTTP {response.status_code}")
+            code, text = _error_parts(response)
+            detail = f"{path}: HTTP {response.status_code}"
+            if code:
+                detail = f"{detail} {code}"
+            if text:
+                detail = f"{detail}: {text}"
+            error_type = (
+                YooKassaRejected
+                if response.status_code in PERMANENT_STATUSES
+                else YooKassaError
+            )
+            raise error_type(
+                detail, status_code=response.status_code, provider_code=code
+            )
         try:
             data = response.json()
         except ValueError:
