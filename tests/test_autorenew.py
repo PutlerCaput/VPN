@@ -256,6 +256,54 @@ async def test_lapsed_subscription_ends(services: Any, stars: StarsPayments) -> 
     assert (await services.db.get_star_subscription(sub_id))["status"] == "ended"
 
 
+async def test_cancelled_subscription_keeps_its_paid_period(
+    services: Any, stars: StarsPayments
+) -> None:
+    sub_id, amount = await _subscribed(services)
+    paid_until = int(time.time()) + 3600
+    await _charge(stars, sub_id, amount, "stx-1", next_charge_at=paid_until)
+    payload = subscription_payload(sub_id)
+    await stars.subscription_changed(payload=payload, from_id=BUYER, state="canceled")
+    # The period is still running: the cancelled record stays as it is.
+    assert await stars.end_lapsed() == 0
+    assert (await services.db.get_star_subscription(sub_id))["status"] == "canceled"
+
+
+async def test_cancelled_subscription_ends_as_soon_as_its_period_is_used_up(
+    services: Any, stars: StarsPayments
+) -> None:
+    sub_id, amount = await _subscribed(services)
+    # Used up one minute ago: inside the grace period that late renewals get,
+    # but a cancelled subscription gets no grace.
+    used_up = int(time.time()) - 60
+    await _charge(stars, sub_id, amount, "stx-1", next_charge_at=used_up)
+    payload = subscription_payload(sub_id)
+    await stars.subscription_changed(payload=payload, from_id=BUYER, state="canceled")
+    assert await stars.end_lapsed() == 1
+    assert (await services.db.get_star_subscription(sub_id))["status"] == "ended"
+
+
+async def test_unmatched_cancel_is_logged_not_dropped_silently(
+    services: Any, stars: StarsPayments, caplog: pytest.LogCaptureFixture
+) -> None:
+    sub_id, _ = await _subscribed(services)
+    caplog.set_level("WARNING")
+    payload = subscription_payload(sub_id)
+    # Someone else's account: the update must not change the subscription.
+    assert (
+        await stars.subscription_changed(payload=payload, from_id=1, state="canceled")
+        is None
+    )
+    records = [
+        r
+        for r in caplog.records
+        if r.getMessage() == "stars_subscription_update_unmatched"
+    ]
+    assert records
+    assert records[-1].reason == "not_found"
+    assert (await services.db.get_star_subscription(sub_id))["status"] == "pending"
+
+
 # ----------------------------------------------------------------- handlers
 async def test_autorenew_button_sends_a_subscription_link(
     services: Any, stars: StarsPayments
