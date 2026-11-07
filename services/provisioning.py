@@ -27,7 +27,7 @@ from services.metrics import (
     TRIALS_PROVISIONED,
 )
 from services.notifier import Notifier
-from services.security import node_username_for
+from services.security import pseudonymous_node_username
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +105,13 @@ class ProvisioningService:
             logger.warning("subscription_url_unavailable")
         return MarzbanClient.extract_vless_link(data)
 
+    def _new_node(self, telegram_id: int) -> str:
+        """Panel name for an account that has none yet. It does not show the
+        Telegram ID, and a retried creation gets the same name."""
+        return pseudonymous_node_username(
+            self.settings.jwt_secret.get_secret_value(), telegram_id
+        )
+
     async def _disable_and_confirm(self, node_username: str) -> None:
         result = await self.marzban.disable_user(node_username)
         if result.get("status") == "disabled":
@@ -130,7 +137,7 @@ class ProvisioningService:
                     user["config_link"],
                     user["expires_at"],
                 )
-            node = node_username_for(telegram_id)
+            node = user["node_username"] or self._new_node(telegram_id)
             expires_at = _ts() + self.settings.trial_seconds
             tier = self.settings.default_tier
             try:
@@ -247,7 +254,7 @@ class ProvisioningService:
         if user["status"] == "banned":
             raise ProvisioningError("banned")
         tier = tier if tier in TIERS else str(user.get("tier") or DEFAULT_TIER)
-        node = user["node_username"] or node_username_for(telegram_id)
+        node = user["node_username"] or self._new_node(telegram_id)
         base = max(_ts(), int(user["expires_at"] or 0))
         new_expires = base + seconds
         try:
@@ -309,7 +316,7 @@ class ProvisioningService:
         selected_tier = tier if tier in TIERS else str(user.get("tier") or DEFAULT_TIER)
         if selected_tier not in TIERS:
             selected_tier = DEFAULT_TIER
-        node = user["node_username"] or node_username_for(telegram_id)
+        node = user["node_username"] or self._new_node(telegram_id)
         # A paid period sets the tier's quota; bonus days keep the current one.
         limit: int | None = None
         strategy: str | None = None

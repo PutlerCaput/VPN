@@ -11,7 +11,8 @@ from tests.conftest import FakeMarzban, FakeNotifier
 async def _active(services: Any, telegram_id: int) -> str:
     await services.db.create_user(telegram_id, "user", None)
     await services.provisioning.accept_offer_and_start_trial(telegram_id)
-    return f"u{telegram_id}"
+    user = await services.db.get_user(telegram_id)
+    return str(user["node_username"])
 
 
 def test_confidence_weights() -> None:
