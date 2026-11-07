@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { ApiError, endpoints, formatDate, formatTraffic, type Me } from "../api/client";
+import { CONNECT_APPS, connectUrl } from "../connect";
 import { ServersCard } from "../components/ServersCard";
 import { InstallHint } from "../components/InstallHint";
 import { QRCode } from "../components/QRCode";
@@ -121,6 +122,20 @@ export function DashboardPage() {
                 {copied ? "✅ Скопировано" : "📋 Скопировать"}
               </button>
               {copyFailed && <p role="alert">Браузер не разрешил копирование. Выделите ссылку в поле выше и скопируйте её вручную.</p>}
+              {config.data.config_link.startsWith("https://") && (
+                <>
+                  <p className="small">Подключить в один клик:</p>
+                  {CONNECT_APPS.map(({ app, label }) => {
+                    const url = connectUrl(app, config.data.config_link);
+                    return url ? (
+                      <button key={app} type="button" className="btn" onClick={() => window.open(url, "_blank", "noopener,noreferrer")}>
+                        {label}
+                      </button>
+                    ) : null;
+                  })}
+                  <p className="small muted">Откроется установленное приложение и добавит профиль. Приложения нет? Скопируйте ссылку выше.</p>
+                </>
+              )}
               <p className="small muted">
                 Клиенты: v2rayNG (Android), Streisand (iPhone), Hiddify (Windows, macOS, Linux).
                 Пошаговая инструкция — /connect в боте. Не передавайте конфигурацию
