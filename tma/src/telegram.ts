@@ -70,6 +70,13 @@ export function openBotChat(start?: string): boolean {
   return true;
 }
 
+/** Opens an https address outside the Mini App, in the browser Telegram provides. */
+export function openExternal(url: string): void {
+  const app = getWebApp();
+  if (app) app.openLink(url);
+  else window.open(url, "_blank", "noopener,noreferrer");
+}
+
 export function notify(message: string): void {
   const app = getWebApp();
   if (app) app.showAlert(message);

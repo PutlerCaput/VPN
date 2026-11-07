@@ -15,7 +15,7 @@ export default defineConfig({
         importScripts: ["service-worker.js"],
         globPatterns: ["**/*.{js,css,html,svg,png,webmanifest}"],
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/api\//, /^\/tma\//, /^\/cryptopay\//, /^\/sbp\//, /^\/healthz/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/tma\//, /^\/cryptopay\//, /^\/sbp\//, /^\/healthz/, /^\/connect\.html/],
         cleanupOutdatedCaches: true,
         runtimeCaching: [],
       },

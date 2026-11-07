@@ -2,11 +2,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { endpoints, formatTraffic, isApiError, type Status } from "../api/client";
+import { CONNECT_APPS, connectUrl } from "../connect";
 import { QRCode } from "../components/QRCode";
 import { ServersCard } from "../components/ServersCard";
 import { formatDate, ru } from "../i18n/ru";
 import { startPayment } from "../payments";
-import { haptic } from "../telegram";
+import { haptic, openExternal } from "../telegram";
 import styles from "../styles/Dashboard.module.css";
 import ui from "../styles/components.module.css";
 
@@ -149,6 +150,20 @@ export function DashboardPage() {
                 📋 {copied ? ru.common.copied : ru.common.copy}
               </button>
               {copyFailed && <p role="alert" className={ui.error}>Не удалось скопировать. Выделите ссылку в поле выше и скопируйте её вручную.</p>}
+              {config.data.config_link.startsWith("https://") && (
+                <>
+                  <p className={ui.small}>{ru.dashboard.connectTitle}</p>
+                  {CONNECT_APPS.map(({ app, label }) => {
+                    const url = connectUrl(app, config.data.config_link);
+                    return url ? (
+                      <button key={app} type="button" className={ui.btn} onClick={() => openExternal(url)}>
+                        {label}
+                      </button>
+                    ) : null;
+                  })}
+                  <p className={`${ui.small} ${ui.muted}`}>{ru.dashboard.connectHint}</p>
+                </>
+              )}
               <p className={`${ui.small} ${ui.muted}`}>{ru.dashboard.configHint}</p>
             </>
           )}
