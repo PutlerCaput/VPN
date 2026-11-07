@@ -13,7 +13,7 @@ import time
 from decimal import Decimal, DecimalException
 from typing import Any, Literal
 
-from db.database import Database
+from db.database import UNPAID_ORDER_TTL_SECONDS, Database
 from services.cryptopay import CryptoPayClient, CryptoPayError
 from services.metrics import JOB_FAILURES
 from services.payment_creation import CreationReviewRequired, YooKassaCreationService
@@ -152,6 +152,15 @@ class PaymentReconciler:
                     if result == "mismatch":
                         JOB_FAILURES.labels(job="payment_reconciliation_mismatch").inc()
                         logger.error("payment_reconciliation_mismatch")
+                    # The provider confirmed "not paid yet" and the order is
+                    # older than its validity: cancel it. A late payment is
+                    # still accepted while the order stays in the late window.
+                    if (
+                        result == "pending"
+                        and int(payment["created_at"])
+                        < int(time.time()) - UNPAID_ORDER_TTL_SECONDS
+                    ):
+                        await self.db.cancel_confirmed_payment(payment["payment_id"])
                 except (YooKassaError, CryptoPayError):
                     JOB_FAILURES.labels(job="payment_reconciliation_api").inc()
                     logger.warning("payment_reconciliation_api_unavailable")
