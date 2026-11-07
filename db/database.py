@@ -1619,11 +1619,15 @@ class Database:
             "DELETE FROM support_messages WHERE created_at < ?", (now_ts - year,)
         )
         # Incidents and the admin audit trail: the 3-year limitation period.
+        # AUTOBAN evidence stays: scripts/compliance_archiver.py archives it and
+        # only then removes the row.
         removed += await self._execute(
-            "DELETE FROM anomalies WHERE created_at < ?", (now_ts - 3 * year,)
+            "DELETE FROM anomalies WHERE created_at < ? AND kind != 'AUTOBAN'",
+            (now_ts - 3 * year,),
         )
         removed += await self._execute(
-            "DELETE FROM audit_log WHERE created_at < ?", (now_ts - 3 * year,)
+            "DELETE FROM audit_log WHERE created_at < ? AND action != 'autoban'",
+            (now_ts - 3 * year,),
         )
         return removed
 
