@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, Message
 
 from config import TIERS, format_gb
 from db.database import Database
@@ -91,8 +91,24 @@ def status_text(
     return "\n".join(lines)
 
 
+def _with_connect(
+    markup: InlineKeyboardMarkup, connect: InlineKeyboardMarkup | None
+) -> InlineKeyboardMarkup:
+    """One-tap app buttons first, then the device guides."""
+    if connect is None:
+        return markup
+    return InlineKeyboardMarkup(
+        inline_keyboard=[*connect.inline_keyboard, *markup.inline_keyboard]
+    )
+
+
 async def send_config(
-    message: Message, link: str, expires_at: int | None, *, awg: bool = False
+    message: Message,
+    link: str,
+    expires_at: int | None,
+    *,
+    awg: bool = False,
+    connect: InlineKeyboardMarkup | None = None,
 ) -> None:
     if message.chat.type != "private":
         return
@@ -108,7 +124,7 @@ async def send_config(
         f"<code>{html_escape(link)}</code>\n\n"
         f"Активна до: <b>{format_date(expires_at)}</b>\n\n{APPS_HINT}\n\n"
         "⚠️ Не передавайте ссылку третьим лицам: она привязана к вашему аккаунту.",
-        reply_markup=setup_kb(awg),
+        reply_markup=_with_connect(setup_kb(awg), connect),
     )
     await message.answer_photo(
         BufferedInputFile(render_qr_png(link), filename="config.png"),

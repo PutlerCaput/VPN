@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Подключение</title>
+  <style>
+    :root { color-scheme: light dark; --fg: #1d1d1f; --bg: #f5f5f7; --accent: #0a84ff; }
+    @media (prefers-color-scheme: dark) { :root { --fg: #f5f5f7; --bg: #1c1c1e; } }
+    body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--fg); }
+    main { max-width: 32rem; margin: 0 auto; padding: 1.25rem 1rem 2rem; }
+    h1 { font-size: 1.25rem; }
+    .btn { display: block; width: 100%; box-sizing: border-box; margin: .5rem 0; padding: .8rem 1rem; border: 0; border-radius: 12px; background: var(--accent); color: #fff; font: inherit; text-align: center; text-decoration: none; cursor: pointer; }
+    .btn.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    textarea { width: 100%; box-sizing: border-box; font: 13px/1.4 ui-monospace, Menlo, monospace; }
+    .hint { font-size: .9rem; opacity: .8; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Подключение</h1>
+  <p id="error" role="alert" hidden>Ссылка не распознана. Вернитесь в бот и нажмите подключение заново.</p>
+  <section id="ok" hidden>
+    <p>Открываем приложение. Если ничего не произошло, нажмите кнопку ниже.</p>
+    <a id="open" class="btn" href="#">Открыть приложение</a>
+    <p class="hint">Приложение не открылось? Установите его из App Store, Google Play или с сайта разработчика, затем нажмите кнопку ещё раз.</p>
+    <p class="hint">Ссылка подписки. Не передавайте её другим людям: она привязана к вашему аккаунту.</p>
+    <textarea id="sub" rows="3" readonly></textarea>
+    <button id="copy" class="btn secondary" type="button">Скопировать ссылку</button>
+    <p id="copied" class="hint" hidden>Скопировано.</p>
+  </section>
+</main>
+<script>
+(function () {
+  "use strict";
+  // The only subscription address this page hands to a VPN app. Keep it equal to
+  // SUBSCRIPTION_BASE_URL in .env.example: a test checks that it is.
+  var SUB_ORIGIN = "https://sub.cyberdefency.com:8443";
+  // Custom URL schemes of the supported apps.
+  var APPS = {
+    happ: "happ://add/",
+    v2raytun: "v2raytun://import/",
+    hiddify: "hiddify://import/"
+  };
+
+  function show(id) {
+    document.getElementById(id).hidden = false;
+  }
+
+  function isSubscriptionLink(value) {
+    try {
+      var url = new URL(value);
+      return url.protocol === "https:" && url.origin === SUB_ORIGIN && url.pathname.indexOf("/sub/") === 0;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // The link travels in the fragment, which browsers never send to the server,
+  // so it stays out of the site's access logs.
+  var params = new URLSearchParams(location.hash.slice(1));
+  var app = params.get("app") || "";
+  var sub = params.get("sub") || "";
+  if (!Object.prototype.hasOwnProperty.call(APPS, app) || !isSubscriptionLink(sub)) {
+    show("error");
+    return;
+  }
+
+  var deepLink = APPS[app] + sub;
+  document.getElementById("open").setAttribute("href", deepLink);
+  document.getElementById("sub").value = sub;
+  show("ok");
+
+  // Try once on arrival; the button stays for browsers that ask first.
+  setTimeout(function () { location.href = deepLink; }, 200);
+
+  document.getElementById("copy").addEventListener("click", function () {
+    var field = document.getElementById("sub");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(sub).then(
+        function () { show("copied"); },
+        function () { field.select(); }
+      );
+    } else {
+      field.select();
+    }
+  });
+})();
+</script>
+</body>
+</html>

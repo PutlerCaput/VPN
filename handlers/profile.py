@@ -13,6 +13,7 @@ from keyboards.main_menu import (
     BTN_CONFIG,
     BTN_PROFILE,
     app_kb,
+    connect_app_kb,
     main_menu_kb,
     revoke_confirm_kb,
 )
@@ -114,7 +115,17 @@ async def deliver_config(message: Message, owner_id: int, services: Services) ->
             "⚠️ Узел временно недоступен. Попробуйте через несколько минут."
         )
         return
-    await send_config(message, link, user["expires_at"], awg=services.awg is not None)
+    await send_config(
+        message,
+        link,
+        user["expires_at"],
+        awg=services.awg is not None,
+        connect=connect_app_kb(
+            services.settings.public_base_url,
+            services.settings.subscription_base_url,
+            link,
+        ),
+    )
     if notice := outage_suffix(services):
         await message.answer(notice.strip())
 
@@ -176,4 +187,9 @@ async def cb_revoke(callback: CallbackQuery, services: Services) -> None:
         link,
         user["expires_at"] if user else None,
         awg=services.awg is not None,
+        connect=connect_app_kb(
+            services.settings.public_base_url,
+            services.settings.subscription_base_url,
+            link,
+        ),
     )
