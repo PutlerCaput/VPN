@@ -37,6 +37,7 @@ from services.push import PushService
 from services.sbp import SbpService
 from services.scheduler import AnomalyMonitor, Jobs, build_scheduler
 from services.stars import StarsPayments
+from services.telegram_api import bot_session
 from services.telegram_rub import TelegramRubPayments
 from services.yookassa import YooKassaClient
 from webhook_server import TELEGRAM_WEBHOOK_PATH, create_webhook_app
@@ -247,6 +248,7 @@ async def run() -> None:
         raise SystemExit(2) from None
     bot = Bot(
         token=settings.bot_token.get_secret_value(),
+        session=bot_session(settings.telegram_proxy_url),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     services = build_services(settings, db, bot)

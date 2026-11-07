@@ -278,6 +278,8 @@ class Settings(BaseSettings):
     # Explicit per-provider routing; never apply a global proxy to the VPN/bot.
     yookassa_egress: Literal["direct", "ru_gateway"] = "direct"
     yookassa_proxy_url: str | None = None
+    # Bot API (Telegram) calls through an HTTP CONNECT proxy outside the RU network.
+    telegram_proxy_url: str | None = None
 
     # --- Auth / API ---------------------------------------------------------
     jwt_secret: SecretStr
@@ -428,6 +430,7 @@ class Settings(BaseSettings):
         "yookassa_secret_key",
         "yookassa_return_url",
         "yookassa_proxy_url",
+        "telegram_proxy_url",
         "subscription_base_url",
         "awg_agent_token",
         "telegram_payment_token",
@@ -475,6 +478,34 @@ class Settings(BaseSettings):
                 "unprivileged port; credentials, query and path are not allowed"
             )
         return value.rstrip("/")
+
+    @field_validator("telegram_proxy_url")
+    @classmethod
+    def _plain_telegram_proxy(cls, value: str | None) -> str | None:
+        """Bot API egress through a proxy: plain http to a literal IPv4 address."""
+        if value is None:
+            return None
+        try:
+            url = urlsplit(value)
+            address = ip_address(url.hostname or "")
+            valid = (
+                url.scheme == "http"
+                and isinstance(address, IPv4Address)
+                and url.port is not None
+                and url.username is None
+                and url.password is None
+                and url.path in ("", "/")
+                and not url.query
+                and not url.fragment
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ValueError(
+                "telegram_proxy_url must be http://IPv4:port without credentials, "
+                "path, query or fragment"
+            )
+        return f"http://{address}:{url.port}"
 
     @model_validator(mode="after")
     def _check_secrets(self) -> Settings:
