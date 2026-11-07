@@ -188,29 +188,40 @@ if [[ "${1:-}" == "--set-public-url" ]]; then
 fi
 
 if [[ "${1:-}" == "--disable-usdt" ]]; then
-  # USDT is not in the offer. Removing the Crypto Pay token turns the /usdt
-  # entry point off; the .env copy allows a rollback.
+  # USDT is not in the offer. The bot reads the Crypto Pay token from the Docker
+  # secret secrets/crypto_pay_token.txt first (a secret file overrides .env), so
+  # both places are emptied. Copies of both files allow a rollback.
   ENV_FILE="$WORKDIR/.env"
-  [[ -f "$ENV_FILE" ]] || fail "$ENV_FILE not found"
-  if ! grep -q '^CRYPTO_PAY_TOKEN=' "$ENV_FILE"; then
+  SECRET_FILE="$WORKDIR/secrets/crypto_pay_token.txt"
+  [[ -f "$ENV_FILE" && -f "$SECRET_FILE" ]] || fail "$ENV_FILE and $SECRET_FILE are required"
+  env_token="$(grep -c '^CRYPTO_PAY_TOKEN=.' "$ENV_FILE" || true)"
+  if [[ ! -s "$SECRET_FILE" && "$env_token" == "0" ]]; then
     say "USDT_ALREADY_OFF"
     exit 0
   fi
   ENV_BACKUP="$ENV_FILE.before-usdt-off-$STAMP"
+  SECRET_BACKUP="$SECRET_FILE.bak-usdt-$STAMP"
   cp -p "$ENV_FILE" "$ENV_BACKUP"
+  cp -p "$SECRET_FILE" "$SECRET_BACKUP"
   grep -v '^CRYPTO_PAY_TOKEN=' "$ENV_FILE" >"$ENV_FILE.tmp-$STAMP" || true
   cat "$ENV_FILE.tmp-$STAMP" >"$ENV_FILE"  # keeps owner and permissions
   rm -f "$ENV_FILE.tmp-$STAMP"
-  say "ENV_BACKUP $ENV_BACKUP"
+  : >"$SECRET_FILE"  # emptied in place: the mount keeps its inode and permissions
+  say "BACKUPS $ENV_BACKUP $SECRET_BACKUP"
   recreate
+  usdt_active=""
   if wait_healthy; then
-    say "USDT_OFF"
-    exit 0
+    usdt_active="$(docker exec "$CONTAINER" python -c 'import sys; sys.path.insert(0, "/app"); from config import get_settings; print(bool(get_settings().crypto_pay_token))' 2>/dev/null || true)"
+    if [[ "$usdt_active" == "False" ]]; then
+      say "USDT_OFF"
+      exit 0
+    fi
   fi
   cp -p "$ENV_BACKUP" "$ENV_FILE"
+  cp -p "$SECRET_BACKUP" "$SECRET_FILE"
   recreate
-  wait_healthy && fail "bot did not start without the token; previous .env restored (healthy)" \
-    || fail "previous .env restored, but the bot is not healthy"
+  wait_healthy && fail "USDT still active (check said '$usdt_active'); previous files restored" \
+    || fail "previous files restored, but the bot is not healthy"
 fi
 
 if [[ "${1:-}" == "--set-secret" ]]; then
