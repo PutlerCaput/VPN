@@ -27,7 +27,7 @@ from typing import Any, Protocol
 from aiogram.types import StarTransaction, TransactionPartnerUser
 
 from db.database import Database
-from services.provisioning import ProvisioningService
+from services.provisioning import ProvisioningService, format_date
 from services.security import is_valid_payment_id
 
 logger = logging.getLogger(__name__)
@@ -315,9 +315,29 @@ class StarsPayments:
                 "stars_subscription_update_unmatched", extra={"reason": "state"}
             )
             return None
+        previous = str(sub["status"])
         await self.db.set_star_subscription_status(subscription_id, status)
         logger.info("stars_subscription_updated", extra={"reason": status})
+        if status == "canceled" and previous != "canceled":
+            await self._tell_cancelled(from_id)
         return status
+
+    async def _tell_cancelled(self, telegram_id: int) -> None:
+        """Say that renewal is off and until when the paid period lasts."""
+        user = await self.db.get_user(telegram_id)
+        paid_until = int(user["expires_at"] or 0) if user is not None else 0
+        if paid_until > int(time.time()):
+            text = (
+                "🔁 Автопродление отключено. Звёзды больше не будут списываться. "
+                f"Оплаченный срок действует до <b>{format_date(paid_until)}</b>. "
+                "Продлить можно в разделе «💳 Оплата»."
+            )
+        else:
+            text = (
+                "🔁 Автопродление отключено. Звёзды больше не будут списываться. "
+                "Срок подписки уже закончился; продлить можно в разделе «💳 Оплата»."
+            )
+        await self.provisioning.notifier.telegram(telegram_id, text)
 
     async def active_subscription(self, telegram_id: int) -> dict[str, Any] | None:
         for sub in await self.db.user_star_subscriptions(telegram_id):
