@@ -12,7 +12,7 @@ from aiogram.types import CallbackQuery, Message
 from config import TIER_PRICES_RUB, TIERS, all_periods
 from handlers.common import DISCLAIMER, is_trial, send_config, status_text
 from handlers.payments import show_channels
-from keyboards.main_menu import accept_offer_kb, app_kb, main_menu_kb
+from keyboards.main_menu import accept_offer_kb, app_kb, connect_app_kb, main_menu_kb
 from middlewares.banned import BANNED_TEXT
 from services.container import Services
 from services.security import html_escape, sanitize_username
@@ -172,4 +172,9 @@ async def cb_accept_offer(callback: CallbackQuery, services: Services) -> None:
             result.config_link,
             result.expires_at,
             awg=services.awg is not None,
+            connect=connect_app_kb(
+                services.settings.public_base_url,
+                services.settings.subscription_base_url,
+                result.config_link,
+            ),
         )
