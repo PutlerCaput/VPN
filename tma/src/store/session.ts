@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 export type Route = "dashboard" | "pay" | "referral" | "profile" | "legal";
-export type AuthState = "booting" | "ready" | "expired" | "outside";
+export type AuthState = "booting" | "ready" | "expired" | "offline" | "outside";
 
 interface SessionState {
   auth: AuthState;

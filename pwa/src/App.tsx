@@ -14,6 +14,7 @@ import { useAppStore } from "./store";
 export function App() {
   const { route, accessToken, refreshToken, syncRoute, clearTokens } = useAppStore();
   const [booting, setBooting] = useState(Boolean(refreshToken && !accessToken));
+  const [offline, setOffline] = useState(false);
 
   useEffect(() => {
     window.addEventListener("hashchange", syncRoute);
@@ -21,7 +22,10 @@ export function App() {
   }, [syncRoute]);
 
   useEffect(() => {
-    if (booting) void refreshSession().finally(() => setBooting(false));
+    if (!booting) return;
+    void refreshSession()
+      .then((result) => setOffline(result === "unavailable"))
+      .finally(() => setBooting(false));
   }, [booting]);
 
   const me = useQuery({ queryKey: ["me"], queryFn: endpoints.me, enabled: Boolean(accessToken) });
@@ -31,6 +35,23 @@ export function App() {
   }, [me.error, clearTokens]);
 
   if (booting) return <main className="page center muted">Загрузка…</main>;
+  if (offline && refreshToken && !accessToken) {
+    return (
+      <main className="page center">
+        <p className="muted">Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.</p>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => {
+            setOffline(false);
+            setBooting(true);
+          }}
+        >
+          Повторить
+        </button>
+      </main>
+    );
+  }
   if (!accessToken) return <LoginPage />;
   if (me.isLoading || !me.data) {
     return <main className="page center muted">{me.isError ? "Сервис временно недоступен." : "Загрузка…"}</main>;

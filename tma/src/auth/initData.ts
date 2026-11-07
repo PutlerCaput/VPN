@@ -9,8 +9,16 @@ interface TokenPair {
   expires_in: number;
 }
 
+/**
+ * "rejected": the server refused the credentials, the session is over.
+ * "unavailable": no network, a timeout, a 5xx while the bot restarts or a rate
+ * limit. The session may be fine, so nothing is deleted.
+ */
+export type AuthResult = "ok" | "rejected" | "unavailable";
+export type BootResult = "ready" | "expired" | "offline";
+
 let accessToken: string | null = null;
-let inflight: Promise<boolean> | null = null;
+let inflight: Promise<AuthResult> | null = null;
 
 export function getAccessToken(): string | null {
   return accessToken;
@@ -22,7 +30,7 @@ async function store(pair: TokenPair): Promise<void> {
   await secureSet(KEYS.refresh, pair.refresh_token);
 }
 
-async function post(path: string, body: unknown): Promise<TokenPair | null> {
+async function post(path: string, body: unknown): Promise<TokenPair | "rejected" | "unavailable"> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 15_000);
   try {
@@ -33,31 +41,32 @@ async function post(path: string, body: unknown): Promise<TokenPair | null> {
       credentials: "omit",
       signal: controller.signal,
     });
-    if (!response.ok) return null;
-    return (await response.json()) as TokenPair;
+    if (response.ok) return (await response.json()) as TokenPair;
+    return response.status >= 500 || response.status === 429 ? "unavailable" : "rejected";
   } catch {
-    return null;
+    return "unavailable";
   } finally {
     window.clearTimeout(timer);
   }
 }
 
 /** Rotates the refresh token. Single-flight so parallel 401s refresh once. */
-export function refresh(): Promise<boolean> {
+export function refresh(): Promise<AuthResult> {
   if (inflight) return inflight;
-  inflight = (async () => {
+  inflight = (async (): Promise<AuthResult> => {
     try {
       const token = await secureGet(KEYS.refresh);
-      if (!token) return false;
-      const pair = await post("/auth/refresh", { refresh_token: token });
-      if (!pair) {
+      if (!token) return "rejected";
+      const result = await post("/auth/refresh", { refresh_token: token });
+      if (result === "unavailable") return "unavailable";
+      if (result === "rejected") {
         await secureRemove(KEYS.refresh);
         await secureRemove(KEYS.access);
         accessToken = null;
-        return false;
+        return "rejected";
       }
-      await store(pair);
-      return true;
+      await store(result);
+      return "ok";
     } finally {
       inflight = null;
     }
@@ -65,32 +74,40 @@ export function refresh(): Promise<boolean> {
   return inflight;
 }
 
-let loginOnce: Promise<boolean> | null = null;
+let loginOnce: Promise<AuthResult> | null = null;
 
 /**
  * Sends the raw initData string to the backend for HMAC validation. It is never
  * parsed client-side for authorization. Each initData is single-use server-side
- * (replay guard), so the call is memoised for the lifetime of the page.
+ * (replay guard), so the call is memoised for the lifetime of the page, except
+ * after an unavailable attempt: that one may be retried.
  */
-function loginWithInitData(): Promise<boolean> {
+function loginWithInitData(): Promise<AuthResult> {
   if (loginOnce) return loginOnce;
-  loginOnce = (async () => {
+  const attempt = (async (): Promise<AuthResult> => {
     const initData = getWebApp()?.initData;
-    if (!initData) return false;
-    const pair = await post("/auth/telegram", { initData });
-    if (!pair) return false;
-    await store(pair);
-    return true;
+    if (!initData) return "rejected";
+    const result = await post("/auth/telegram", { initData });
+    if (result === "unavailable" || result === "rejected") return result;
+    await store(result);
+    return "ok";
   })();
-  return loginOnce;
+  loginOnce = attempt;
+  void attempt.then((result) => {
+    if (result === "unavailable" && loginOnce === attempt) loginOnce = null;
+  });
+  return attempt;
 }
 
 /** Boot: a fresh initData login first (valid ≤ 5 min after launch), then refresh. */
-export async function bootstrapSession(): Promise<boolean> {
-  if (await loginWithInitData()) return true;
+export async function bootstrapSession(): Promise<BootResult> {
+  const login = await loginWithInitData();
+  if (login === "ok") return "ready";
   const stored = await secureGet(KEYS.access);
   if (stored) accessToken = stored;
-  return refresh();
+  const refreshed = await refresh();
+  if (refreshed === "ok") return "ready";
+  return login === "unavailable" || refreshed === "unavailable" ? "offline" : "expired";
 }
 
 export async function clearSession(): Promise<void> {

@@ -121,7 +121,7 @@ export interface Referral {
   invitee_bonus_days: number;
 }
 
-let refreshing: Promise<boolean> | null = null;
+let refreshing: Promise<RefreshResult> | null = null;
 
 async function rawFetch(path: string, init: RequestInit, token: string | null): Promise<Response> {
   const controller = new AbortController();
@@ -138,27 +138,35 @@ async function rawFetch(path: string, init: RequestInit, token: string | null): 
   }
 }
 
+/**
+ * "rejected": the server refused the refresh token, the session is over.
+ * "unavailable": no network, a timeout, a 5xx while the bot restarts or a rate
+ * limit. The refresh token is kept for the next try.
+ */
+export type RefreshResult = "ok" | "rejected" | "unavailable";
+
 /** Single-flight refresh: parallel 401s share one /auth/refresh call. */
-export function refreshSession(): Promise<boolean> {
+export function refreshSession(): Promise<RefreshResult> {
   if (refreshing) return refreshing;
   const { refreshToken, setTokens, clearTokens } = useAppStore.getState();
-  if (!refreshToken) return Promise.resolve(false);
-  refreshing = (async () => {
+  if (!refreshToken) return Promise.resolve("rejected");
+  refreshing = (async (): Promise<RefreshResult> => {
     try {
       const response = await rawFetch(
         "/auth/refresh",
         { method: "POST", body: JSON.stringify({ refresh_token: refreshToken }) },
         null,
       );
+      if (response.status >= 500 || response.status === 429) return "unavailable";
       if (!response.ok) {
         clearTokens();
-        return false;
+        return "rejected";
       }
       const pair = (await response.json()) as TokenPair;
       setTokens(pair.access_token, pair.refresh_token);
-      return true;
+      return "ok";
     } catch {
-      return false;
+      return "unavailable";
     } finally {
       refreshing = null;
     }
@@ -171,8 +179,10 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response = await rawFetch(path, init, sentWith);
   if (response.status === 401) {
     const current = useAppStore.getState().accessToken;
-    const ok = current && current !== sentWith ? true : await refreshSession();
-    if (!ok) throw new ApiError(401, "unauthorized");
+    const result = current && current !== sentWith ? "ok" : await refreshSession();
+    // Only a rejected refresh means "logged out"; an outage stays a network error.
+    if (result === "unavailable") throw new ApiError(0, "network");
+    if (result !== "ok") throw new ApiError(401, "unauthorized");
     response = await rawFetch(path, init, useAppStore.getState().accessToken);
   }
   if (response.status === 204) return undefined as T;
