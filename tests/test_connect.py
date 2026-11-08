@@ -34,8 +34,15 @@ def test_no_buttons_for_other_hosts_or_plain_links() -> None:
     assert connect_app_kb("http://app.test", SUB, LINK) is None
 
 
-def test_page_and_bot_agree_on_the_subscription_host_and_apps() -> None:
+def test_connect_page_has_no_inline_script() -> None:
+    # The site's CSP allows same-origin scripts only: an inline one never runs.
     page = (ROOT / "pwa" / "public" / "connect.html").read_text(encoding="utf-8")
+    assert re.search(r"<script(?![^>]*\ssrc=)[^>]*>", page) is None
+    assert '<script src="/connect.js" defer></script>' in page
+
+
+def test_page_and_bot_agree_on_the_subscription_host_and_apps() -> None:
+    page = (ROOT / "pwa" / "public" / "connect.js").read_text(encoding="utf-8")
     origin = re.search(r'SUB_ORIGIN = "([^"]+)"', page)
     assert origin is not None
     env = (ROOT / ".env.example").read_text(encoding="utf-8")
