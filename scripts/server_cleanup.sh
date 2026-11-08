@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # Server cleanup: old Docker images and build cache, old backups and copies of
-# secrets, leftover delivery folders, system journal, and technical rows of the
-# bot database.
+# secrets, leftover delivery folders, oversized container logs, old kernels,
+# system journal, and technical rows of the bot database.
 #
 #   bash scripts/server_cleanup.sh            # report only: removes nothing
 #   bash scripts/server_cleanup.sh --apply    # removes what the report lists
 #
 # Never removed: running images, the newest two rollback images of each service,
-# :latest, payments and legal records, the GitHub checkout, the encrypted
-# copies made by backup.sh. The database loses only technical rows
-# (db/maintenance.py) and gets a checked copy first.
+# :latest, the base images of the bot and the site, payments and legal records,
+# the GitHub checkout, the encrypted copies made by backup.sh, the running
+# kernel. The database loses only technical rows (db/maintenance.py) and gets
+# a checked copy first. Stopped containers, volumes, images no container uses
+# and large files are only listed: whether they are needed is your call.
 set -o pipefail
 
 APPLY=0
@@ -17,6 +19,10 @@ APPLY=0
 CONTAINER="${CONTAINER:-node-rental-bot-1}"
 KEEP_ROLLBACKS=2
 KEEP_COPIES=2
+MB=$((1024 * 1024))
+LOG_REPORT_MB=50
+LOG_EMPTY_MB=200
+SRC="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 
 say() { printf '%s\n' "$*"; }
 
@@ -93,6 +99,74 @@ else
 fi
 
 say ""
+say "== Other versions of running services' images (re-downloaded if ever needed)"
+mapfile -t bases < <(awk 'toupper($1) == "FROM" { print $2 }' "$SRC/Dockerfile" 2>/dev/null | sort -u)
+declare -A used_repo=()
+for ref in "${in_use[@]}"; do
+  [[ "${ref##*:}" == */* || "$ref" != *:* ]] && ref="$ref:latest"
+  used_repo["${ref%:*}"]=1
+done
+unused=()
+while IFS= read -r image; do
+  [[ "$image" == node-rental-* || "$image" == *'<none>'* ]] && continue
+  skip=0
+  for name in "${in_use[@]}" "${bases[@]}"; do [[ "$image" == "$name" ]] && skip=1; done
+  ((skip)) && continue
+  if [[ -n "${used_repo[${image%:*}]:-}" ]]; then
+    if ((APPLY)); then
+      # No -f: an image a container still uses is refused.
+      if docker rmi "$image" >/dev/null 2>&1; then say "  removed: $image"; else say "  kept (in use): $image"; fi
+    else
+      say "  would remove: $image (no container uses it; ${image%:*} runs another version)"
+    fi
+  else
+    unused+=("$image")
+  fi
+done < <(docker images --format '{{.Repository}}:{{.Tag}}' | sort -u)
+
+say ""
+say "== Only listed: decide yourself"
+if ((${#unused[@]})); then
+  say "  images no container uses (remove: docker rmi <name>):"
+  for image in "${unused[@]}"; do
+    say "    $image ($(docker image inspect -f '{{.Size}}' "$image" 2>/dev/null | awk '{ printf "%d MB", $1 / 1048576 }'))"
+  done
+fi
+mapfile -t stopped < <(docker ps -a --filter status=exited --filter status=created --format '{{.Names}} ({{.Image}}, {{.Status}})')
+if ((${#stopped[@]})); then
+  say "  stopped containers (remove: docker rm <name>):"
+  printf '    %s\n' "${stopped[@]}"
+fi
+mapfile -t volumes < <(docker volume ls -q --filter dangling=true)
+if ((${#volumes[@]})); then
+  say "  volumes no container uses; their data is lost on removal (docker volume rm <name>):"
+  printf '    %s\n' "${volumes[@]}"
+fi
+while IFS=$'\t' read -r size file; do
+  say "  large file untouched for 2 weeks: $file ($((size / MB)) MB); check, then: rm <path>"
+done < <(find /root -xdev -type f -size +50M -mtime +14 \
+  \( -name '*.tar*' -o -name '*.zip' -o -name '*.gz' -o -name '*.img' -o -name '*.iso' -o -name '*.log' \) \
+  -not -path '/root/server-backups/*' -printf '%s\t%p\n' 2>/dev/null | sort -rn | head -n 15)
+
+say ""
+say "== Container logs over $LOG_REPORT_MB MB (emptied above $LOG_EMPTY_MB MB)"
+while IFS= read -r name; do
+  log="$(docker inspect -f '{{.LogPath}}' "$name" 2>/dev/null)"
+  [[ -n "$log" && -f "$log" ]] || continue
+  size=$(($(stat -c %s "$log") / MB))
+  ((size > LOG_REPORT_MB)) || continue
+  if ((size > LOG_EMPTY_MB)); then
+    if ((APPLY)); then
+      truncate -s 0 "$log" && say "  emptied: $name ($size MB)"
+    else
+      say "  would empty: $name ($size MB); limit it in its compose file: logging max-size"
+    fi
+  else
+    say "  $name: $size MB"
+  fi
+done < <(docker ps -a --format '{{.Names}}')
+
+say ""
 say "== Old copies in the project folder (the newest $KEEP_COPIES are kept)"
 prune_newest "$WORKDIR/data" 'before-*.db' "$KEEP_COPIES"
 prune_newest "$WORKDIR/data" '*.migrate-check*' 0
@@ -127,6 +201,20 @@ if ((APPLY)); then
   apt-get clean >/dev/null 2>&1 && say "  apt cache cleared"
 else
   say "  would run: journalctl --vacuum-time=14d, apt-get clean"
+fi
+# Old kernels only, as apt itself would pick them; never the running one.
+mapfile -t kernels < <(apt-get -s autoremove 2>/dev/null | awk '/^Remv / { print $2 }' \
+  | grep -E '^linux-(image|headers|modules|modules-extra|hwe)-' | grep -vF -- "$(uname -r)")
+if ((${#kernels[@]})); then
+  if ((APPLY)); then
+    if DEBIAN_FRONTEND=noninteractive apt-get -y -q purge "${kernels[@]}" >/dev/null 2>&1; then
+      say "  old kernels removed: ${kernels[*]}"
+    else
+      say "  old kernels could not be removed: ${kernels[*]}"
+    fi
+  else
+    say "  would remove old kernels: ${kernels[*]}"
+  fi
 fi
 
 say ""
