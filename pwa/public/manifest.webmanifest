@@ -1,14 +1,14 @@
 {
-  "name": "Узел — шифрование в публичных сетях",
-  "short_name": "Узел",
+  "name": "Cyberdefency — шифрование в публичных сетях",
+  "short_name": "Cyberdefency",
   "description": "Персональный технический узел для шифрования подключения в публичных сетях.",
   "lang": "ru",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "background_color": "#050a14",
+  "theme_color": "#050a14",
   "icons": [
     { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },

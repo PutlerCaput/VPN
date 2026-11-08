@@ -79,17 +79,22 @@ rollback="node-rental-web:rollback-$STAMP"
 new="node-rental-web:release-$STAMP"
 bot_name="$(container_env "$BOT_CONTAINER" BOT_USERNAME)"
 [[ "$bot_name" =~ ^[A-Za-z0-9_]{5,32}$ ]] || bot_name=""
+# Link previews and the offer pages carry the site's absolute address.
+site="$(container_env "$BOT_CONTAINER" PUBLIC_BASE_URL)"
+site="${site%/}"
+[[ "$site" =~ ^https://[a-z0-9-]+(\.[a-z0-9-]+)+$ ]] || site="https://app.cyberdefency.com"
 
 say "SOURCE $src $(git -C "$src" log -1 --format='%h %s' 2>/dev/null || true)"
 docker tag "$current" "$rollback"
 say "ROLLBACK_IMAGE $rollback (was $current)"
 
-docker build --target web --build-arg "VITE_BOT_USERNAME=$bot_name" -t "$new" "$src" \
+docker build --target web --build-arg "VITE_BOT_USERNAME=$bot_name" \
+  --build-arg "PUBLIC_ORIGIN=$site" -t "$new" "$src" \
   || fail "build failed, live site unchanged"
 docker run --rm --entrypoint sh "$new" -c \
   'test -s /srv/pwa/index.html && test -s /srv/tma/index.html && ls /srv/tma/assets/*.js >/dev/null' \
   || fail "site files missing in $new, live site unchanged"
-say "BUILD_OK $new (bot name in build: ${bot_name:-none, taken from the server at runtime})"
+say "BUILD_OK $new (bot name in build: ${bot_name:-none, taken from the server at runtime}; site: $site)"
 
 if [[ "$mode" != --apply ]]; then
   say "CHECK_OK: live site unchanged. To switch, run again with --apply."

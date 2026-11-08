@@ -7,3 +7,5 @@ mypy==1.13.0
 bandit==1.7.10
 pip-audit==2.7.3
 pre-commit==4.0.1
+# Brand images: scripts/build_brand_assets.py and tests/test_brand.py
+pillow==13.0.0

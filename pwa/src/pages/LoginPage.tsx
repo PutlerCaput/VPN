@@ -4,7 +4,7 @@ import { InstallHint } from "../components/InstallHint";
 export function LoginPage() {
   return (
     <main className="page center">
-      <div className="logo" aria-hidden="true">🔐</div>
+      <img className="splash-logo" src="/brand/logo-512.webp" width={220} height={220} alt="Cyberdefency" />
       <h1>Шифрование подключения в публичных сетях</h1>
       <p className="muted">
         Персональный технический узел для работы в Wi-Fi кафе, коворкингов, отелей и аэропортов. Протокол VLESS +

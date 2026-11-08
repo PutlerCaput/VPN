@@ -29,6 +29,7 @@ COPY --chown=1000:1000 keyboards ./keyboards
 COPY --chown=1000:1000 legal ./legal
 COPY --chown=1000:1000 scripts/db_tool.py ./scripts/db_tool.py
 COPY --chown=1000:1000 scripts/db_maintenance.py ./scripts/db_maintenance.py
+COPY --chown=1000:1000 branding/telegram/welcome-1280x720.jpg ./branding/telegram/welcome-1280x720.jpg
 RUN mkdir -p /app/data /app/logs && chown 1000:1000 /app/data /app/logs
 USER 1000:1000
 EXPOSE 8080
@@ -46,6 +47,8 @@ RUN --mount=type=secret,id=proxy_ca \
 COPY pwa/ ./
 ARG VITE_BOT_USERNAME
 ENV VITE_BOT_USERNAME=${VITE_BOT_USERNAME}
+# The site's address for link previews (og:image must be absolute).
+ARG PUBLIC_ORIGIN=https://app.cyberdefency.com
 RUN npm run build
 
 FROM node:22-bookworm-slim AS tma-builder
