@@ -130,8 +130,10 @@ def env(tmp_path: Path) -> dict[str, str]:
     with sqlite3.connect(database) as conn:
         conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
         conn.execute("INSERT INTO users (name) VALUES ('n1')")
+    # Whoever runs the tests may be on SSH or in tmux: the script reacts to both.
+    session_vars = {"SSH_CONNECTION", "TMUX", "STY", "SERVER_UPDATE_DIRECT"}
     return {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if k not in session_vars},
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "FAKE_DOCKER_STATE": str(state),
         "FAKE_LOG": str(tmp_path / "calls.log"),
@@ -246,3 +248,39 @@ if args[:1] == ["start"]:
     assert code == 0, out
     assert "docker start marzban-marzban-1" in calls
     assert "all 1 containers run again" in out
+
+
+SSH = {"SSH_CONNECTION": "203.0.113.7 51000 10.0.0.5 22"}
+
+
+def test_apply_over_ssh_asks_for_tmux_and_starts_nothing(env: dict[str, str]) -> None:
+    code, out, calls = _run({**env, **SSH}, "--apply")
+    assert code == 2
+    assert "SERVER_UPDATE_NOT_STARTED" in out
+    assert "tmux new -s update" in out
+    assert "tmux attach -t update" in out
+    assert calls == []  # not a single docker or apt call
+    assert not Path(env["BACKUP_DIR"]).exists()
+
+
+@pytest.mark.parametrize(
+    "session",
+    [
+        {"TMUX": "tmux-socket,1,0"},
+        {"STY": "123.pts-0.host"},
+        {"SERVER_UPDATE_DIRECT": "1"},
+    ],
+    ids=["tmux", "screen", "override"],
+)
+def test_apply_over_ssh_runs_where_a_dropped_link_cannot_stop_it(
+    env: dict[str, str], session: dict[str, str]
+) -> None:
+    code, out, _ = _run({**env, **SSH, **session}, "--apply")
+    assert code == 0, out
+    assert "SERVER_UPDATE_OK" in out
+
+
+def test_the_report_needs_no_session_over_ssh(env: dict[str, str]) -> None:
+    code, out, _ = _run({**env, **SSH})
+    assert code == 0, out
+    assert "REPORT DONE" in out

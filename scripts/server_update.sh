@@ -76,6 +76,25 @@ wait_containers() {  # wait_containers <names...>: until each runs (and is healt
   return 1
 }
 
+# A dropped connection (a phone on a mobile network, say) would stop --apply
+# half-way, possibly in the middle of a package upgrade. Inside tmux or screen
+# the update keeps running and the session can be reopened.
+if ((APPLY)) && [[ -n "${SSH_CONNECTION:-}" && -z "${TMUX:-}" && -z "${STY:-}" \
+  && "${SERVER_UPDATE_DIRECT:-0}" != 1 ]]; then
+  cat >&2 <<EOF
+SERVER_UPDATE_NOT_STARTED: you are connected over SSH. If the connection drops,
+the update stops half-way. Run it inside tmux, which keeps going:
+
+  command -v tmux >/dev/null || apt-get install -y tmux
+  tmux new -s update
+  bash $SRC/scripts/server_update.sh --apply
+
+Connection lost? Log in again and run: tmux attach -t update
+To run it directly anyway: SERVER_UPDATE_DIRECT=1 bash $0 --apply
+EOF
+  exit 2
+fi
+
 [[ $EUID -eq 0 ]] || stop "run as root"
 [[ -f "$SRC/Dockerfile" && -f "$SRC/scripts/update_bot.sh" ]] || stop "run from the project checkout"
 command -v docker >/dev/null 2>&1 || stop "docker not found"
