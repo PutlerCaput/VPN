@@ -86,6 +86,17 @@ case "$2" in
 esac
 """
 
+FAKE_DF = """#!/usr/bin/env bash
+free="${FAKE_FREE_MB:-20000}"
+if [[ " $* " == *" -hP "* || " $* " == *" -h "* ]]; then
+  echo "Filesystem Size Used Avail Use% Mounted on"
+  echo "/dev/vda1 30G 27G $((free / 1024)).0G 90% /"
+else
+  echo "Filesystem 1M-blocks Used Available Capacity Mounted on"
+  echo "/dev/vda1 30720 $((30720 - free)) $free 90% /"
+fi
+"""
+
 LOGGER = """#!/usr/bin/env bash
 echo "{name} $*" >> "$FAKE_LOG"
 """
@@ -100,6 +111,7 @@ def env(tmp_path: Path) -> dict[str, str]:
         "apt": FAKE_APT,
         "dpkg-query": FAKE_DPKG_QUERY,
         "apt-cache": FAKE_APT_CACHE,
+        "df": FAKE_DF,
         "apt-get": LOGGER.format(name="apt-get"),
         "ip": "#!/usr/bin/env bash\necho 'default via 10.0.0.1 dev eth0'\n",
     }
@@ -205,6 +217,9 @@ def test_apply_copies_first_and_never_removes_packages(env: dict[str, str]) -> N
     assert not [c for c in calls if c.startswith("apt-get") and " remove" in c]
     assert "docker pull -q python:3.11-slim-bookworm" in calls
     assert "docker pull -q caddy:2.11.7" in calls
+    # The Caddy compiler image stays as it is: pulling it would rebuild Caddy.
+    assert "docker pull -q caddy:2.11.7-builder" not in calls
+    assert "skipped: caddy:2.11.7-builder" in out
     assert "apt-get install -y -q vnstat" in calls
     assert "all 1 containers run again" in out
     assert not [c for c in calls if c.startswith("docker start")]
@@ -284,3 +299,31 @@ def test_the_report_needs_no_session_over_ssh(env: dict[str, str]) -> None:
     code, out, _ = _run({**env, **SSH})
     assert code == 0, out
     assert "REPORT DONE" in out
+
+
+def test_report_says_when_the_disk_is_tight(env: dict[str, str]) -> None:
+    code, out, calls = _run({**env, "FAKE_FREE_MB": "3000"})
+    assert code == 0, out
+    assert "3000 MB free, less than 5 GB wanted" in out
+    assert "stops below 3 GB" in out
+    assert not [c for c in calls if "upgrade" in c]
+
+
+def test_apply_does_not_start_when_the_cleanup_cannot_free_enough(
+    env: dict[str, str],
+) -> None:
+    code, out, calls = _run({**env, "FAKE_FREE_MB": "2500"}, "--apply")
+    assert code == 1
+    assert "SERVER_UPDATE_STOPPED: only 2500 MB free" in out
+    assert not Path(env["BACKUP_DIR"]).exists()
+    assert not [c for c in calls if c.startswith(("apt-get", "docker pull"))]
+
+
+def test_apply_goes_on_when_the_space_is_tight_but_enough(
+    env: dict[str, str],
+) -> None:
+    code, out, _ = _run({**env, "FAKE_FREE_MB": "4000"}, "--apply")
+    assert code == 0, out
+    assert "4000 MB free, less than 5 GB wanted: cleaning up first" in out
+    assert "after the cleanup: 4000 MB free" in out
+    assert "SERVER_UPDATE_OK" in out
