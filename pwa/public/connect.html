@@ -2,93 +2,55 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
-  <title>Подключение</title>
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#050a14">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+  <title>Подключение — Cyberdefency</title>
   <style>
-    :root { color-scheme: light dark; --fg: #1d1d1f; --bg: #f5f5f7; --accent: #0a84ff; }
-    @media (prefers-color-scheme: dark) { :root { --fg: #f5f5f7; --bg: #1c1c1e; } }
-    body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--fg); }
-    main { max-width: 32rem; margin: 0 auto; padding: 1.25rem 1rem 2rem; }
-    h1 { font-size: 1.25rem; }
-    .btn { display: block; width: 100%; box-sizing: border-box; margin: .5rem 0; padding: .8rem 1rem; border: 0; border-radius: 12px; background: var(--accent); color: #fff; font: inherit; text-align: center; text-decoration: none; cursor: pointer; }
-    .btn.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
-    textarea { width: 100%; box-sizing: border-box; font: 13px/1.4 ui-monospace, Menlo, monospace; }
-    .hint { font-size: .9rem; opacity: .8; }
+    @font-face { font-family: "Manrope"; font-weight: 200 800; font-display: swap; src: url("/fonts/manrope-cyrillic.woff2") format("woff2"); unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+    @font-face { font-family: "Manrope"; font-weight: 200 800; font-display: swap; src: url("/fonts/manrope-latin.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+    :root { color-scheme: dark; --bg: #050a14; --text: #e8f1ff; --text-2: #c2d2e9; --muted: #8ea4c2; --accent: #2ec5ff; --border: rgba(120, 180, 255, .14); --border-strong: rgba(120, 180, 255, .3); }
+    * { box-sizing: border-box; }
+    html { background: var(--bg); }
+    body { margin: 0; min-height: 100vh; color: var(--text); font: 16px/1.55 "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+    body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: radial-gradient(ellipse 75% 45% at 50% -12%, rgba(46, 150, 255, .24), transparent 70%), radial-gradient(ellipse 60% 40% at 105% 110%, rgba(46, 197, 255, .12), transparent 70%); }
+    main { max-width: 32rem; margin: 0 auto; padding: 1.25rem 1rem 2.5rem; }
+    .brand { display: flex; align-items: center; gap: .6rem; margin-bottom: 1.25rem; }
+    .brand img { width: 38px; height: 38px; filter: drop-shadow(0 0 10px rgba(46, 197, 255, .45)); }
+    .wordmark { font-size: 1.25rem; font-weight: 800; letter-spacing: -.01em; }
+    .wordmark span { background: linear-gradient(135deg, #38d0ff, #2f8cff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    h1 { font-size: 1.45rem; line-height: 1.25; font-weight: 800; letter-spacing: -.015em; margin: 0 0 .75rem; }
+    .card { background: linear-gradient(180deg, rgba(20, 38, 68, .92), rgba(12, 24, 45, .92)); border: 1px solid var(--border); border-radius: 16px; padding: 1.1rem 1rem; box-shadow: 0 10px 28px rgba(0, 8, 24, .35); }
+    .card p { margin: 0 0 .75rem; color: var(--text-2); }
+    .btn { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 48px; margin: .6rem 0; padding: .8rem 1rem; border: 1px solid transparent; border-radius: 12px; background: linear-gradient(135deg, #38d0ff 0%, #2f8cff 100%); color: #04111f; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; box-shadow: 0 0 0 1px rgba(46, 197, 255, .35), 0 8px 24px rgba(46, 160, 255, .28); }
+    .btn.secondary { background: rgba(255, 255, 255, .04); color: var(--text); border-color: var(--border-strong); box-shadow: none; font-weight: 600; }
+    textarea { width: 100%; padding: .7rem; border-radius: 12px; border: 1px solid var(--border-strong); background: rgba(0, 0, 0, .25); color: var(--text); font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; resize: none; }
+    .card .hint { font-size: .9rem; color: var(--muted); }
+    .card .alert { color: #f87171; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     [hidden] { display: none !important; }
   </style>
 </head>
 <body>
 <main>
+  <header class="brand"><img src="/brand/emblem-128.webp" width="38" height="38" alt=""><span class="wordmark">Cyber<span>defency</span></span></header>
   <h1>Подключение</h1>
-  <p id="error" role="alert" hidden>Ссылка не распознана. Вернитесь в бот и нажмите подключение заново.</p>
-  <section id="ok" hidden>
-    <p>Открываем приложение. Если ничего не произошло, нажмите кнопку ниже.</p>
-    <a id="open" class="btn" href="#">Открыть приложение</a>
-    <p class="hint">Приложение не открылось? Установите его из App Store, Google Play или с сайта разработчика, затем нажмите кнопку ещё раз.</p>
-    <p class="hint">Ссылка подписки. Не передавайте её другим людям: она привязана к вашему аккаунту.</p>
-    <textarea id="sub" rows="3" readonly></textarea>
-    <button id="copy" class="btn secondary" type="button">Скопировать ссылку</button>
-    <p id="copied" class="hint" hidden>Скопировано.</p>
-  </section>
+  <div class="card">
+    <p id="error" class="alert" role="alert" hidden>Ссылка не распознана. Вернитесь в бот и нажмите подключение заново.</p>
+    <section id="ok" hidden>
+      <p>Открываем приложение. Если ничего не произошло, нажмите кнопку ниже.</p>
+      <a id="open" class="btn" href="#">Открыть приложение</a>
+      <p class="hint">Приложение не открылось? Установите его из App Store, Google Play или с сайта разработчика, затем нажмите кнопку ещё раз.</p>
+      <p class="hint">Ссылка подписки. Не передавайте её другим людям: она привязана к вашему аккаунту.</p>
+      <textarea id="sub" rows="3" readonly></textarea>
+      <button id="copy" class="btn secondary" type="button">Скопировать ссылку</button>
+      <p id="copied" class="hint" hidden>Скопировано.</p>
+    </section>
+  </div>
 </main>
-<script>
-(function () {
-  "use strict";
-  // The only subscription address this page hands to a VPN app. Keep it equal to
-  // SUBSCRIPTION_BASE_URL in .env.example: a test checks that it is.
-  var SUB_ORIGIN = "https://sub.cyberdefency.com:8443";
-  // Custom URL schemes of the supported apps.
-  var APPS = {
-    happ: "happ://add/",
-    v2raytun: "v2raytun://import/",
-    hiddify: "hiddify://import/"
-  };
-
-  function show(id) {
-    document.getElementById(id).hidden = false;
-  }
-
-  function isSubscriptionLink(value) {
-    try {
-      var url = new URL(value);
-      return url.protocol === "https:" && url.origin === SUB_ORIGIN && url.pathname.indexOf("/sub/") === 0;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  // The link travels in the fragment, which browsers never send to the server,
-  // so it stays out of the site's access logs.
-  var params = new URLSearchParams(location.hash.slice(1));
-  var app = params.get("app") || "";
-  var sub = params.get("sub") || "";
-  if (!Object.prototype.hasOwnProperty.call(APPS, app) || !isSubscriptionLink(sub)) {
-    show("error");
-    return;
-  }
-
-  var deepLink = APPS[app] + sub;
-  document.getElementById("open").setAttribute("href", deepLink);
-  document.getElementById("sub").value = sub;
-  show("ok");
-
-  // Try once on arrival; the button stays for browsers that ask first.
-  setTimeout(function () { location.href = deepLink; }, 200);
-
-  document.getElementById("copy").addEventListener("click", function () {
-    var field = document.getElementById("sub");
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(sub).then(
-        function () { show("copied"); },
-        function () { field.select(); }
-      );
-    } else {
-      field.select();
-    }
-  });
-})();
-</script>
+<script src="/connect.js" defer></script>
 </body>
 </html>
