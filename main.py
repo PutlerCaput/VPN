@@ -36,6 +36,7 @@ from services.notifier import Notifier
 from services.payment_reconciliation import PaymentReconciler
 from services.provisioning import ProvisioningService
 from services.push import PushService
+from services.refund_watch import RefundWatch
 from services.sbp import SbpService
 from services.scheduler import AnomalyMonitor, Jobs, build_scheduler
 from services.server_traffic import ServerTrafficWatch
@@ -280,6 +281,13 @@ async def run() -> None:
         health=services.health,
         awg=services.awg,
         traffic=services.traffic,
+        refunds=RefundWatch(
+            db,
+            services.yookassa,
+            services.provisioning,
+            services.notifier,
+            settings.admin_telegram_id,
+        ),
     )
     scheduler = build_scheduler(jobs)
     if services.traffic is not None:

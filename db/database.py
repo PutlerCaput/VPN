@@ -1274,6 +1274,26 @@ class Database:
             (key, value),
         )
 
+    async def claim_meta(self, key: str) -> bool:
+        """True the first time a key is stored: a note that is made only once."""
+        rowcount = await self._execute(
+            "INSERT OR IGNORE INTO app_meta (key, value) VALUES (?, '1')", (key,)
+        )
+        return rowcount == 1
+
+    async def forget_meta(self, key: str) -> None:
+        await self._execute("DELETE FROM app_meta WHERE key = ?", (key,))
+
+    async def paid_ruble_payments(self, since: int) -> list[dict[str, Any]]:
+        """Paid YooKassa orders (the SBP link and the in-Telegram checkout)."""
+        return await self._fetchall(
+            "SELECT * FROM payments WHERE status = 'paid' AND method = 'sbp' "
+            "AND currency = 'RUB' AND (provider_id LIKE 'yookassa:%' "
+            "OR provider_id LIKE 'tgyk:%') AND COALESCE(paid_at, created_at) >= ? "
+            "ORDER BY COALESCE(paid_at, created_at) DESC",
+            (since,),
+        )
+
     async def claim_traffic_notice(
         self, node_username: str, window_start: int, level: int
     ) -> bool:

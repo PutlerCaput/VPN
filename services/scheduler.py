@@ -22,6 +22,7 @@ from services.metrics import ACTIVE_USERS, JOB_FAILURES
 from services.notifier import Notifier
 from services.payment_reconciliation import PaymentReconciler
 from services.provisioning import ProvisioningService, format_date
+from services.refund_watch import RefundWatch
 from services.security import SlidingWindowLimiter, is_valid_node_username
 from services.server_traffic import ServerTrafficWatch
 from services.stars import StarsPayments
@@ -372,6 +373,7 @@ class Jobs:
         health: ServiceHealth | None = None,
         awg: AwgService | None = None,
         traffic: ServerTrafficWatch | None = None,
+        refunds: RefundWatch | None = None,
     ) -> None:
         self.db = db
         self.provisioning = provisioning
@@ -384,6 +386,7 @@ class Jobs:
         self.health = health
         self.awg = awg
         self.traffic = traffic
+        self.refunds = refunds
 
     async def daily_expiry_check(self) -> None:
         for user in await self.db.users_to_expire(int(time.time())):
@@ -458,6 +461,10 @@ class Jobs:
     async def server_traffic(self) -> None:
         if self.traffic is not None:
             await self.traffic.refresh()
+
+    async def refund_watch(self) -> None:
+        if self.refunds is not None:
+            await self.refunds.run()
 
     async def housekeeping(self) -> None:
         current = int(time.time())
@@ -586,6 +593,16 @@ def build_scheduler(jobs: Jobs) -> AsyncIOScheduler:
         _guarded("server_traffic", jobs.server_traffic),
         IntervalTrigger(hours=1, timezone=UTC),
         id="server_traffic",
+        **defaults,
+    )
+    # A refund made in the YooKassa dashboard is noticed within ten minutes. The
+    # first look comes shortly after start, so a refund made while the bot was
+    # down does not wait for a full interval.
+    scheduler.add_job(
+        _guarded("refund_watch", jobs.refund_watch),
+        IntervalTrigger(minutes=10, timezone=UTC),
+        id="refund_watch",
+        next_run_time=datetime.now(UTC) + timedelta(seconds=45),
         **defaults,
     )
     return scheduler
