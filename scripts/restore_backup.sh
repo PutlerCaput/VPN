@@ -6,6 +6,10 @@
 #
 # age-key.txt is the owner's private key (AGE-SECRET-KEY-…). The folder must not
 # exist yet; the default is ./restore-<time>.
+#
+# On some phones Go programs do not run in Termux: every option is taken for a
+# stray argument, even `age --version`. Then rage (the same format, written in
+# Rust, `pkg install rage`) opens the archive instead.
 set -euo pipefail
 umask 077
 
@@ -16,11 +20,17 @@ DEST="${3:-./restore-$(date -u +%Y%m%dT%H%M%SZ)}"
 fail() { printf 'RESTORE_FAILED: %s\n' "$*" >&2; exit 1; }
 
 [[ -f "$ARCHIVE" && -f "$IDENTITY" ]] || fail "usage: restore_backup.sh <backup.tar.gz.age> <age-key.txt> [folder]"
-command -v age >/dev/null 2>&1 || fail "age is not installed (apt-get install age)"
+if age --version >/dev/null 2>&1; then
+  OPEN=age
+elif command -v rage >/dev/null 2>&1; then
+  OPEN=rage
+else
+  fail "age is not installed or does not run (apt-get install age; in Termux: pkg install rage)"
+fi
 [[ ! -e "$DEST" ]] || fail "$DEST already exists: choose a new folder"
 
 mkdir -p "$DEST"
-if ! age -d -i "$IDENTITY" "$ARCHIVE" | tar -xz -C "$DEST"; then
+if ! "$OPEN" -d -i "$IDENTITY" "$ARCHIVE" | tar -xz -C "$DEST"; then
   rm -rf "$DEST"
   fail "the archive could not be opened: wrong key, or the file is damaged"
 fi
