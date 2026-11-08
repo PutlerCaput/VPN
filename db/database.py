@@ -1776,6 +1776,55 @@ class Database:
         )
         return int(row["n"]) if row else 0
 
+    async def owner_stats(self, now_ts: int) -> dict[str, Any]:
+        """Counts and sums for the owner's /stats: no names, no identifiers."""
+        day = 86400
+        users = await self._fetchone(
+            "SELECT COUNT(*) AS total, "
+            "COALESCE(SUM(status = 'active'), 0) AS active, "
+            "COALESCE(SUM(status = 'expired'), 0) AS expired, "
+            "COALESCE(SUM(status = 'suspended'), 0) AS suspended, "
+            "COALESCE(SUM(status = 'banned'), 0) AS banned, "
+            "COALESCE(SUM(trial_used = 1), 0) AS trials, "
+            "COALESCE(SUM(created_at >= ?), 0) AS new_7d, "
+            "COALESCE(SUM(status = 'active' AND expires_at BETWEEN ? AND ?), 0) "
+            "AS expiring_3d, "
+            "COALESCE(SUM(status = 'active' AND expires_at BETWEEN ? AND ?), 0) "
+            "AS expiring_7d, "
+            "COALESCE(SUM(status = 'expired' AND expires_at >= ?), 0) AS lapsed_7d "
+            "FROM users",
+            (
+                now_ts - 7 * day,
+                now_ts,
+                now_ts + 3 * day,
+                now_ts,
+                now_ts + 7 * day,
+                now_ts - 7 * day,
+            ),
+        )
+        paying = await self._fetchone(
+            "SELECT COUNT(DISTINCT telegram_id) AS n FROM payments "
+            "WHERE status = 'paid'"
+        )
+        money = await self._fetchall(
+            "SELECT currency, "
+            "CASE WHEN paid_at >= ? THEN 'now' ELSE 'before' END AS period, "
+            "COUNT(*) AS n, SUM(amount) AS total FROM payments "
+            "WHERE status = 'paid' AND paid_at >= ? GROUP BY currency, period",
+            (now_ts - 30 * day, now_ts - 60 * day),
+        )
+        refunds = await self._fetchone(
+            "SELECT COUNT(*) AS n FROM payments WHERE status = 'refunded' "
+            "AND paid_at >= ?",
+            (now_ts - 30 * day,),
+        )
+        return {
+            "users": users or {},
+            "paying_users": int(paying["n"]) if paying else 0,
+            "money": money,
+            "refunds_30d": int(refunds["n"]) if refunds else 0,
+        }
+
     async def claim_server_traffic_alert(self, period: str, level: str) -> bool:
         changed = await self._execute(
             "INSERT OR IGNORE INTO server_traffic_alerts (period, level, created_at) "
