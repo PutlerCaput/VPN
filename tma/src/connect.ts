@@ -1,4 +1,4 @@
-// One-tap links to the connect page on this site. The page opens the chosen VPN
+// One-tap links to the connect page on this site. The page opens the chosen client
 // app with the subscription link, which travels in the URL fragment only.
 export const CONNECT_APPS = [
   { app: "happ", label: "📲 Happ" },
