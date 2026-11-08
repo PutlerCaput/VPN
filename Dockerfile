@@ -62,6 +62,15 @@ ARG VITE_BOT_USERNAME
 ENV VITE_BOT_USERNAME=${VITE_BOT_USERNAME}
 RUN npm run build
 
+# ---------- Legal documents as readable pages (stdlib only) ----------
+FROM python:3.11-slim-bookworm AS legal-builder
+WORKDIR /build
+COPY scripts/render_legal.py ./
+COPY scripts/legal_page ./legal_page
+COPY legal/oferta.md legal/privacy.md ./legal/
+ARG PUBLIC_ORIGIN=https://app.cyberdefency.com
+RUN python render_legal.py --source legal --out /out --origin "$PUBLIC_ORIGIN"
+
 # ---------- Caddy with rate limiting ----------
 FROM caddy:2.11.7-builder AS caddy-builder
 RUN --mount=type=secret,id=proxy_ca \
@@ -78,3 +87,5 @@ COPY --from=pwa-builder /pwa/dist /srv/pwa
 COPY --from=tma-builder /tma/dist /srv/tma
 COPY legal/oferta.md /srv/legal/oferta.md
 COPY legal/privacy.md /srv/legal/privacy.md
+COPY --from=legal-builder /out/oferta.html /srv/legal/oferta.html
+COPY --from=legal-builder /out/privacy.html /srv/legal/privacy.html

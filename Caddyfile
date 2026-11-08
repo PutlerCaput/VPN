@@ -37,26 +37,46 @@
 	}
 
 	# The contract must be readable without a Telegram session or app login.
-	@public_offer path /oferta /oferta.md
+	# /oferta is a styled page built from legal/oferta.md (scripts/render_legal.py);
+	# /oferta.md is the same text for download.
+	@public_offer path /oferta /oferta/
 	handle @public_offer {
 		root * /srv/legal
-		rewrite * /oferta.md
+		rewrite * /oferta.html
+		header {
+			Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+			Cache-Control "public, max-age=3600"
+		}
+		file_server
+	}
+	@public_offer_md path /oferta.md
+	handle @public_offer_md {
+		root * /srv/legal
 		header {
 			Content-Type "text/markdown; charset=utf-8"
-			Content-Disposition "inline; filename=publichnaya-oferta.md"
+			Content-Disposition "attachment; filename=publichnaya-oferta.md"
 			Cache-Control "public, max-age=3600"
 		}
 		file_server
 	}
 
 	# The privacy policy must be public too (152-FZ, art. 18.1 part 2).
-	@public_privacy path /privacy /privacy.md
+	@public_privacy path /privacy /privacy/
 	handle @public_privacy {
 		root * /srv/legal
-		rewrite * /privacy.md
+		rewrite * /privacy.html
+		header {
+			Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+			Cache-Control "public, max-age=3600"
+		}
+		file_server
+	}
+	@public_privacy_md path /privacy.md
+	handle @public_privacy_md {
+		root * /srv/legal
 		header {
 			Content-Type "text/markdown; charset=utf-8"
-			Content-Disposition "inline; filename=politika-personalnyh-dannyh.md"
+			Content-Disposition "attachment; filename=politika-personalnyh-dannyh.md"
 			Cache-Control "public, max-age=3600"
 		}
 		file_server
