@@ -304,6 +304,36 @@ def test_the_report_ties_every_login_to_the_key_it_used(box: Box) -> None:
     assert "ipinfo.io" in out
 
 
+def test_the_report_warns_about_a_key_stuck_to_the_line_before_it(box: Box) -> None:
+    # `echo KEY >> authorized_keys` after a last line without a newline: the new
+    # key becomes the tail of the old key's comment and sshd never sees it.
+    box.keys.write_text(
+        "ssh-rsa AAAAB3hostsupport support@ssh.adminvps.net"
+        "ssh-ed25519 AAAAC3Nzastuckkey pc\n"
+        "ssh-ed25519 AAAAC3Nzaphoneblob phone\n",
+        encoding="utf-8",
+    )
+    code, out, _ = box.run()
+    assert code == 0, out
+    assert "WARNING: line 1 holds more than one key stuck together" in out
+    assert "sshd reads only the first key" in out
+    assert '#1 RSA "support@ssh.adminvps.netssh-ed"' in out  # as the owner saw it
+
+
+def test_a_normal_key_file_gets_no_stuck_key_warning(box: Box) -> None:
+    code, out, _ = box.run()
+    assert code == 0, out
+    assert "stuck together" not in out
+
+
+def test_the_documented_ways_to_add_a_key_start_with_a_newline() -> None:
+    doc = (ROOT / "docs" / "SERVER_MAINTENANCE.md").read_text(encoding="utf-8")
+    assert ">> /root/.ssh/authorized_keys" in doc
+    assert "printf '\\n%s\\n' 'ВСТАВЬТЕ_СТРОКУ' >> /root/.ssh/authorized_keys" in doc
+    assert "echo 'ВСТАВЬТЕ_СТРОКУ' >>" not in doc  # the way keys got stuck together
+    assert "{ echo; cat ~/.ssh/id_ed25519.pub; } | ssh de" in doc
+
+
 def test_a_key_comment_cannot_talk_to_the_terminal(box: Box) -> None:
     box.keys.write_text(
         "ssh-ed25519 EVILEVIL4 \x1b[31mred " + "x" * 80 + "\n", encoding="utf-8"
