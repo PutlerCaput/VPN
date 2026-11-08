@@ -258,6 +258,13 @@ report() {
     done <<<"$keys"
     say "  Yours? Phone: ssh-keygen -lf ~/.ssh/id_ed25519.pub   PC (PowerShell): ssh-keygen -lf \$env:USERPROFILE\\.ssh\\id_ed25519.pub"
     say "  Not yours: bash scripts/ssh_hardening.sh --remove-key <first 6+ characters after SHA256:>"
+    local stuck
+    stuck="$(awk '{ n = gsub(/(ssh-(rsa|ed25519|dss)|ecdsa-sha2-nistp(256|384|521)) +AAAA/, "&"); if (n > 1) printf "%d ", NR }' "$AUTH_KEYS" 2>/dev/null || true)"
+    if [[ -n "$stuck" ]]; then
+      say "  WARNING: line ${stuck% } holds more than one key stuck together (a key was appended to a line that had no newline)."
+      say "           sshd reads only the first key of such a line; the others do not work, and show up above only as the end of a comment."
+      say "           Fix: --remove-key for that line, then add the lost key again on a line of its own (docs/SERVER_MAINTENANCE.md, step 6)."
+    fi
   fi
 
   section "Logins in the last $LOOKBACK (check that every address is yours)"
