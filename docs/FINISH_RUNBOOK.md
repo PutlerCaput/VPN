@@ -201,6 +201,11 @@ cd "$WORKDIR" && docker compose -p "$PROJECT" up -d --no-deps --no-build --force
 удалите резервные копии ключа: `rm -f "$WORKDIR"/secrets/yookassa_secret_key.txt.bak-*`.
 Если в `.env` осталась строка `YOOKASSA_SECRET_KEY=`, её можно удалить: бот её не читает.
 
+## Резервные копии
+
+Раз в сутки зашифрованная копия баз и настроек приходит вам в Telegram. Как
+включить и проверить восстановление: `docs/BACKUPS.md`.
+
 ## Очистка сервера
 
 Обновление системы, Docker и баз вместе с очисткой, а также лимит трафика

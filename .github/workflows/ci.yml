@@ -26,6 +26,8 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
+      - name: age (the backup tests encrypt and decrypt for real)
+        run: sudo apt-get install -y -q age
       - name: Secret scan
         run: ./scripts/secret_scan.sh
       - name: Ruff
