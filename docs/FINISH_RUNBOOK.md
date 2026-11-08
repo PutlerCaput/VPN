@@ -23,6 +23,17 @@
 git -C /root/vpn-src pull --ff-only && git -C /root/vpn-src log --oneline -1
 ```
 
+Если `pull` пишет `Not possible to fast-forward`, значит ветку начали заново от
+свежего `main` после слияния pull request. Прежнее состояние сохраняется в
+ветке `backup-before-reset`, незакоммиченные правки остаются на месте:
+
+```bash
+git -C /root/vpn-src branch -f backup-before-reset HEAD
+git -C /root/vpn-src fetch origin
+git -C /root/vpn-src checkout -B ccr-67b53ac3-v9lutm origin/ccr-67b53ac3-v9lutm
+git -C /root/vpn-src log --oneline -1
+```
+
 Если её нет, сначала один раз дайте серверу доступ к GitHub только на чтение:
 
 ```bash
@@ -103,6 +114,8 @@ VPN-вход на RU (DNAT 443) и WireGuard/Squid для запросов к AP
 - Bot Settings → Configure Mini App (если используется) → тот же адрес.
 - Bot Settings → Privacy Policy → `https://app.cyberdefency.com/privacy`.
 - `/setdomain` → `app.cyberdefency.com` (вход через Telegram на сайте).
+- Аватар, картинка описания и экран загрузки Mini App — по разделу
+  «Что сделать вручную в @BotFather» в `docs/BRANDING.md`.
 
 ## Шаг 8. Проверка в Telegram
 
