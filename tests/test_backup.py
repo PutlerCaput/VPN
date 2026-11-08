@@ -312,6 +312,65 @@ def test_restore_opens_the_archive_into_a_new_folder_and_checks_it(
     assert "already exists" in again.stderr
 
 
+def _break_age_and_offer_rage(env: dict[str, str], real_age: str) -> None:
+    """The owner's phone: every Go program in Termux fails, rage is installed."""
+    bin_dir = Path(env["PATH"].split(":")[0])
+    (bin_dir / "age").write_text(
+        '#!/usr/bin/env bash\necho "age $*" >> "$FAKE_LOG"\n'
+        'echo "age: error: too many arguments" >&2\nexit 1\n',
+        encoding="utf-8",
+    )
+    (bin_dir / "rage").write_text(
+        f'#!/usr/bin/env bash\necho "rage $*" >> "$FAKE_LOG"\nexec {real_age} "$@"\n',
+        encoding="utf-8",
+    )
+    for name in ("age", "rage"):
+        (bin_dir / name).chmod(0o755)
+
+
+@needs_age
+def test_restore_uses_rage_when_age_cannot_run(
+    env: dict[str, str], tmp_path: Path
+) -> None:
+    real_age = shutil.which("age")
+    assert real_age is not None
+    run("backup_all.sh", env)
+    (archive,) = archives(env)
+    _break_age_and_offer_rage(env, real_age)
+
+    dest = tmp_path / "restored"
+    result = run("restore_backup.sh", env, str(archive), env["AGE_IDENTITY"], str(dest))
+    assert result.returncode == 0, result.stderr
+    assert "RESTORE_OK" in result.stdout
+    assert (dest / "bot" / "bot.db").read_text(encoding="utf-8").strip() == (
+        "BOT-DATABASE-CONTENT"
+    )
+    log = calls(env)
+    assert "age --version" in log  # asked first, and it failed
+    assert any(c.startswith("rage -d -i ") for c in log)
+    assert not any(c.startswith("age -d") for c in log)
+
+
+@needs_age
+def test_restore_says_what_to_install_when_neither_age_nor_rage_runs(
+    env: dict[str, str], tmp_path: Path
+) -> None:
+    real_age = shutil.which("age")
+    assert real_age is not None
+    run("backup_all.sh", env)
+    (archive,) = archives(env)
+    _break_age_and_offer_rage(env, real_age)
+    (Path(env["PATH"].split(":")[0]) / "rage").unlink()
+    if shutil.which("rage", path=env["PATH"]):
+        pytest.skip("a rage is installed on this machine")
+
+    dest = tmp_path / "restored"
+    result = run("restore_backup.sh", env, str(archive), env["AGE_IDENTITY"], str(dest))
+    assert result.returncode == 1
+    assert "pkg install rage" in result.stderr
+    assert not dest.exists()
+
+
 @needs_age
 def test_restore_refuses_the_wrong_key_and_a_damaged_archive(
     env: dict[str, str], tmp_path: Path
