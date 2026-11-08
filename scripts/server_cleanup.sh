@@ -9,8 +9,9 @@
 # Never removed: running images, the newest two rollback images of each service,
 # :latest, the base images of the bot and the site, payments and legal records,
 # the GitHub checkout, the encrypted copies made by backup.sh, the running
-# kernel. The database loses only technical rows (db/maintenance.py) and gets
-# a checked copy first. Stopped containers, volumes, images no container uses
+# kernel. The build cache is cut down to the layers of the latest builds (2 GB),
+# so the next build is not slow. The database loses only technical rows
+# (db/maintenance.py) and gets a checked copy first. Stopped containers, volumes, images no container uses
 # and large files are only listed: whether they are needed is your call.
 set -o pipefail
 
@@ -19,6 +20,7 @@ APPLY=0
 CONTAINER="${CONTAINER:-node-rental-bot-1}"
 KEEP_ROLLBACKS=2
 KEEP_COPIES=2
+CACHE_KEEP="${CACHE_KEEP:-2GB}"  # build cache that stays: the layers of the latest builds
 MB=$((1024 * 1024))
 LOG_REPORT_MB=50
 LOG_EMPTY_MB=200
@@ -93,9 +95,22 @@ for repo in node-rental-bot node-rental-web; do
 done
 if ((APPLY)); then
   docker image prune -f >/dev/null 2>&1 && say "  dangling images removed"
-  docker builder prune -f --filter until=168h >/dev/null 2>&1 && say "  build cache older than 7 days removed"
+  # An old week-long rule left 5 GB of cache on a 15 GB disk, because every
+  # build is recent. A cap keeps the latest layers and drops the rest. The flag
+  # was --keep-storage before Docker 28; the last resort is the age filter.
+  cache_done=0
+  for flag in --reserved-space --keep-storage; do
+    if docker builder prune -f "$flag" "$CACHE_KEEP" >/dev/null 2>&1; then
+      say "  build cache cut down to $CACHE_KEEP: the layers of the latest builds stay"
+      cache_done=1
+      break
+    fi
+  done
+  if ((!cache_done)) && docker builder prune -f --filter until=24h >/dev/null 2>&1; then
+    say "  build cache older than a day removed"
+  fi
 else
-  say "  would remove: dangling images and build cache older than 7 days"
+  say "  would remove: dangling images; build cache above $CACHE_KEEP (the layers of the latest builds stay)"
 fi
 
 say ""

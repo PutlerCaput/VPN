@@ -150,6 +150,7 @@ def test_report_lists_and_removes_nothing(env: dict[str, str]) -> None:
     assert "libfoo1" not in out
     assert not [c for c in calls if c.startswith(("docker rmi", "docker rm "))]
     assert not [c for c in calls if "purge" in c or "prune" in c]
+    assert "build cache above 2GB (the layers of the latest builds stay)" in out
     assert Path(env["BIG_LOG"]).stat().st_size == 250 * 1024 * 1024
 
 
@@ -172,3 +173,6 @@ def test_apply_removes_only_the_safe_part(env: dict[str, str]) -> None:
     purges = [c for c in calls if "purge" in c]
     assert purges == [f"apt-get -y -q purge {OLD_KERNEL}"]
     assert "journalctl --vacuum-time=14d" in calls
+    # The build cache is capped, not aged out: every build is recent.
+    assert "docker builder prune -f --reserved-space 2GB" in calls
+    assert "--filter" not in " ".join(c for c in calls if "builder prune" in c)
