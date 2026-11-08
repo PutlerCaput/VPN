@@ -13,6 +13,7 @@ from services.audit import audit
 from services.container import Services
 from services.scheduler import SEVERE_KINDS
 from services.security import html_escape, is_valid_payment_id
+from services.server_traffic import report as traffic_report
 from services.telegram_rub import PROVIDER_PREFIX as RUB_PROVIDER_PREFIX
 
 router = Router(name="admin")
@@ -58,6 +59,16 @@ async def cmd_status(message: Message, services: Services) -> None:
         f"Время проверки: {datetime.now(UTC):%Y-%m-%d %H:%M:%S} UTC\n"
         "VPN-туннель: этой командой не проверяется."
     )
+
+
+@router.message(Command("traffic"))
+async def cmd_traffic(message: Message, services: Services) -> None:
+    if services.traffic is None:
+        await message.answer(
+            "Учёт трафика сервера выключен (SERVER_TRAFFIC_LIMIT_GB=0)."
+        )
+        return
+    await message.answer(traffic_report(await services.traffic.compute()))
 
 
 @router.message(Command("confirm"), CanManage())

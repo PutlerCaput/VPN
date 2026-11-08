@@ -81,6 +81,7 @@ export function LegalPage({ accepted }: { accepted: boolean }) {
           </button>
           {accept.isError && <p className={ui.error}>{ru.legal.failed}</p>}
           {accept.data?.trial === "provision_failed" && <p className={ui.error}>{ru.legal.provisionFailed}</p>}
+          {accept.data?.trial === "trials_paused" && <p className={ui.error}>{ru.legal.trialsPaused}</p>}
         </section>
       )}
     </main>

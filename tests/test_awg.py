@@ -548,3 +548,18 @@ def test_amnezia_guide_only_when_connected() -> None:
     assert any(
         (b.url or "").startswith("https://github.com/amnezia-vpn/") for b in buttons
     )
+
+
+async def test_awg_traffic_counts_toward_the_server_total(
+    services: Any, awg: AwgService, fake_agent: FakeAgent
+) -> None:
+    await _active(services, 640019)
+    device = await awg.add_device(640019)
+    pk = str(device["public_key"])
+    fake_agent.state[pk]["rx_bytes"] = 3 * GIB
+    fake_agent.state[pk]["tx_bytes"] = 2 * GIB
+    await awg.reconcile()
+    fake_agent.state[pk]["rx_bytes"] = 4 * GIB
+    await awg.reconcile()
+    rows = await services.db.server_traffic_since("2000-01-01")
+    assert sum(value for _, value in rows) == 6 * GIB

@@ -66,6 +66,12 @@ export function LegalPage({ accepted }: { accepted: boolean }) {
           {accept.data?.trial === "provision_failed" && (
             <p className="error">Оферта принята, но узел пока не готов. Обновите страницу через пару минут.</p>
           )}
+          {accept.data?.trial === "trials_paused" && (
+            <p className="error">
+              Оферта принята. Пробный доступ временно недоступен: сервер близок к месячному лимиту трафика. Подписку
+              можно оформить в разделе «Оплата».
+            </p>
+          )}
         </div>
       )}
     </main>

@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from collections import OrderedDict, defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -90,6 +91,9 @@ class ProvisioningService:
         self._traffic_cache: OrderedDict[str, tuple[float, TrafficStatus]] = (
             OrderedDict()
         )
+        # True while new trials are paused (the server is near its monthly
+        # traffic allowance: services/server_traffic.py).
+        self.trial_gate: Callable[[], bool] | None = None
 
     def _lock(self, telegram_id: int) -> asyncio.Lock:
         return self._locks[telegram_id]
@@ -137,6 +141,8 @@ class ProvisioningService:
                     user["config_link"],
                     user["expires_at"],
                 )
+            if self.trial_gate is not None and self.trial_gate():
+                return TrialResult(False, "trials_paused")
             node = user["node_username"] or self._new_node(telegram_id)
             expires_at = _ts() + self.settings.trial_seconds
             tier = self.settings.default_tier

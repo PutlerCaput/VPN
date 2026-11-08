@@ -22,6 +22,7 @@ import os
 import time
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -51,6 +52,10 @@ PARAM_KEYS = ("jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4")
 
 class AwgError(Exception):
     pass
+
+
+def utc_day() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 async def combined_usage(
@@ -350,6 +355,7 @@ class AwgService:
             except MarzbanError:
                 logger.warning("awg_reconcile_panel_unavailable")
 
+        server_delta = 0
         for telegram_id, user_devices in by_user.items():
             user = await self.db.get_user(telegram_id)
             delta = 0
@@ -364,6 +370,7 @@ class AwgService:
                 delta += counter - last if counter >= last else counter
                 if counter != last:
                     await self.db.set_awg_counter(int(device["id"]), counter)
+            server_delta += delta
             exhausted = False
             if user is not None:
                 exhausted = await self._account(user, delta, panel)
@@ -391,6 +398,14 @@ class AwgService:
                 await self.agent.delete(public_key)
             except AwgError:
                 logger.warning("awg_reconcile_delete_failed")
+
+        if server_delta > 0:
+            # The server carried this traffic too: it counts against the
+            # hosting plan's allowance (services/server_traffic.py).
+            try:
+                await self.db.add_server_traffic(utc_day(), server_delta)
+            except Exception:
+                logger.warning("awg_server_traffic_failed")
 
     async def window_bytes(self, telegram_id: int, window: int) -> int:
         """AmneziaWG traffic of the given Marzban window (0 if none)."""
