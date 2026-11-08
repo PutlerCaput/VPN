@@ -60,7 +60,9 @@ Telegram Stars внутри бота ([правила и устройство](d
 
 **Тихая работа** — [OWNER_OPERATIONS.md](docs/OWNER_OPERATIONS.md#тихая-работа): без рекламы,
 сайт не предлагается поисковикам (`X-Robots-Tag`, `meta robots`), сводка числами
-в `/stats`.
+в `/stats`. Расписание проверок и юридические вопросы владельца —
+[OWNER_CHECKLIST.md](docs/OWNER_CHECKLIST.md). Вход на сервер только по ключу с откатом —
+`scripts/ssh_hardening.sh` ([SERVER_MAINTENANCE.md](docs/SERVER_MAINTENANCE.md)).
 
 Сравнение с крупными VPN-сервисами и следующий этап — [LEVEL_UP_2026-11-06.md](docs/LEVEL_UP_2026-11-06.md):
 ссылка-подписка со всеми серверами, `/servers` и карточка серверов в приложениях,
