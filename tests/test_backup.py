@@ -349,6 +349,10 @@ def test_the_installer_writes_the_timer_and_makes_the_first_backup(
     assert result.returncode == 0, result.stderr
     assert "BACKUP_INSTALL_OK" in result.stdout
     assert "BACKUP_OK" in result.stdout
+    assert f"BACKUP_DIR={env['BACKUP_DIR']}" in (etc / "node-backup.env").read_text(
+        encoding="utf-8"
+    )
+    assert len(archives(env)) == 1  # in the folder asked for, not in /root
 
     conf = (etc / "node-backup.env").read_text(encoding="utf-8")
     assert f"AGE_RECIPIENT={env['AGE_RECIPIENT']}" in conf
@@ -360,6 +364,55 @@ def test_the_installer_writes_the_timer_and_makes_the_first_backup(
     assert "OnCalendar=*-*-* 03:20:00 UTC" in timer
     assert "Persistent=true" in timer
     assert "systemctl enable --now node-backup.timer" in calls(env)
+
+
+@needs_age
+@needs_root
+def test_the_installer_can_keep_every_copy_on_the_server(
+    env: dict[str, str], tmp_path: Path
+) -> None:
+    etc = tmp_path / "etc"
+    options = {**env, "ETC_DIR": str(etc)}
+    result = run("install_backup.sh", options, env["AGE_RECIPIENT"], "--no-telegram")
+    assert result.returncode == 0, result.stderr
+    assert "BACKUP_INSTALL_OK" in result.stdout
+    assert "telegram=skipped" in result.stdout  # the first copy is not sent either
+    assert "No copy leaves this server" in result.stdout
+    assert "SEND_TELEGRAM=0" in (etc / "node-backup.env").read_text(encoding="utf-8")
+    assert not any("send_backup.py file" in c for c in calls(env))
+    assert len(archives(env)) == 1
+
+    again = run("install_backup.sh", options, env["AGE_RECIPIENT"])  # changed mind
+    assert again.returncode == 0, again.stderr
+    assert "SEND_TELEGRAM=1" in (etc / "node-backup.env").read_text(encoding="utf-8")
+
+
+@needs_root
+def test_the_installer_refuses_a_folder_that_is_not_a_plain_path(
+    env: dict[str, str], tmp_path: Path
+) -> None:
+    # The folder goes into a file that bash sources: no $(...) may get through.
+    options = {**env, "ETC_DIR": str(tmp_path / "etc"), "BACKUP_DIR": "/x/$(id)"}
+    result = run("install_backup.sh", options, env["AGE_RECIPIENT"])
+    assert result.returncode == 1
+    assert "plain absolute path" in result.stderr
+    assert not (tmp_path / "etc" / "node-backup.env").exists()
+
+
+@needs_root
+@pytest.mark.parametrize("extra", [["--telegram"], ["--no-telegram", "x"]])
+def test_the_installer_rejects_options_it_does_not_know(
+    env: dict[str, str], tmp_path: Path, extra: list[str]
+) -> None:
+    result = run(
+        "install_backup.sh",
+        {**env, "ETC_DIR": str(tmp_path / "etc")},
+        env["AGE_RECIPIENT"],
+        *extra,
+    )
+    assert result.returncode == 1
+    assert "usage: install_backup.sh" in result.stderr
+    assert not (tmp_path / "etc" / "node-backup.env").exists()
 
 
 @needs_root
