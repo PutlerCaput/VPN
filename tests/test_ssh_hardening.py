@@ -95,12 +95,19 @@ echo "systemd-run $*" >> "$FAKE_LOG"
 exit "${FAKE_TIMER_FAILS:-0}"
 """
 
+# Like ssh-keygen -l: options in front of the key type are skipped, and a line
+# that holds no key prints nothing.
 FAKE_SSH_KEYGEN = """#!/usr/bin/env bash
 n=0
 while IFS= read -r line; do
-  [[ -z "$line" || "$line" == \\#* ]] && continue
+  read -r -a w <<<"$line"
+  i=0
+  while ((i < ${#w[@]})) && [[ "${w[i]}" != ssh-* ]]; do i=$((i + 1)); done
+  ((i < ${#w[@]})) || continue
   n=$((n + 1))
-  echo "256 SHA256:fingerprint$n person@example.org (ED25519)"
+  case "${w[i]}" in ssh-rsa) kind=RSA ;; *) kind=ED25519 ;; esac
+  comment="${w[*]:i+2}"
+  echo "256 SHA256:${w[i+1]} ${comment:-no comment} ($kind)"
 done < "$2"
 ((n > 0))
 """
@@ -121,17 +128,48 @@ LISTEN 0 128 [::]:22 [::]:*
 LISTEN 0 4096 *:443 *:*
 LISTEN 0 4096 127.0.0.1:8080 0.0.0.0:*
 LISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:*
+LISTEN 0 4096 10.203.0.2:18081 0.0.0.0:*
+LISTEN 0 4096 [::1]:631 [::]:*
 EOF
 """
 
-KEY_LOGINS = """\
-Accepted publickey for root from 203.0.113.7 port 51234 ssh2: ED25519 SHA256:abc
-Accepted publickey for root from 203.0.113.7 port 51240 ssh2: ED25519 SHA256:abc
-Accepted password for root from 198.51.100.9 port 40000 ssh2
-Invalid user admin from 192.0.2.44 port 1111
-Failed password for invalid user admin from 192.0.2.44 port 1111 ssh2
-Failed password for root from 192.0.2.45 port 2222 ssh2
+AUTHORIZED_KEYS = """\
+# keys of the owner
+ssh-ed25519 PHONEPHONE1 phone
+ssh-rsa PCPCPCPC2 desktop-pc
+ssh-ed25519 OLDOLDOLD3 old-laptop
 """
+
+
+def _journal(*rows: tuple[str, str]) -> str:
+    """What `journalctl -o short-iso` prints for sshd: a time, then the message."""
+    return "".join(
+        f"{when}+0000 host sshd[{n}]: {message}\n"
+        for n, (when, message) in enumerate(rows, 1)
+    )
+
+
+def _by_key(address: str, port: int, kind: str, blob: str) -> str:
+    who = f"root from {address} port {port}"
+    return f"Accepted publickey for {who} ssh2: {kind} SHA256:{blob}"
+
+
+KEY_LOGINS = _journal(
+    ("2026-11-08T12:01:10", _by_key("203.0.113.7", 51234, "ED25519", "PHONEPHONE1")),
+    ("2026-11-08T12:05:10", _by_key("203.0.113.7", 51240, "ED25519", "PHONEPHONE1")),
+    ("2026-11-07T09:00:00", _by_key("192.0.2.99", 4000, "RSA", "PCPCPCPC2")),
+    ("2026-11-06T20:00:00", _by_key("192.0.2.77", 4001, "ED25519", "GONEGONE9")),
+    (
+        "2026-11-05T10:00:00",
+        "Accepted password for root from 198.51.100.9 port 40000 ssh2",
+    ),
+    ("2026-11-05T10:01:00", "Invalid user admin from 192.0.2.44 port 1111"),
+    (
+        "2026-11-05T10:01:01",
+        "Failed password for invalid user admin from 192.0.2.44 port 1111 ssh2",
+    ),
+    ("2026-11-05T10:02:00", "Failed password for root from 192.0.2.45 port 2222 ssh2"),
+)
 PASSWORD_ONLY = "Accepted password for root from 198.51.100.9 port 40000 ssh2\n"
 NEW_KEY_LOGIN = "Accepted publickey for root from 203.0.113.8 port 6000 ssh2\n"
 
@@ -154,7 +192,8 @@ class Box:
         (self.etc / "ssh" / "sshd_config").write_text(
             "Include /etc/ssh/sshd_config.d/*.conf\nUsePAM yes\n", encoding="utf-8"
         )
-        self.keys.write_text("ssh-ed25519 AAAAC3Nza phone\n", encoding="utf-8")
+        self.keys.write_text(AUTHORIZED_KEYS, encoding="utf-8")
+        self.keys.chmod(0o600)
         self.journal.write_text(KEY_LOGINS, encoding="utf-8")
         self.journal_new.write_text("", encoding="utf-8")
 
@@ -233,17 +272,56 @@ def test_the_report_changes_nothing_and_shows_what_matters(box: Box) -> None:
     assert "REPORT ONLY" in out
     assert "password login" in out
     assert "yes" in out
-    assert "(ED25519) SHA256:fingerprint1" in out
-    assert "person@example.org" not in out  # a key comment is often an e-mail
-    assert "root from 203.0.113.7  x2" in out
-    assert "root from 198.51.100.9  x1" in out
     assert "refused guesses: 3 log lines from 2 addresses" in out
     assert "Match" in out
-    assert "22 443" in out
-    assert "8080" not in out  # loopback is not "open to the internet"
     assert "set: PasswordAuthentication no" in out
     assert "SSH_HARDENING_REPORT_DONE" in out
     untouched(box, calls)
+    assert box.keys.read_text(encoding="utf-8") == AUTHORIZED_KEYS
+
+
+def test_the_report_numbers_the_keys_and_shows_which_are_used(box: Box) -> None:
+    code, out, _ = box.run()
+    assert code == 0, out
+    assert '#1 ED25519 "phone"\n     SHA256:PHONEPHONE1' in out
+    assert "2 logins in the last 14 days, last 2026-11-08 12:05" in out
+    assert '#2 RSA "desktop-pc"' in out
+    assert "1 logins in the last 14 days, last 2026-11-07 09:00" in out
+    assert '#3 ED25519 "old-laptop"\n     SHA256:OLDOLDOLD3\n     no logins' in out
+    assert "--remove-key" in out
+
+
+def test_the_report_ties_every_login_to_the_key_it_used(box: Box) -> None:
+    code, out, _ = box.run()
+    assert code == 0, out
+    assert "by key:      4" in out
+    assert "by password: 1" in out
+    assert "2x  root from 203.0.113.7  key #1  last 2026-11-08 12:05" in out
+    assert "1x  root from 192.0.2.99  key #2  last 2026-11-07 09:00" in out
+    # a login by a key that is no longer in the file stands out
+    assert "root from 192.0.2.77  key NOT in the list" in out
+    assert "1x  root from 198.51.100.9  last 2026-11-05 10:00" in out
+    assert "ipinfo.io" in out
+
+
+def test_a_key_comment_cannot_talk_to_the_terminal(box: Box) -> None:
+    box.keys.write_text(
+        "ssh-ed25519 EVILEVIL4 \x1b[31mred " + "x" * 80 + "\n", encoding="utf-8"
+    )
+    code, out, _ = box.run()
+    assert code == 0, out
+    assert "\x1b" not in out
+    assert "x" * 31 not in out  # cut at 30 characters
+
+
+def test_the_report_tells_public_from_private_listeners(box: Box) -> None:
+    code, out, _ = box.run()
+    assert code == 0, out
+    assert "on every address: 22 443" in out
+    assert "on a private address only: 18081" in out
+    assert "8080" not in out  # loopback is nobody's business
+    assert " 53" not in out
+    assert " 631" not in out
 
 
 def test_the_report_says_when_there_is_nothing_to_do(box: Box) -> None:
@@ -490,6 +568,116 @@ def test_revert_with_nothing_to_undo_is_harmless(box: Box) -> None:
     assert code == 0, out
     assert "nothing to undo" in out
     assert not box.reloads(calls)
+
+
+# --------------------------------------------------------------- --remove-key
+def removed_copies(box: Box) -> list[Path]:
+    return sorted(box.keys.parent.glob("authorized_keys.removed-*"))
+
+
+def test_remove_key_deletes_only_that_key_and_keeps_a_copy(box: Box) -> None:
+    code, out, calls = box.run("--remove-key", "OLDOLD")
+    assert code == 0, out
+    assert 'SSH_KEY_REMOVED: ED25519 "old-laptop" SHA256:OLDOLDOLD3' in out
+    assert box.keys.read_text(encoding="utf-8") == (
+        "# keys of the owner\n"
+        "ssh-ed25519 PHONEPHONE1 phone\n"
+        "ssh-rsa PCPCPCPC2 desktop-pc\n"
+    )
+    assert box.keys.stat().st_mode & 0o777 == 0o600
+    copies = removed_copies(box)
+    assert len(copies) == 1
+    assert copies[0].read_text(encoding="utf-8") == AUTHORIZED_KEYS
+    assert copies[0].stat().st_mode & 0o777 == 0o600
+    assert "NOTE" not in out  # that key was idle
+    assert not box.reloads(calls)  # sshd reads the file at every login
+
+
+def test_remove_key_takes_the_fingerprint_as_the_report_prints_it(box: Box) -> None:
+    code, out, _ = box.run("--remove-key", "SHA256:OLDOLDOLD3")
+    assert code == 0, out
+    assert "old-laptop" not in box.keys.read_text(encoding="utf-8")
+
+
+def test_remove_key_says_when_the_key_was_in_use(box: Box) -> None:
+    code, out, _ = box.run("--remove-key", "PCPCPC")
+    assert code == 0, out
+    assert "NOTE: this key had 1 logins in the last 14 days" in out
+    assert "last 2026-11-07 09:00" in out
+    assert "put the line back" in out
+
+
+def test_remove_key_removes_a_key_listed_twice_together(box: Box) -> None:
+    box.keys.write_text(
+        "ssh-ed25519 DUPDUPDUP5 laptop\nssh-ed25519 PHONEPHONE1 phone\n"
+        "ssh-ed25519 DUPDUPDUP5 laptop-again\n",
+        encoding="utf-8",
+    )
+    code, out, _ = box.run("--remove-key", "DUPDUP")
+    assert code == 0, out
+    assert box.keys.read_text(encoding="utf-8") == "ssh-ed25519 PHONEPHONE1 phone\n"
+
+
+def test_remove_key_leaves_lines_it_cannot_read_alone(box: Box) -> None:
+    box.keys.write_text(
+        'command="x" ssh-ed25519 PHONEPHONE1 phone\nnot a key at all\n'
+        "ssh-rsa PCPCPCPC2 desktop-pc\n",
+        encoding="utf-8",
+    )
+    code, out, _ = box.run("--remove-key", "PCPCPC")
+    assert code == 0, out
+    # sshd skips what it cannot read; we do not decide for it
+    assert "not a key at all" in box.keys.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("argument", "message"),
+    [
+        ("OLDOL", "at least 6 characters"),  # too short to be sure
+        ("OLD", "at least 6 characters"),
+        ("OLD OLD", "at least 6 characters"),
+        ("NOSUCHKEY", "no key in"),
+        ("../../etc", "at least 6 characters"),
+    ],
+)
+def test_remove_key_refuses_what_it_cannot_be_sure_of(
+    box: Box, argument: str, message: str
+) -> None:
+    code, out, _ = box.run("--remove-key", argument)
+    assert code == 1
+    assert message in out
+    assert box.keys.read_text(encoding="utf-8") == AUTHORIZED_KEYS
+    assert not removed_copies(box)
+
+
+def test_remove_key_refuses_an_ambiguous_start(box: Box) -> None:
+    box.keys.write_text(
+        "ssh-ed25519 PHONEPHONE1 phone\nssh-ed25519 PHONEPLAIN6 other\n",
+        encoding="utf-8",
+    )
+    code, out, _ = box.run("--remove-key", "PHONEP")
+    assert code == 1
+    assert "more than one key" in out
+    assert not removed_copies(box)
+    code, out, _ = box.run("--remove-key", "PHONEPH")  # one more letter settles it
+    assert code == 0, out
+    assert box.keys.read_text(encoding="utf-8") == "ssh-ed25519 PHONEPLAIN6 other\n"
+
+
+def test_remove_key_never_removes_the_last_key(box: Box) -> None:
+    box.keys.write_text("ssh-ed25519 PHONEPHONE1 phone\n", encoding="utf-8")
+    code, out, _ = box.run("--remove-key", "PHONEP")
+    assert code == 1
+    assert "last key" in out
+    assert box.keys.read_text(encoding="utf-8") == "ssh-ed25519 PHONEPHONE1 phone\n"
+    assert not removed_copies(box)
+
+
+def test_remove_key_needs_exactly_one_argument(box: Box) -> None:
+    assert box.run("--remove-key")[0] == 2
+    assert box.run("--remove-key", "OLDOLD", "extra")[0] == 2
+    assert box.run("--status", "extra")[0] == 2
+    assert box.keys.read_text(encoding="utf-8") == AUTHORIZED_KEYS
 
 
 # ----------------------------------------------------- the doctor's one line
