@@ -13,6 +13,8 @@ from pydantic import ValidationError
 from config import Settings
 from services.telegram_api import bot_session
 
+FAKE_TOKEN = "123456:TEST"
+
 
 @pytest.mark.parametrize(
     "url",
@@ -63,7 +65,7 @@ async def test_bot_api_calls_leave_as_connect_to_telegram_through_the_proxy() ->
     port = server.sockets[0].getsockname()[1]
     session = bot_session(f"http://127.0.0.1:{port}")
     assert session is not None
-    bot = Bot(token="123456:TEST", session=session)
+    bot = Bot(token=FAKE_TOKEN, session=session)
     try:
         with pytest.raises(TelegramNetworkError):
             await bot.get_me()

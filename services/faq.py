@@ -33,7 +33,7 @@ def normalize(text: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Topic:
-    key: str  # callback data is "faq:" + key
+    slug: str  # callback data is "faq:" + slug
     label: str  # text of the topic button
     keywords: tuple[str, ...]  # stems in normalize() form
     answer: str  # HTML, sent with the bot's default parse mode
@@ -170,7 +170,7 @@ SUPPORT_ANSWER = (
 
 TOPICS: tuple[Topic, ...] = (
     Topic(
-        key="payment_missing",
+        slug="payment_missing",
         label="🧾 Оплатил, а доступа нет",
         keywords=(
             "доступа нет",
@@ -187,19 +187,19 @@ TOPICS: tuple[Topic, ...] = (
         answer=PAYMENT_MISSING_ANSWER,
     ),
     Topic(
-        key="trial",
+        slug="trial",
         label="🎁 Пробный период",
         keywords=("пробн", "бесплатн", "триал", "trial", "попробов"),
         answer=TRIAL_ANSWER,
     ),
     Topic(
-        key="tariff",
+        slug="tariff",
         label="💰 Тарифы и цены",
         keywords=("тариф", "цен", "стоимост", "стоит", "сколько", "прайс", "дорог"),
         answer=_tariff_answer(),
     ),
     Topic(
-        key="payment",
+        slug="payment",
         label="💳 Оплата",
         keywords=(
             "оплат",
@@ -218,7 +218,7 @@ TOPICS: tuple[Topic, ...] = (
         answer=PAYMENT_ANSWER,
     ),
     Topic(
-        key="connect",
+        slug="connect",
         label="📱 Подключение",
         keywords=(
             "подключ",
@@ -236,7 +236,7 @@ TOPICS: tuple[Topic, ...] = (
         answer=CONNECT_ANSWER,
     ),
     Topic(
-        key="devices",
+        slug="devices",
         label="📲 Устройства",
         keywords=(
             "устройств",
@@ -250,7 +250,7 @@ TOPICS: tuple[Topic, ...] = (
         answer=_devices_answer(),
     ),
     Topic(
-        key="config",
+        slug="config",
         label="🔐 Моя ссылка",
         keywords=(
             "конфигурац",
@@ -265,7 +265,7 @@ TOPICS: tuple[Topic, ...] = (
         answer=CONFIG_ANSWER,
     ),
     Topic(
-        key="traffic",
+        slug="traffic",
         label="📊 Трафик",
         keywords=(
             "трафик",
@@ -282,7 +282,7 @@ TOPICS: tuple[Topic, ...] = (
         answer=_traffic_answer(),
     ),
     Topic(
-        key="autorenew",
+        slug="autorenew",
         label="🔁 Автопродление",
         keywords=(
             "автопродл",
@@ -297,7 +297,7 @@ TOPICS: tuple[Topic, ...] = (
         answer=AUTORENEW_ANSWER,
     ),
     Topic(
-        key="refund",
+        slug="refund",
         label="↩️ Возврат",
         keywords=(
             "возврат",
@@ -313,7 +313,7 @@ TOPICS: tuple[Topic, ...] = (
         answer=REFUND_ANSWER,
     ),
     Topic(
-        key="privacy",
+        slug="privacy",
         label="🔒 Мои данные",
         keywords=(
             "персональн",
@@ -332,7 +332,7 @@ TOPICS: tuple[Topic, ...] = (
         answer=PRIVACY_ANSWER,
     ),
     Topic(
-        key="about",
+        slug="about",
         label="ℹ️ Что это за сервис",
         keywords=(
             "что за сервис",
@@ -348,13 +348,13 @@ TOPICS: tuple[Topic, ...] = (
         answer=ABOUT_ANSWER,
     ),
     Topic(
-        key="offer",
+        slug="offer",
         label="📄 Оферта",
         keywords=("оферт", "договор", "соглашен"),
         answer=OFFER_ANSWER,
     ),
     Topic(
-        key="support",
+        slug="support",
         label="💬 Поддержка",
         keywords=(
             "поддержк",
@@ -372,7 +372,7 @@ TOPICS: tuple[Topic, ...] = (
     ),
 )
 
-TOPICS_BY_KEY: dict[str, Topic] = {topic.key: topic for topic in TOPICS}
+TOPICS_BY_SLUG: dict[str, Topic] = {topic.slug: topic for topic in TOPICS}
 
 
 def match_topic(text: str) -> Topic | None:

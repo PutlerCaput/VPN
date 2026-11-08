@@ -4,7 +4,7 @@ import { endpoints } from "../api/client";
 import { ru } from "../i18n/ru";
 import ui from "../styles/components.module.css";
 
-/** Locations and their state, like the server list of large VPN apps. */
+/** Locations and their state, shown like the location list of popular client apps. */
 export function ServersCard() {
   const servers = useQuery({ queryKey: ["servers"], queryFn: endpoints.servers, staleTime: 120_000 });
   const data = servers.data;

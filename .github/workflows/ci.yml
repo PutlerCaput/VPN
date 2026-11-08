@@ -62,9 +62,11 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: Forbidden words and unsafe APIs
+        # One "if" per check: under "bash -e" a negated "! grep" never stops the
+        # script, so only the last line used to decide the result.
         run: |
-          ! grep -rniE '\bVPN\b|обход|анонимн|proxy' src --include='*.ts' --include='*.tsx'
-          ! grep -rn 'dangerouslySetInnerHTML' src
+          if grep -rniE '\bVPN\b|обход|анонимн|proxy' src --include='*.ts' --include='*.tsx'; then exit 1; fi
+          if grep -rn 'dangerouslySetInnerHTML' src; then exit 1; fi
 
   docker:
     runs-on: ubuntu-24.04

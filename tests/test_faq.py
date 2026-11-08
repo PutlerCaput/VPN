@@ -11,11 +11,11 @@ from config import TIER_PRICES_RUB, TIERS
 from handlers import build_root_router
 from handlers.faq import faq_question, faq_topic
 from keyboards.faq import faq_topics_kb
-from services.faq import NOT_FOUND_TEXT, TOPICS, TOPICS_BY_KEY, match_topic, normalize
+from services.faq import NOT_FOUND_TEXT, TOPICS, TOPICS_BY_SLUG, match_topic, normalize
 
 
 @pytest.mark.parametrize(
-    ("question", "key"),
+    ("question", "slug"),
     [
         ("сколько стоит подписка?", "tariff"),
         ("Есть ли пробный период", "trial"),
@@ -33,10 +33,10 @@ from services.faq import NOT_FOUND_TEXT, TOPICS, TOPICS_BY_KEY, match_topic, nor
         ("хочу поговорить с оператором", "support"),
     ],
 )
-def test_common_questions_reach_their_topic(question: str, key: str) -> None:
+def test_common_questions_reach_their_topic(question: str, slug: str) -> None:
     topic = match_topic(question)
     assert topic is not None
-    assert topic.key == key
+    assert topic.slug == slug
 
 
 @pytest.mark.parametrize("text", ["", "привет", "ок"])
@@ -48,11 +48,11 @@ def test_normalize_folds_case_yo_and_punctuation() -> None:
     assert normalize("  Ёлка, VPN!  ") == "елка vpn"
 
 
-def test_topic_keys_and_callbacks_are_unique_and_fit_telegram() -> None:
-    keys = [topic.key for topic in TOPICS]
-    assert len(keys) == len(set(keys))
+def test_topic_slugs_and_callbacks_are_unique_and_fit_telegram() -> None:
+    slugs = [topic.slug for topic in TOPICS]
+    assert len(slugs) == len(set(slugs))
     for topic in TOPICS:
-        assert len(f"faq:{topic.key}".encode()) <= 64
+        assert len(f"faq:{topic.slug}".encode()) <= 64
 
 
 def test_every_answer_fits_one_message() -> None:
@@ -76,12 +76,12 @@ def test_answers_do_not_promise_bypassing_blocks() -> None:
     for topic in TOPICS:
         lowered = topic.answer.casefold()
         for phrase in FORBIDDEN_PROMISES:
-            assert phrase not in lowered, (topic.key, phrase)
+            assert phrase not in lowered, (topic.slug, phrase)
 
 
 def test_tariff_answer_quotes_the_configured_terms() -> None:
     standard = TIERS["standard"]
-    answer = TOPICS_BY_KEY["tariff"].answer
+    answer = TOPICS_BY_SLUG["tariff"].answer
     assert f"до {standard.devices} устройств" in answer
     assert f"{standard.traffic_gb} ГБ" in answer
     assert f"{TIER_PRICES_RUB['standard'][1]} ₽" in answer
@@ -92,7 +92,7 @@ def test_topic_buttons_offer_every_menu_topic_and_a_person() -> None:
     callbacks = [button.callback_data for button in buttons]
     for topic in TOPICS:
         if topic.in_menu:
-            assert f"faq:{topic.key}" in callbacks
+            assert f"faq:{topic.slug}" in callbacks
     assert "support:write" in callbacks
     assert "faq:support" not in callbacks
 
@@ -103,7 +103,7 @@ async def test_question_gets_the_matching_answer_with_topic_buttons() -> None:
     message.answer = AsyncMock()
     await faq_question(message)
     message.answer.assert_awaited_once()
-    assert message.answer.await_args.args[0] == TOPICS_BY_KEY["tariff"].answer
+    assert message.answer.await_args.args[0] == TOPICS_BY_SLUG["tariff"].answer
     assert "reply_markup" in message.answer.await_args.kwargs
 
 
@@ -123,7 +123,7 @@ async def test_topic_button_opens_its_answer() -> None:
     callback.message = message
     callback.answer = AsyncMock()
     await faq_topic(callback)
-    assert message.answer.await_args.args[0] == TOPICS_BY_KEY["refund"].answer
+    assert message.answer.await_args.args[0] == TOPICS_BY_SLUG["refund"].answer
 
 
 async def test_unknown_topic_button_asks_to_start_again() -> None:

@@ -14,7 +14,7 @@ def faq_topics_kb() -> InlineKeyboardMarkup:
     buttons = [
         InlineKeyboardButton(
             text=topic.label,
-            callback_data=f"{FAQ_PREFIX}{topic.key}",
+            callback_data=f"{FAQ_PREFIX}{topic.slug}",
         )
         for topic in TOPICS
         if topic.in_menu
