@@ -116,17 +116,20 @@ fi
 say ""
 say "== Other versions of running services' images (re-downloaded if ever needed)"
 mapfile -t bases < <(awk 'toupper($1) == "FROM" { print $2 }' "$SRC/Dockerfile" 2>/dev/null | sort -u)
-declare -A used_repo=()
+# A container started from "amnezia-awg2" runs "amnezia-awg2:latest", so both
+# sides are compared with the tag spelled out.
+norm() { local r="$1"; [[ "${r##*/}" == *:* ]] || r="$r:latest"; printf '%s' "$r"; }
+declare -A used_image=() used_repo=()
 for ref in "${in_use[@]}"; do
-  [[ "${ref##*:}" == */* || "$ref" != *:* ]] && ref="$ref:latest"
+  ref="$(norm "$ref")"
+  used_image["$ref"]=1
   used_repo["${ref%:*}"]=1
 done
+for ref in "${bases[@]}"; do used_image["$(norm "$ref")"]=1; done
 unused=()
 while IFS= read -r image; do
   [[ "$image" == node-rental-* || "$image" == *'<none>'* ]] && continue
-  skip=0
-  for name in "${in_use[@]}" "${bases[@]}"; do [[ "$image" == "$name" ]] && skip=1; done
-  ((skip)) && continue
+  [[ -n "${used_image[$image]:-}" ]] && continue
   if [[ -n "${used_repo[${image%:*}]:-}" ]]; then
     if ((APPLY)); then
       # No -f: an image a container still uses is refused.

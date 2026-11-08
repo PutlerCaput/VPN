@@ -93,6 +93,12 @@ def env(tmp_path: Path) -> dict[str, str]:
                 "running": True,
             },
             {
+                # Started from an untagged name, as on the real server.
+                "name": "amnezia-awg2",
+                "image": "amnezia-awg2",
+                "running": True,
+            },
+            {
                 "name": "old-tunnel",
                 "image": "cloudflare/cloudflared:2024.1.0",
                 "running": False,
@@ -102,6 +108,7 @@ def env(tmp_path: Path) -> dict[str, str]:
             "node-rental-bot:latest",
             "gozargah/marzban:v0.8.4",
             "gozargah/marzban:v0.8.3",
+            "amnezia-awg2:latest",
             "cloudflare/cloudflared:2024.1.0",
             "hello-world:latest",
             "python:3.11-slim-bookworm",
@@ -142,6 +149,7 @@ def test_report_lists_and_removes_nothing(env: dict[str, str]) -> None:
     assert "REPORT ONLY" in out
     assert "would remove: gozargah/marzban:v0.8.3 (no container uses it" in out
     assert "hello-world:latest (123 MB)" in out  # listed, never removed
+    assert "would remove: amnezia-awg2" not in out  # a running container uses it
     assert "old-tunnel (cloudflare/cloudflared:2024.1.0" in out
     assert "3f9c0ffee" in out
     assert "would empty: marzban-marzban-1 (250 MB)" in out
@@ -158,6 +166,7 @@ def test_apply_removes_only_the_safe_part(env: dict[str, str]) -> None:
     out, calls = _run(env, "--apply")
     removed = [c.split()[-1] for c in calls if c.startswith("docker rmi")]
     assert removed == ["gozargah/marzban:v0.8.3"]
+    assert "amnezia-awg2:latest" not in " ".join(calls)
     for kept in (
         "gozargah/marzban:v0.8.4",
         "hello-world:latest",
