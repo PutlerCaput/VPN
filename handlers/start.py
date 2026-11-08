@@ -38,6 +38,12 @@ OFFER_PROMPT = (
 )
 
 
+TRIALS_PAUSED_TEXT = (
+    "Оферта принята. Пробный доступ сейчас временно недоступен: сервер близок "
+    "к месячному лимиту трафика. Подписка работает как обычно — оформить её "
+    "можно в разделе «💳 Оплата»."
+)
+
 WELCOME_IMAGE = (
     Path(__file__).resolve().parent.parent
     / "branding"
@@ -177,6 +183,9 @@ async def cb_accept_offer(callback: CallbackQuery, services: Services) -> None:
     message = callback.message
     if result.reason == "banned":
         await message.answer(BANNED_TEXT)
+        return
+    if result.reason == "trials_paused":
+        await message.answer(TRIALS_PAUSED_TEXT, reply_markup=main_menu_kb())
         return
     if not result.ok:
         await message.answer(

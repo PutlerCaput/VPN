@@ -23,6 +23,7 @@ from services.notifier import Notifier
 from services.payment_reconciliation import PaymentReconciler
 from services.provisioning import ProvisioningService, format_date
 from services.security import SlidingWindowLimiter, is_valid_node_username
+from services.server_traffic import ServerTrafficWatch
 from services.stars import StarsPayments
 
 logger = logging.getLogger(__name__)
@@ -274,13 +275,14 @@ class AnomalyMonitor:
         if not delivered:
             await self.db.release_traffic_notice(node, window, level)
 
-    async def check_user(self, panel_user: dict[str, Any]) -> None:
+    async def check_user(self, panel_user: dict[str, Any]) -> int:
+        """Checks one panel user; returns their traffic since the last poll."""
         node = panel_user.get("username")
         if not isinstance(node, str) or not is_valid_node_username(node):
-            return
+            return 0
         user = await self.db.get_user_by_node(node)
         if user is None:
-            return
+            return 0
         telegram_id = int(user["telegram_id"])
         used = int(
             panel_user.get("lifetime_used_traffic")
@@ -295,7 +297,7 @@ class AnomalyMonitor:
             )
 
         if user["status"] == "banned":
-            return
+            return delta
         if user["status"] == "active":
             await self._quota_notice(telegram_id, node, panel_user)
         flags = extract_flags(panel_user.get("note"))
@@ -303,11 +305,11 @@ class AnomalyMonitor:
         if flags and await self._evaluate(
             telegram_id, node, flags, {"gb_today": round(gb_today, 2)}, alert=False
         ):
-            return
+            return delta
         if gb_today > self.settings.autoban_gb_per_day:
             if self.settings.autoban_mode == "review":
                 await self._review(telegram_id)
-                return
+                return delta
             await self.provisioning.autoban(
                 telegram_id,
                 node,
@@ -317,7 +319,7 @@ class AnomalyMonitor:
                     "threshold": self.settings.autoban_gb_per_day,
                 },
             )
-            return
+            return delta
         if (
             AUTO_SUSPEND_ON_ANOMALY
             and self.settings.autoban_mode == "automatic"
@@ -329,20 +331,30 @@ class AnomalyMonitor:
             if record is not None and not record["soft_flagged"]:
                 await self.db.set_traffic_soft_flag(node, day)
                 await self.provisioning.soft_suspend(telegram_id, node, gb_today)
+        return delta
 
     async def poll(self) -> None:
         users = await self.marzban.get_users_usage()
         active = 0
+        server_delta = 0
         for panel_user in users:
             if panel_user.get("status") == "active":
                 active += 1
             try:
-                await self.check_user(panel_user)
+                server_delta += await self.check_user(panel_user)
             except Exception:
                 logger.exception(
                     "anomaly_check_failed", extra={"node": panel_user.get("username")}
                 )
         ACTIVE_USERS.set(active)
+        # The server's daily total for the allowance forecast; written even
+        # when zero, so a quiet day differs from a day the bot did not see.
+        try:
+            await self.db.add_server_traffic(
+                datetime.now(UTC).strftime("%Y-%m-%d"), server_delta
+            )
+        except Exception:
+            logger.exception("server_traffic_write_failed")
 
 
 class Jobs:
@@ -359,6 +371,7 @@ class Jobs:
         stars: StarsPayments | None = None,
         health: ServiceHealth | None = None,
         awg: AwgService | None = None,
+        traffic: ServerTrafficWatch | None = None,
     ) -> None:
         self.db = db
         self.provisioning = provisioning
@@ -370,6 +383,7 @@ class Jobs:
         self.stars = stars
         self.health = health
         self.awg = awg
+        self.traffic = traffic
 
     async def daily_expiry_check(self) -> None:
         for user in await self.db.users_to_expire(int(time.time())):
@@ -441,6 +455,10 @@ class Jobs:
     async def anomaly_poller(self) -> None:
         await self.monitor.poll()
 
+    async def server_traffic(self) -> None:
+        if self.traffic is not None:
+            await self.traffic.refresh()
+
     async def housekeeping(self) -> None:
         current = int(time.time())
         await self.db.purge_refresh_tokens(current)
@@ -450,6 +468,8 @@ class Jobs:
         await self.db.purge_traffic_days(cutoff)
         await self.db.purge_retained_records(current)
         await self.db.purge_traffic_notices(current - TRAFFIC_NOTICE_RETENTION_SECONDS)
+        if self.traffic is not None:
+            await self.traffic.purge()
         if self.stars is not None:
             await self.stars.end_lapsed()
         for limiter in self.limiters:
@@ -560,6 +580,12 @@ def build_scheduler(jobs: Jobs) -> AsyncIOScheduler:
         _guarded("pending_ban_retry", jobs.pending_ban_retry),
         IntervalTrigger(minutes=1, timezone=UTC),
         id="pending_ban_retry",
+        **defaults,
+    )
+    scheduler.add_job(
+        _guarded("server_traffic", jobs.server_traffic),
+        IntervalTrigger(hours=1, timezone=UTC),
+        id="server_traffic",
         **defaults,
     )
     return scheduler

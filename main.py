@@ -38,6 +38,7 @@ from services.provisioning import ProvisioningService
 from services.push import PushService
 from services.sbp import SbpService
 from services.scheduler import AnomalyMonitor, Jobs, build_scheduler
+from services.server_traffic import ServerTrafficWatch
 from services.stars import StarsPayments
 from services.telegram_api import bot_session
 from services.telegram_rub import TelegramRubPayments
@@ -79,6 +80,13 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
     )
     notifier = Notifier(bot, push)
     provisioning = ProvisioningService(db, marzban, notifier, settings)
+    traffic = (
+        ServerTrafficWatch(db, notifier, settings)
+        if settings.server_traffic_limit_gb > 0
+        else None
+    )
+    if traffic is not None:
+        provisioning.trial_gate = traffic.trials_paused
     yookassa = (
         YooKassaClient(
             settings.yookassa_shop_id,
@@ -148,6 +156,7 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
             if settings.awg_enabled and settings.awg_agent_token is not None
             else None
         ),
+        traffic=traffic,
     )
 
 
@@ -270,8 +279,15 @@ async def run() -> None:
         stars=services.stars,
         health=services.health,
         awg=services.awg,
+        traffic=services.traffic,
     )
     scheduler = build_scheduler(jobs)
+    if services.traffic is not None:
+        # The trial gate needs an outlook before the first hourly run.
+        try:
+            await services.traffic.compute()
+        except Exception:
+            logger.exception("server_traffic_startup_failed")
 
     app = create_webhook_app(bot, dp, services)
     runner = web.AppRunner(app, access_log=None, handle_signals=False)

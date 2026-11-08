@@ -283,6 +283,21 @@ CREATE TABLE IF NOT EXISTS traffic_notices (
     created_at INTEGER NOT NULL,
     PRIMARY KEY (node_username, window_start, level)
 );
+
+-- Server traffic per UTC day: the sum over all subscribers, for the forecast
+-- against the hosting plan's monthly allowance. No per-user data.
+CREATE TABLE IF NOT EXISTS server_traffic_daily (
+    day TEXT PRIMARY KEY,
+    bytes INTEGER NOT NULL DEFAULT 0
+);
+
+-- Owner alerts about that allowance: once per billing period and level.
+CREATE TABLE IF NOT EXISTS server_traffic_alerts (
+    period TEXT NOT NULL,
+    level TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (period, level)
+);
 """
 )
 
@@ -1701,6 +1716,63 @@ class Database:
         return await self._execute(
             "DELETE FROM traffic_daily WHERE day < ?",
             (before_day,),
+        )
+
+    # --------------------------------------------------------- server traffic
+    async def add_server_traffic(self, day: str, delta: int) -> None:
+        """Add to a day's server total. A zero delta still marks the day as
+        observed, so the forecast can tell a quiet day from a missing one."""
+        await self._execute(
+            "INSERT INTO server_traffic_daily (day, bytes) VALUES (?, ?) "
+            "ON CONFLICT(day) DO UPDATE SET bytes = bytes + excluded.bytes",
+            (day, max(0, int(delta))),
+        )
+
+    async def backfill_server_traffic(self, up_to_day: str) -> int:
+        """Seed days the server total does not have yet from the per-user
+        daily table (kept for a week when activity logging is on)."""
+        return await self._execute(
+            "INSERT OR IGNORE INTO server_traffic_daily (day, bytes) "
+            "SELECT day, SUM(MAX(last_bytes - baseline_bytes, 0)) "
+            "FROM traffic_daily WHERE day <= ? GROUP BY day",
+            (up_to_day,),
+        )
+
+    async def server_traffic_since(self, first_day: str) -> list[tuple[str, int]]:
+        rows = await self._fetchall(
+            "SELECT day, bytes FROM server_traffic_daily WHERE day >= ? ORDER BY day",
+            (first_day,),
+        )
+        return [(str(row["day"]), int(row["bytes"])) for row in rows]
+
+    async def purge_server_traffic(self, before_day: str) -> int:
+        return await self._execute(
+            "DELETE FROM server_traffic_daily WHERE day < ?", (before_day,)
+        )
+
+    async def count_active_users(self) -> int:
+        row = await self._fetchone(
+            "SELECT COUNT(*) AS n FROM users WHERE status = 'active'"
+        )
+        return int(row["n"]) if row else 0
+
+    async def claim_server_traffic_alert(self, period: str, level: str) -> bool:
+        changed = await self._execute(
+            "INSERT OR IGNORE INTO server_traffic_alerts (period, level, created_at) "
+            "VALUES (?, ?, ?)",
+            (period, level, int(time.time())),
+        )
+        return changed == 1
+
+    async def release_server_traffic_alert(self, period: str, level: str) -> None:
+        await self._execute(
+            "DELETE FROM server_traffic_alerts WHERE period = ? AND level = ?",
+            (period, level),
+        )
+
+    async def purge_server_traffic_alerts(self, before_period: str) -> int:
+        return await self._execute(
+            "DELETE FROM server_traffic_alerts WHERE period < ?", (before_period,)
         )
 
     # ------------------------------------------------------------------- push

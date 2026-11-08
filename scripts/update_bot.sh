@@ -85,7 +85,8 @@ fi
 SETTABLE_KEYS="ENABLED_TIERS CONFIG_DELIVERY SUBSCRIPTION_BASE_URL MAIN_LOCATION_NAME \
 STARS_ENABLED STARS_AUTORENEW_ENABLED STARS_RUB_PER_STAR YOOKASSA_IN_BOT TRIAL_TRAFFIC_GB \
 AWG_ENABLED AWG_AGENT_URL AWG_AGENT_TOKEN TELEGRAM_PAYMENT_TOKEN \
-YOOKASSA_RECEIPT_MODE ACTIVITY_LOGGING_ENABLED AUTOBAN_MODE TELEGRAM_PROXY_URL"
+YOOKASSA_RECEIPT_MODE ACTIVITY_LOGGING_ENABLED AUTOBAN_MODE TELEGRAM_PROXY_URL \
+SERVER_TRAFFIC_LIMIT_GB SERVER_TRAFFIC_COUNTS SERVER_TRAFFIC_RESET_DAY SERVER_TRAFFIC_PAUSE_TRIALS"
 
 if [[ "${1:-}" == "--payment-status" ]]; then
   # Safe summary only: which payment paths are configured, never any value.
@@ -266,6 +267,18 @@ if [[ "${1:-}" == "--set" ]]; then
     fi
     if [[ "$key" == AUTOBAN_MODE && ! "$value" =~ ^(review|automatic)$ ]]; then
       fail "usage: --set AUTOBAN_MODE=review"
+    fi
+    if [[ "$key" == SERVER_TRAFFIC_LIMIT_GB && ! "$value" =~ ^([0-9]{1,6}|1000000)$ ]]; then
+      fail "usage: --set SERVER_TRAFFIC_LIMIT_GB=5000  (decimal GB, 0 = off)"
+    fi
+    if [[ "$key" == SERVER_TRAFFIC_COUNTS && ! "$value" =~ ^(both|out|in)$ ]]; then
+      fail "usage: --set SERVER_TRAFFIC_COUNTS=both  (both, out or in)"
+    fi
+    if [[ "$key" == SERVER_TRAFFIC_RESET_DAY && ! "$value" =~ ^([1-9]|1[0-9]|2[0-8])$ ]]; then
+      fail "usage: --set SERVER_TRAFFIC_RESET_DAY=1  (1..28)"
+    fi
+    if [[ "$key" == SERVER_TRAFFIC_PAUSE_TRIALS && ! "$value" =~ ^(true|false)$ ]]; then
+      fail "usage: --set SERVER_TRAFFIC_PAUSE_TRIALS=false"
     fi
     if [[ "$key" == ENABLED_TIERS ]]; then
       [[ "$value" =~ ^(standard|basic|complete|prime)(,(standard|basic|complete|prime))*$ ]] \

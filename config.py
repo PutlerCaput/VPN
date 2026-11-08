@@ -298,6 +298,19 @@ class Settings(BaseSettings):
     traffic_anomaly_gb_per_day: int = 800
     autoban_gb_per_day: int = 2000
 
+    # --- Server traffic allowance ---------------------------------------------
+    # Monthly traffic of the hosting plan in decimal GB (5 TB = 5000). The bot
+    # forecasts the period and warns the owner (services/server_traffic.py);
+    # 0 turns this off.
+    server_traffic_limit_gb: int = Field(5000, ge=0, le=1_000_000)
+    # What the provider counts: in + out ("both", the safe default), "out" or "in".
+    server_traffic_counts: Literal["both", "out", "in"] = "both"
+    # Day of the month the provider's counter starts again.
+    server_traffic_reset_day: int = Field(1, ge=1, le=28)
+    # Pause new trials at 90 % of the allowance. Off until clause 1.6 of the
+    # offer allows it (docs/SERVER_MAINTENANCE.md has the wording).
+    server_traffic_pause_trials: bool = False
+
     # --- Telegram Stars (in-bot sales of digital services) -------------------
     # Telegram requires Stars (XTR) for digital goods sold inside bots.
     stars_enabled: bool = False
