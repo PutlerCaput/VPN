@@ -27,8 +27,8 @@ export default defineConfig(({ mode }) => {
           importScripts: ["service-worker.js"],
           globPatterns: ["**/*.{js,css,html,svg,png,webp,woff2,webmanifest}"],
           navigateFallback: "/index.html",
-          // Server pages the app's shell must not replace: the connect page,
-          // the Mini App and the backend.
+          // Server pages the app's shell must not replace: the public offer and
+          // privacy policy, the connect page, the Mini App and the backend.
           navigateFallbackDenylist: [
             /^\/api\//,
             /^\/tma\//,
@@ -36,6 +36,8 @@ export default defineConfig(({ mode }) => {
             /^\/sbp\//,
             /^\/healthz/,
             /^\/connect\.html/,
+            /^\/oferta/,
+            /^\/privacy/,
           ],
           cleanupOutdatedCaches: true,
           runtimeCaching: [],
