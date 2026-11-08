@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -12,6 +13,7 @@ from aiogram.types import Message
 
 from services.audit import audit
 from services.container import Services
+from services.owner_stats import format_stats
 from services.scheduler import SEVERE_KINDS
 from services.security import html_escape, is_valid_payment_id
 from services.server_traffic import report as traffic_report
@@ -70,6 +72,15 @@ async def cmd_traffic(message: Message, services: Services) -> None:
         )
         return
     await message.answer(traffic_report(await services.traffic.compute()))
+
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message, services: Services) -> None:
+    now_ts = int(time.time())
+    outlook = services.traffic.outlook if services.traffic is not None else None
+    await message.answer(
+        format_stats(await services.db.owner_stats(now_ts), now_ts, outlook)
+    )
 
 
 @router.message(Command("confirm"), CanManage())
