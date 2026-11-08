@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError
@@ -120,9 +121,12 @@ async def cmd_refund(
         return
     payment = await services.db.get_payment(payment_id)
     provider_id = str((payment or {}).get("provider_id") or "")
-    if payment is not None and provider_id.startswith(RUB_PROVIDER_PREFIX):
+    if payment is not None and provider_id.startswith(
+        (RUB_PROVIDER_PREFIX, "yookassa:")
+    ):
         # The Bot API cannot refund YooKassa payments: the money is returned
         # in the YooKassa dashboard; here only the paid period is taken back.
+        # (The bot also notices such a refund by itself: services/refund_watch.py.)
         if payment["status"] != "paid":
             await message.answer(REFUND_RESULTS["not_refundable"])
             return
@@ -133,7 +137,7 @@ async def cmd_refund(
             payment_id,
         )
         await services.provisioning.revoke_refunded_payment(payment_id)
-        yookassa_id = html_escape(provider_id.removeprefix(RUB_PROVIDER_PREFIX))
+        yookassa_id = html_escape(provider_id.split(":", 1)[1])
         await message.answer(
             "↩️ Оплаченный период снят с подписки. Верните деньги в личном "
             f"кабинете ЮKassa: платёж <code>{yookassa_id}</code> → «Вернуть»."
@@ -206,6 +210,16 @@ async def cmd_ban(message: Message, command: CommandObject, services: Services) 
         await message.answer("Пользователь не найден или уже заблокирован.")
 
 
+def order_sum(order: dict[str, Any]) -> str:
+    """An order's sum in the unit it was paid in."""
+    amount = int(order["amount"])
+    if order["currency"] == "RUB":
+        return f"{amount / 100:.2f} ₽".replace(".", ",")
+    if order["currency"] == "XTR":
+        return f"{amount} ⭐"
+    return f"{amount / 100:.2f} {order['currency']}".replace(".", ",")
+
+
 @router.message(Command("user"), CanManage())
 async def cmd_user(
     message: Message, command: CommandObject, services: Services
@@ -220,12 +234,22 @@ async def cmd_user(
         return
     paid = await services.db.count_paid_payments(int(arg))
     anomalies = await services.db.list_anomalies(int(arg))
+    orders = [
+        f"<code>{o['payment_id']}</code> {order_sum(o)}, {o['months']} мес., "
+        f"{o['status']}"
+        for o in await services.db.payment_history(int(arg), 5)
+    ]
     await message.answer(
         f"<code>{user['telegram_id']}</code> @{user['username'] or '—'}\n"
         f"status={user['status']} expires_at={user['expires_at']}\n"
         f"node=<code>{user['node_username'] or '—'}</code> "
         f"referred_by={user['referred_by']}\n"
-        f"paid_payments={paid} anomalies={len(anomalies)}",
+        f"paid_payments={paid} anomalies={len(anomalies)}"
+        + (
+            "\nПоследние заказы (номер для /refund):\n" + "\n".join(orders)
+            if orders
+            else ""
+        ),
     )
 
 
