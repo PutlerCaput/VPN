@@ -3,6 +3,7 @@ import { useCallback, useEffect } from "react";
 
 import { endpoints, isApiError } from "./api/client";
 import { bootstrapSession } from "./auth/initData";
+import { Splash } from "./components/Brand";
 import { Nav } from "./components/Nav";
 import { ru } from "./i18n/ru";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -38,30 +39,46 @@ export function App() {
 
   useEffect(() => setBotUsername(me.data?.bot_username), [me.data?.bot_username]);
 
-  if (auth === "booting") return <div className={ui.center}>{ru.common.loading}</div>;
-  if (auth === "outside") return <div className={ui.center}>{ru.session.outside}</div>;
+  if (auth === "booting") {
+    return (
+      <Splash>
+        <p className={ui.muted}>{ru.common.loading}</p>
+      </Splash>
+    );
+  }
+  if (auth === "outside") {
+    return (
+      <Splash>
+        <p>{ru.session.outside}</p>
+      </Splash>
+    );
+  }
   if (auth === "offline") {
     return (
-      <div className={ui.center}>
+      <Splash>
         <p>{ru.session.offline}</p>
         <button type="button" className={`${ui.btn} ${ui.primary}`} onClick={boot}>
           {ru.common.retry}
         </button>
-      </div>
+      </Splash>
     );
   }
   if (auth === "expired") {
     return (
-      <div className={ui.center}>
+      <Splash>
         <p>{ru.session.expired}</p>
         <button type="button" className={`${ui.btn} ${ui.primary}`} onClick={closeApp}>
           {ru.session.close}
         </button>
-      </div>
+      </Splash>
     );
   }
   if (!me.data) {
-    return <div className={ui.center}>{me.isError ? ru.common.error : ru.common.loading}</div>;
+    return (
+      <Splash>
+        <p className={ui.muted}>{me.isError ? ru.common.error : ru.common.loading}</p>
+      </Splash>
+    );
   }
   if (me.data.status === "banned") {
     return (

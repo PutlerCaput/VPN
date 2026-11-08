@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { ApiError, endpoints, refreshSession } from "./api/client";
+import { Splash } from "./components/Brand";
 import { Nav } from "./components/Nav";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LegalPage } from "./pages/LegalPage";
@@ -34,11 +35,17 @@ export function App() {
     if (me.error instanceof ApiError && me.error.status === 401) clearTokens();
   }, [me.error, clearTokens]);
 
-  if (booting) return <main className="page center muted">Загрузка…</main>;
+  if (booting) {
+    return (
+      <Splash>
+        <p className="muted">Загрузка…</p>
+      </Splash>
+    );
+  }
   if (offline && refreshToken && !accessToken) {
     return (
-      <main className="page center">
-        <p className="muted">Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.</p>
+      <Splash>
+        <p>Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.</p>
         <button
           type="button"
           className="btn primary"
@@ -49,12 +56,16 @@ export function App() {
         >
           Повторить
         </button>
-      </main>
+      </Splash>
     );
   }
   if (!accessToken) return <LoginPage />;
   if (me.isLoading || !me.data) {
-    return <main className="page center muted">{me.isError ? "Сервис временно недоступен." : "Загрузка…"}</main>;
+    return (
+      <Splash>
+        <p className="muted">{me.isError ? "Сервис временно недоступен." : "Загрузка…"}</p>
+      </Splash>
+    );
   }
   if (me.data.status === "banned") {
     return (

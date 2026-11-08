@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { endpoints, formatTraffic, isApiError, type Status } from "../api/client";
+import { BrandHeader } from "../components/Brand";
 import { CONNECT_APPS, connectUrl } from "../connect";
 import { QRCode } from "../components/QRCode";
 import { ServersCard } from "../components/ServersCard";
@@ -65,6 +66,7 @@ export function DashboardPage() {
 
   return (
     <main className={ui.page}>
+      <BrandHeader />
       <h1>{ru.dashboard.title}</h1>
       <p className={`${ui.small} ${ui.muted}`}>{ru.dashboard.tagline}</p>
       <section className={ui.card}>

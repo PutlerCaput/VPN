@@ -20,6 +20,9 @@ export interface TelegramWebApp {
   close(): void;
   isVersionAtLeast(version: string): boolean;
   disableVerticalSwipes?: () => void;
+  setHeaderColor?: (color: string) => void;
+  setBackgroundColor?: (color: string) => void;
+  setBottomBarColor?: (color: string) => void;
   openTelegramLink(url: string): void;
   openLink(url: string, options?: { try_instant_view?: boolean }): void;
   showAlert(message: string, callback?: () => void): void;
@@ -40,6 +43,19 @@ export function getWebApp(): TelegramWebApp | null {
   return app && typeof app.ready === "function" ? app : null;
 }
 
+/** The app background (--bg): Telegram's header and edges take it too. */
+const BRAND_BACKGROUND = "#050a14";
+
+function paintTelegramChrome(app: TelegramWebApp): void {
+  try {
+    if (app.isVersionAtLeast("6.9")) app.setHeaderColor?.(BRAND_BACKGROUND);
+    if (app.isVersionAtLeast("6.1")) app.setBackgroundColor?.(BRAND_BACKGROUND);
+    if (app.isVersionAtLeast("7.10")) app.setBottomBarColor?.(BRAND_BACKGROUND);
+  } catch {
+    // An old client without these methods keeps its own colours.
+  }
+}
+
 export function initWebApp(): TelegramWebApp | null {
   const app = getWebApp();
   if (!app) return null;
@@ -48,6 +64,7 @@ export function initWebApp(): TelegramWebApp | null {
   if (app.isVersionAtLeast("7.7") && typeof app.disableVerticalSwipes === "function") {
     app.disableVerticalSwipes();
   }
+  paintTelegramChrome(app);
   return app;
 }
 

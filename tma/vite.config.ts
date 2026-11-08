@@ -12,9 +12,9 @@ export default defineConfig({
       manifest: false,
       filename: "service-worker.js",
       scope: "/tma/",
-      includeAssets: ["icons/*.png", "robots.txt"],
+      includeAssets: ["icons/*.png", "brand/*.webp", "fonts/*.woff2", "robots.txt"],
       workbox: {
-        globPatterns: ["**/*.{js,css,svg,png,webmanifest}"],
+        globPatterns: ["**/*.{js,css,svg,png,webp,woff2,webmanifest}"],
         navigateFallback: null,
         cleanupOutdatedCaches: true,
         clientsClaim: true,

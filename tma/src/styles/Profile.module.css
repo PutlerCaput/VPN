@@ -1,6 +1,7 @@
-.facts { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1rem; margin: 0; }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 0.45rem 1rem; margin: 0; }
 .facts dt { color: var(--hint); }
-.facts dd { margin: 0; }
+.facts dd { margin: 0; font-weight: 600; }
 .tableWrap { overflow-x: auto; }
-.table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-.table th, .table td { padding: 0.4rem; text-align: left; border-bottom: 1px solid rgba(148, 163, 184, 0.25); }
+.table { width: 100%; border-collapse: collapse; font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+.table th { color: var(--hint); font-weight: 600; }
+.table th, .table td { padding: 0.5rem 0.4rem; text-align: left; border-bottom: 1px solid var(--border); }

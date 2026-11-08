@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import { ApiError, endpoints, formatDate, formatTraffic, type Me } from "../api/client";
 import { CONNECT_APPS, connectUrl } from "../connect";
+import { BrandHeader } from "../components/Brand";
 import { ServersCard } from "../components/ServersCard";
 import { InstallHint } from "../components/InstallHint";
 import { QRCode } from "../components/QRCode";
@@ -43,6 +44,7 @@ export function DashboardPage() {
 
   return (
     <main className="page">
+      <BrandHeader />
       <h1>Будь собой. Безопасно.</h1>
       <p className="small muted">Включи защиту. Отключи угрозы.</p>
       <section className="card">

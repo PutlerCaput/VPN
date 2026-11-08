@@ -1,16 +1,33 @@
-.disclaimer { font-size: 0.88rem; line-height: 1.45; color: var(--hint); }
+.disclaimer { font-size: 0.88rem; line-height: 1.5; color: var(--hint); }
 .tariff { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem 0.75rem; padding: 0.4rem 0; }
-.term { font-weight: 600; font-size: 1.05rem; }
+.term { font-weight: 700; font-size: 1.05rem; }
 .prices { text-align: right; }
-.rub { font-size: 1.2rem; font-weight: 700; display: block; }
+.rub { font-size: 1.25rem; font-weight: 800; display: block; font-variant-numeric: tabular-nums; }
 .perMonth { font-size: 0.85rem; color: var(--hint); }
-.features { margin: 0.25rem 0 0.75rem; padding-left: 1.1rem; font-size: 0.9rem; line-height: 1.45; }
-.save { color: var(--accent, #22c55e); font-weight: 600; font-size: 0.85rem; }
+.features { margin: 0.25rem 0 0.75rem; padding-left: 1.1rem; font-size: 0.92rem; line-height: 1.5; color: var(--text-2); }
+.features li::marker { color: var(--accent); }
+.save { color: var(--accent); font-weight: 700; font-size: 0.85rem; }
 .why { margin-top: 0.75rem; }
-.why p { margin: 0.25rem 0 0; line-height: 1.45; }
-.whyLabel { font-weight: 600; }
-.bestBadge { display: block; font-size: 0.75rem; font-weight: 700; color: var(--accent, #22c55e); text-transform: uppercase; letter-spacing: 0.02em; }
-.periods { display: grid; gap: 0.5rem; margin: 0.5rem 0 0.75rem; }
-.period { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; width: 100%; padding: 0.65rem 0.8rem; border: 1px solid rgba(127, 127, 127, 0.3); border-radius: 12px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.periodActive { border: 2px solid var(--accent, #22c55e); background: rgba(34, 197, 94, 0.08); }
+.why p { margin: 0.25rem 0 0; line-height: 1.5; color: var(--text-2); }
+.whyLabel { font-weight: 700; color: var(--text); }
+.bestBadge { display: block; font-size: 0.72rem; font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; }
+.periods { display: grid; gap: 0.55rem; margin: 0.5rem 0 0.75rem; }
+.period {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 52px;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.periodActive { border: 2px solid var(--accent); background: rgba(46, 197, 255, 0.1); box-shadow: var(--glow); }
 .cta { width: 100%; }
