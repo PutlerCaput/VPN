@@ -11,10 +11,15 @@
 #   2. system packages: upgrade that never removes a package and keeps every
 #      changed config file; Docker's previous versions are saved for a
 #      downgrade; containers that ran before are checked to run again;
-#   3. fresh base images, then the bot and the site rebuilt through
-#      update_bot.sh and update_web.sh, which keep a rollback image and switch
-#      back by themselves if the new one is not healthy;
+#   3. fresh base images (not the Caddy compiler image: pulling it would
+#      rebuild Caddy, about a gigabyte of memory and disk), then the bot and
+#      the site rebuilt through update_bot.sh and update_web.sh, which keep a
+#      rollback image and switch back by themselves if the new one is not
+#      healthy;
 #   4. cleanup (server_cleanup.sh --apply) and the doctor, before and after.
+#
+# Disk: it wants 5 GB free on / and cleans up first when there is less; if
+# less than 3 GB remain after the cleanup it does not start.
 #
 # Never touched: Marzban's version and settings, Xray, its rule and geo files,
 # the firewall, SSH. A new kernel waits for a reboot at a time you choose.
@@ -30,7 +35,8 @@ BACKUP_DIR="${BACKUP_DIR:-/root/server-backups}"
 MARZBAN_DB="${MARZBAN_DB:-/var/lib/marzban/db.sqlite3}"
 MARZBAN_DIR="${MARZBAN_DIR:-/opt/marzban}"
 KEEP=3
-MIN_FREE_GB=3
+WANT_FREE_MB=5120  # comfortable: packages, images and two builds
+MIN_FREE_MB=3072   # below this after the cleanup the update does not start
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 DOCKER_PACKAGES=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin)
 
@@ -38,7 +44,7 @@ say() { printf '%s\n' "$*"; }
 section() { printf '\n== %s\n' "$*"; }
 stop() { printf 'SERVER_UPDATE_STOPPED: %s\n' "$*" >&2; exit 1; }
 
-free_gb() { df -P --block-size=1G / | awk 'NR == 2 { print $4 }'; }
+free_mb() { df -P --block-size=1M / | awk 'NR == 2 { print $4 }'; }
 
 keep_newest() {  # keep_newest <glob pattern inside BACKUP_DIR>
   local n=0 file
@@ -109,7 +115,8 @@ say "time: $STAMP"
 
 section "System"
 say "  $( (. /etc/os-release 2>/dev/null && printf '%s' "$PRETTY_NAME") ), kernel $(uname -r)"
-say "  free on /: $(free_gb) GB; memory: $(free -m | awk 'NR == 2 { print $7 " MB available of " $2 }')"
+say "  free on /: $(df -hP / | awk 'NR == 2 { print $4 " of " $2 }')"
+say "  memory: $(free -m | awk 'NR == 2 { printf "%s MB available of %s", $7, $2 } NR == 3 { printf "; swap %s MB", $2 }')"
 say "  docker: $(docker version -f '{{.Server.Version}}' 2>/dev/null || echo 'not running')"
 [[ -f /var/run/reboot-required ]] && say "  REBOOT NEEDED: $(tr '\n' ' ' < /var/run/reboot-required.pkgs 2>/dev/null)"
 
@@ -118,16 +125,21 @@ doctor
 doctor_before=$?
 
 section "Disk"
-if (($(free_gb) < MIN_FREE_GB)); then
+free="$(free_mb)"
+if ((free < WANT_FREE_MB)); then
   if ((APPLY)); then
-    say "  less than $MIN_FREE_GB GB free: cleaning up first"
-    bash "$SRC/scripts/server_cleanup.sh" --apply >/dev/null 2>&1
-    (($(free_gb) >= MIN_FREE_GB)) || stop "only $(free_gb) GB free on /; free space first"
+    say "  $free MB free, less than $((WANT_FREE_MB / 1024)) GB wanted: cleaning up first"
+    bash "$SRC/scripts/server_cleanup.sh" --apply 2>&1 | tail -n 12 | sed 's/^/    /'
+    free="$(free_mb)"
+    say "  after the cleanup: $free MB free"
+    ((free >= MIN_FREE_MB)) \
+      || stop "only $free MB free on /, at least $((MIN_FREE_MB / 1024)) GB are needed; see: bash scripts/server_cleanup.sh"
   else
-    say "  less than $MIN_FREE_GB GB free: --apply cleans up first"
+    say "  $free MB free, less than $((WANT_FREE_MB / 1024)) GB wanted."
+    say "  --apply cleans up first and stops below $((MIN_FREE_MB / 1024)) GB; see what: bash scripts/server_cleanup.sh"
   fi
 else
-  say "  enough space"
+  say "  enough space ($free MB free)"
 fi
 
 # ---------------------------------------------------------------- copies
@@ -239,6 +251,10 @@ say "  images of other containers (updated by hand, never by this script):"
 docker ps --format '{{.Names}}\t{{.Image}}' | grep -v '^node-rental-' | sed 's/^/    /'
 if ((APPLY)); then
   for image in "${bases[@]}"; do
+    if [[ "$image" == *-builder ]]; then
+      say "  skipped: $image (a new compiler layer would rebuild Caddy: about a gigabyte of memory and disk)"
+      continue
+    fi
     if docker pull -q "$image" >/dev/null 2>&1; then
       say "  pulled: $image"
     else
@@ -258,7 +274,7 @@ if ((APPLY)); then
     say "  bot container $CONTAINER not here: bot and site skipped"
   fi
 else
-  say "  --apply pulls the base images and rebuilds the bot and the site with them"
+  say "  --apply pulls the base images (not the Caddy compiler image) and rebuilds the bot and the site with them"
 fi
 
 # ---------------------------------------------------------------- databases
