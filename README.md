@@ -48,6 +48,11 @@ Telegram Stars внутри бота ([правила и устройство](d
 15 секунд и кнопкой «🔄 Проверить оплату»), проверка сервера одной командой
 `scripts/update_bot.sh --doctor`, смена адреса сайта `--set-public-url`.
 
+**Резервные копии** — [BACKUPS.md](docs/BACKUPS.md): раз в сутки зашифрованный
+архив баз и настроек приходит владельцу в Telegram, закрытый ключ только у него;
+`scripts/install_backup.sh`, проверка в `--doctor`, восстановление
+`scripts/restore_backup.sh`.
+
 **Обслуживание сервера** — [SERVER_MAINTENANCE.md](docs/SERVER_MAINTENANCE.md):
 обновление системы, Docker, бота и сайта одной командой `scripts/server_update.sh`
 (сначала отчёт, затем `--apply`) с копиями и откатом, очистка `scripts/server_cleanup.sh`,

@@ -167,6 +167,9 @@ if [[ "${1:-}" == "--doctor" ]]; then
       fi
     done
   fi
+  # A copy of everything that cannot be re-created, kept encrypted and sent off the server.
+  row="$(bash "$(dirname "$SELF")/backup_status.sh" 2>/dev/null || true)"
+  case "$row" in OK\ * | WARN\ *) report "${row%% *}" "${row#* }" ;; *) report WARN "backup status could not be read" ;; esac
   say "DOCTOR: $ok ok, $warn warnings, $bad problems"
   exit $((bad > 0 ? 1 : 0))
 fi
