@@ -139,3 +139,28 @@ async def test_returning_user_gets_no_logo(services: Any) -> None:
     await cmd_start(message, CommandObject(command="start"), services)
 
     message.answer_photo.assert_not_awaited()
+
+
+def test_pictures_have_the_sizes_botfather_and_the_page_declare() -> None:
+    wanted = {
+        "branding/telegram/avatar-640.jpg": (640, 640),
+        "branding/telegram/description-640x360.jpg": (640, 360),
+        "branding/telegram/welcome-1280x720.jpg": (1280, 720),
+        "pwa/public/brand/og-image.jpg": (1200, 630),
+    }
+    for name, size in wanted.items():
+        with Image.open(ROOT / name) as image:
+            assert (image.format, image.size) == ("JPEG", size), name
+    page = (ROOT / "pwa" / "index.html").read_text(encoding="utf-8")
+    assert 'og:image:width" content="1200"' in page
+    assert 'og:image:height" content="630"' in page
+
+
+def test_the_banner_is_drawn_the_same_every_time() -> None:
+    from scripts.build_brand_assets import banner
+
+    first, second = banner(320, 180), banner(320, 180)
+    assert first.size == (320, 180)
+    assert first.tobytes() == second.tobytes()
+    # Light behind the logo, a darker blue towards the corners.
+    assert sum(first.getpixel((40, 90))) > sum(first.getpixel((2, 2)))
