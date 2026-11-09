@@ -63,6 +63,8 @@ Telegram Stars внутри бота ([правила и устройство](d
 в `/stats`. Расписание проверок и юридические вопросы владельца —
 [OWNER_CHECKLIST.md](docs/OWNER_CHECKLIST.md). Вход на сервер только по ключу с откатом —
 `scripts/ssh_hardening.sh` ([SERVER_MAINTENANCE.md](docs/SERVER_MAINTENANCE.md)).
+Внешний монитор доступности (сервер на одном узле) — [UPTIME_MONITORING.md](docs/UPTIME_MONITORING.md);
+выжимка и черновик уведомления в РКН для юриста — [LEGAL_BRIEF.md](docs/LEGAL_BRIEF.md).
 
 Сравнение с крупными VPN-сервисами и следующий этап — [LEVEL_UP_2026-11-06.md](docs/LEVEL_UP_2026-11-06.md):
 ссылка-подписка со всеми серверами, `/servers` и карточка серверов в приложениях,
