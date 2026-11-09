@@ -229,7 +229,6 @@ TOPICS: tuple[Topic, ...] = (
             "инструкц",
             "hiddify",
             "v2ray",
-            "happ",
             "впн не работ",
             "vpn не работ",
         ),

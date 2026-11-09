@@ -7,8 +7,6 @@
   var SUB_ORIGIN = "https://sub.cyberdefency.com:8443";
   // Custom URL schemes of the supported apps.
   var APPS = {
-    happ: "happ://add/",
-    v2raytun: "v2raytun://import/",
     hiddify: "hiddify://import/"
   };
 

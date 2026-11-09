@@ -243,8 +243,7 @@ def revoke_confirm_kb() -> InlineKeyboardMarkup:
 # Apps that take a subscription link through their own URL scheme. The page on
 # the site (connect.html) checks the link before it hands the link to an app.
 CONNECT_APPS: tuple[tuple[str, str], ...] = (
-    ("happ", "📲 Подключить в Happ"),
-    ("v2raytun", "📲 Подключить в v2rayTUN"),
+    # The one app offered with a one-tap link; others get the copy and QR paths.
     ("hiddify", "💻 Подключить в Hiddify"),
 )
 CONNECT_PAGE = "/connect.html"

@@ -1,10 +1,10 @@
 """The connect screen (PWA and Mini App): device-aware picks, official links only.
 
-The deep links that hand a subscription to a VPN app (happ://, v2raytun://,
-hiddify://) are built in one place per app, public/connect.js, which first checks
-the link is this service's own subscription (tests/test_connect.py). Each screen
-and its device module must go through it and must never point an install button
-at anything but the developers' own pages.
+The deep link that hands a subscription to a VPN app (hiddify://) is built in
+one place, public/connect.js, which first checks the link is this service's own
+subscription (tests/test_connect.py). Each screen and its device module must go
+through it and must never point an install button at anything but the developers'
+own pages.
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 APPS = ["pwa", "tma"]
 
 # A wrong install link in a security product could send a buyer to a look-alike,
-# so the set of hosts is closed and checked: happ.su routes to the stores itself,
-# Hiddify ships on GitHub, v2rayTUN on the two app stores.
-OFFICIAL_INSTALL_HOSTS = {"happ.su", "apps.apple.com", "play.google.com", "github.com"}
+# so the set of hosts is closed and checked: Hiddify ships on GitHub and in the
+# app stores.
+OFFICIAL_INSTALL_HOSTS = {"apps.apple.com", "play.google.com", "github.com"}
 
 
 def _device(app: str) -> str:

@@ -21,33 +21,22 @@ interface AppInfo {
   install: Partial<Record<Platform, string>>;
 }
 
-const HAPP = "https://happ.su";
 const HIDDIFY = "https://github.com/hiddify/hiddify-app/releases";
 
+// Hiddify is open source and free; its Releases page covers every platform.
+// On iPhone the App Store search is the only route the site offers: the store
+// may not list the app in every country, and the support page covers that.
 export const APP_INFO: Record<ConnectApp, AppInfo> = {
-  happ: {
-    name: "Happ",
-    icon: "📲",
-    best: ["ios", "android"],
-    runs: ["ios", "android", "desktop"],
-    install: { ios: HAPP, android: HAPP, desktop: HAPP },
-  },
-  v2raytun: {
-    name: "v2rayTUN",
-    icon: "📲",
-    best: ["android"],
-    runs: ["ios", "android"],
-    install: {
-      ios: "https://apps.apple.com/app/id6476628951",
-      android: "https://play.google.com/store/apps/details?id=com.v2raytun.android",
-    },
-  },
   hiddify: {
     name: "Hiddify",
     icon: "💻",
-    best: ["desktop"],
+    best: ["desktop", "android", "ios"],
     runs: ["ios", "android", "desktop"],
-    install: { ios: HIDDIFY, android: HIDDIFY, desktop: HIDDIFY },
+    install: {
+      ios: "https://apps.apple.com/search?term=Hiddify",
+      android: HIDDIFY,
+      desktop: HIDDIFY,
+    },
   },
 };
 

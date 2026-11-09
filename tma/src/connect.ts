@@ -1,10 +1,7 @@
 // One-tap links to the connect page on this site. The page opens the chosen client
 // app with the subscription link, which travels in the URL fragment only.
-export const CONNECT_APPS = [
-  { app: "happ", label: "📲 Happ" },
-  { app: "v2raytun", label: "📲 v2rayTUN" },
-  { app: "hiddify", label: "💻 Hiddify" },
-] as const;
+// The one app offered with a one-tap link. Others get the copy and QR paths.
+export const CONNECT_APPS = [{ app: "hiddify", label: "💻 Hiddify" }] as const;
 
 export type ConnectApp = (typeof CONNECT_APPS)[number]["app"];
 
