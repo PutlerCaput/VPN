@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { endpoints, isApiError } from "../api/client";
-import { connectUrl } from "../connect";
-import { appsForPlatform, detectPlatform } from "../device";
+import { APPS, PLATFORMS, detectPlatform } from "../device";
+import type { ClientApp, Platform } from "../device";
 import { QRCode } from "../components/QRCode";
 import { ru } from "../i18n/ru";
 import { useSession } from "../store/session";
@@ -12,8 +12,8 @@ import ui from "../styles/components.module.css";
 
 export function ConnectPage() {
   const navigate = useSession((s) => s.navigate);
-  const platform = useMemo(() => detectPlatform(), []);
-  const apps = useMemo(() => appsForPlatform(platform), [platform]);
+  const [platform, setPlatform] = useState<Platform>(() => detectPlatform());
+  const [chosen, setChosen] = useState<ClientApp | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const [showLink, setShowLink] = useState(false);
@@ -36,6 +36,8 @@ export function ConnectPage() {
       ? ru.dashboard.rateLimited
       : ru.dashboard.unavailable
     : null;
+  const guide = chosen ? c.guides[platform]?.[chosen.key] : undefined;
+  const steps = guide ? (isSub ? guide.steps : [c.singleLink]) : [];
 
   async function copy() {
     setCopyFailed(false);
@@ -44,10 +46,22 @@ export function ConnectPage() {
       await navigator.clipboard.writeText(link);
       haptic("success");
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
     } catch {
       setCopyFailed(true);
     }
+  }
+
+  function choosePlatform(next: Platform) {
+    setPlatform(next);
+    setChosen(null);
+    setCopied(false);
+    setCopyFailed(false);
+  }
+
+  // The copy starts inside the tap, which is when the clipboard is allowed.
+  function choose(app: ClientApp) {
+    setChosen(app);
+    void copy();
   }
 
   return (
@@ -76,7 +90,20 @@ export function ConnectPage() {
 
       {active && (
         <>
-          <p className={`${ui.small} ${ui.muted}`}>{c.device(c.platform[platform])}</p>
+          <p className={`${ui.small} ${ui.muted}`}>{c.intro}</p>
+          <div className={ui.chips} role="group">
+            {PLATFORMS.map((p) => (
+              <button
+                key={p}
+                type="button"
+                className={p === platform ? `${ui.chip} ${ui.chipActive}` : ui.chip}
+                aria-pressed={p === platform}
+                onClick={() => choosePlatform(p)}
+              >
+                {c.platform[p]}
+              </button>
+            ))}
+          </div>
 
           {config.isLoading && (
             <section className={ui.card}>
@@ -91,58 +118,54 @@ export function ConnectPage() {
 
           {config.data && (
             <>
-              {isSub ? (
+              <section className={ui.card}>
+                <h2>{c.pickApp}</h2>
+                {APPS[platform].map((app) => (
+                  <button
+                    key={app.key}
+                    type="button"
+                    className={chosen?.key === app.key ? `${ui.btn} ${ui.primary}` : ui.btn}
+                    aria-pressed={chosen?.key === app.key}
+                    onClick={() => choose(app)}
+                  >
+                    {app.name}
+                  </button>
+                ))}
+              </section>
+
+              {chosen && guide && (
                 <section className={ui.card}>
-                  <h2>{c.oneTap}</h2>
-                  {apps.map((choice) => {
-                    const url = connectUrl(choice.app, link);
-                    const install = choice.install;
-                    if (!url) return null;
-                    return (
-                      <div key={choice.app}>
-                        <button
-                          type="button"
-                          className={choice.recommended ? `${ui.btn} ${ui.primary}` : ui.btn}
-                          onClick={() => openExternal(url)}
-                        >
-                          {choice.icon} {c.openIn(choice.name)}
-                          {choice.recommended ? ` ${c.recommended}` : ""}
-                        </button>
-                        {install && (
-                          <button type="button" className={ui.install} onClick={() => openExternal(install)}>
-                            {c.install(choice.name)}
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                  <p className={`${ui.small} ${ui.muted}`}>{c.notOpened}</p>
-                </section>
-              ) : (
-                <section className={ui.card}>
-                  <h2>{c.scanTitle}</h2>
-                  <p className={`${ui.small} ${ui.muted}`}>{c.scanHint(apps.map((a) => a.name).join(", "))}</p>
-                  <QRCode value={config.data.qr_payload} />
-                  <p className={`${ui.small} ${ui.muted} ${ui.qrCaption}`}>{c.scanLabel}</p>
-                  {apps.map((choice) => {
-                    const install = choice.install;
-                    return install ? (
-                      <button key={choice.app} type="button" className={ui.install} onClick={() => openExternal(install)}>
-                        {c.installShort(choice.name)}
-                      </button>
-                    ) : null;
-                  })}
+                  <h2>{chosen.name}</h2>
+                  <p role="status" className={ui.small}>
+                    {copied && c.copied}
+                    {copyFailed && c.copyFailed}
+                  </p>
+                  <button type="button" className={ui.btn} onClick={copy}>
+                    📋 {c.copyLink}
+                  </button>
+                  <ol className={ui.steps}>
+                    {steps.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ol>
+                  {guide.note && <p className={`${ui.small} ${ui.muted}`}>{guide.note}</p>}
+                  <button
+                    type="button"
+                    className={`${ui.btn} ${ui.primary}`}
+                    onClick={() => openExternal(chosen.install)}
+                  >
+                    {c.install(chosen.name)}
+                  </button>
+                  <p className={`${ui.small} ${ui.muted}`}>{c.labelsDiffer}</p>
                 </section>
               )}
 
-              {isSub && (
-                <section className={ui.card}>
-                  <h2>{c.otherDevice}</h2>
-                  <p className={`${ui.small} ${ui.muted}`}>{c.otherHint}</p>
-                  <QRCode value={link} />
-                  <p className={`${ui.small} ${ui.muted} ${ui.qrCaption}`}>{c.subLabel}</p>
-                </section>
-              )}
+              <section className={ui.card}>
+                <h2>{c.otherDevice}</h2>
+                <p className={`${ui.small} ${ui.muted}`}>{c.otherHint}</p>
+                <QRCode value={isSub ? link : config.data.qr_payload} />
+                <p className={`${ui.small} ${ui.muted} ${ui.qrCaption}`}>{isSub ? c.subLabel : c.scanLabel}</p>
+              </section>
 
               <section className={ui.card}>
                 <button type="button" className={ui.back} onClick={() => setShowLink((v) => !v)}>
@@ -156,7 +179,7 @@ export function ConnectPage() {
                     </button>
                     {copyFailed && (
                       <p role="alert" className={ui.error}>
-                        {c.copyFailed}
+                        {c.manualCopyFailed}
                       </p>
                     )}
                   </>

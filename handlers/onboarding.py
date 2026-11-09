@@ -7,24 +7,93 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from handlers.profile import deliver_config
+from handlers.profile import config_access, deliver_config
 from keyboards.main_menu import BTN_SETUP
-from keyboards.onboarding import guide_kb, help_kb, setup_kb
+from keyboards.onboarding import (
+    client_apps_kb,
+    client_guide_kb,
+    guide_kb,
+    help_kb,
+    setup_kb,
+)
 from services.connection_guide import (
     AMNEZIA_GUIDE,
     GUIDES,
     HELP_TEXT,
     KILL_SWITCH_TEXT,
+    SINGLE_LINK_STEPS,
+    ClientApp,
+    DeviceGuide,
+    find_app,
 )
 from services.container import Services
+from services.security import html_escape
 
 router = Router(name="onboarding")
 SETUP_TEXT = (
     "📱 <b>Подключение устройства</b>\n\n"
-    "Выберите систему. Бот покажет установку клиента, импорт профиля "
-    "и проверку подключения. Для получения конфигурации нужна активная подписка "
-    "или пробный доступ после /start."
+    "Выберите устройство, затем приложение: бот пришлёт вашу ссылку-подписку "
+    "(её можно скопировать одним нажатием) и короткую инструкцию. Для ссылки "
+    "нужна активная подписка или пробный доступ после /start.\n\n"
+    "Для другой системы подойдёт любое приложение, которое умеет добавлять "
+    "подписку по ссылке."
 )
+
+
+def apps_text(device: DeviceGuide) -> str:
+    return (
+        f"📱 <b>{device.title}</b>\n\n"
+        "Выберите приложение: бот пришлёт вашу ссылку-подписку (её можно "
+        "скопировать одним нажатием) и короткую инструкцию."
+    )
+
+
+def app_guide_text(device: DeviceGuide, app: ClientApp, link: str) -> str:
+    """The link and the steps in one message, so the link is at hand for step 2."""
+    subscription = link.startswith("https://")
+    label = (
+        "Ваша ссылка-подписка (нажмите на неё, чтобы скопировать):"
+        if subscription
+        else "Ваша ссылка для импорта (нажмите на неё, чтобы скопировать):"
+    )
+    steps = app.steps if subscription else SINGLE_LINK_STEPS
+    note = f"\n\n{app.note}" if app.note else ""
+    return (
+        f"📱 <b>{device.title} · {app.name}</b>\n\n"
+        f"{label}\n<code>{html_escape(link)}</code>\n\n"
+        f"{steps}{note}\n\n"
+        "Ссылку и QR-код никому не передавайте: они привязаны к вашему аккаунту. "
+        "Названия пунктов в приложении могут немного отличаться."
+    )
+
+
+def app_blocked_text(device: DeviceGuide, app: ClientApp, problem: str) -> str:
+    return (
+        f"📱 <b>{device.title} · {app.name}</b>\n\n{problem}\n\n"
+        "Приложение можно установить уже сейчас кнопкой ниже: ссылка и "
+        "инструкция придут сюда, как только доступ будет активен."
+    )
+
+
+async def send_app_guide(
+    message: Message,
+    owner_id: int,
+    services: Services,
+    device_key: str,
+    device: DeviceGuide,
+    app: ClientApp,
+) -> None:
+    access = await config_access(owner_id, services)
+    if access.link is None:
+        await message.answer(
+            app_blocked_text(device, app, access.problem or ""),
+            reply_markup=client_guide_kb(device_key, app, None),
+        )
+        return
+    await message.answer(
+        app_guide_text(device, app, access.link),
+        reply_markup=client_guide_kb(device_key, app, access.link),
+    )
 
 
 @router.message(F.text == BTN_SETUP)
@@ -58,22 +127,40 @@ async def setup_action(
     action = callback.data or ""
     if action.startswith("setup:guide:"):
         key = action.removeprefix("setup:guide:")
-        guide = (
-            AMNEZIA_GUIDE
-            if key == "amnezia" and services.awg is not None
-            else GUIDES.get(key)
-        )
-        if guide is None:
+        if key == "amnezia" and services.awg is not None:
+            await callback.answer()
+            await state.clear()
+            await message.answer(
+                f"📱 <b>{AMNEZIA_GUIDE.title} · {AMNEZIA_GUIDE.client}</b>\n\n"
+                f"{AMNEZIA_GUIDE.steps}\n\n"
+                "На одном устройстве удобнее импорт по ссылке. "
+                "QR-код можно сканировать с другого экрана. "
+                "Ссылку и QR-код никому не передавайте.",
+                reply_markup=guide_kb(key),
+            )
+            return
+        device = GUIDES.get(key)
+        if device is None:
             await callback.answer("Выберите устройство заново: /connect.")
             return
         await callback.answer()
         await state.clear()
-        await message.answer(
-            f"📱 <b>{guide.title} · {guide.client}</b>\n\n{guide.steps}\n\n"
-            "На одном устройстве удобнее импорт по ссылке. "
-            "QR-код можно сканировать с другого экрана. "
-            "Ссылку и QR-код никому не передавайте.",
-            reply_markup=guide_kb(key),
+        if len(device.apps) == 1:
+            await send_app_guide(
+                message, callback.from_user.id, services, key, device, device.apps[0]
+            )
+        else:
+            await message.answer(apps_text(device), reply_markup=client_apps_kb(key))
+    elif action.startswith("setup:app:"):
+        parts = action.split(":")
+        found = find_app(parts[2], parts[3]) if len(parts) == 4 else None
+        if found is None:
+            await callback.answer("Выберите устройство заново: /connect.")
+            return
+        await callback.answer()
+        await state.clear()
+        await send_app_guide(
+            message, callback.from_user.id, services, parts[2], found[0], found[1]
         )
     elif action == "setup:choose":
         await callback.answer()

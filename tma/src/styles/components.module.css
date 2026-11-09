@@ -45,13 +45,12 @@
 .small { font-size: 0.875rem; }
 .error { color: var(--danger); }
 
-/* A text button that reads as a link: back, "show link", "install …". */
-.back,
-.install {
+/* A text button that reads as a link: back, "show link". */
+.back {
   display: inline-flex;
   width: auto;
   min-height: 0;
-  margin: 0;
+  margin: 0 0 0.3rem;
   padding: 0.2rem 0;
   border: none;
   background: none;
@@ -61,8 +60,25 @@
   text-align: left;
   cursor: pointer;
 }
-.back { margin-bottom: 0.3rem; }
-.install { display: block; margin-top: 0.35rem; font-size: 0.85rem; }
+
+/* Device chips and the numbered steps on the connect screen. */
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0 0.9rem; }
+.chip {
+  min-height: 40px;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chipActive { border-color: transparent; background: linear-gradient(135deg, #38d0ff 0%, #2f8cff 100%); color: var(--on-accent); font-weight: 700; }
+.steps { margin: 0.8rem 0; padding-left: 1.2rem; color: var(--text); }
+.steps li { margin-bottom: 0.45rem; }
+.steps li::marker { color: var(--accent); font-weight: 700; }
 .cta { min-height: 52px; font-size: 1.05rem; }
 .qrCaption { text-align: center; margin-top: -0.5rem; }
 

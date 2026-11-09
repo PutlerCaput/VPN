@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -13,7 +14,6 @@ from keyboards.main_menu import (
     BTN_CONFIG,
     BTN_PROFILE,
     app_kb,
-    connect_app_kb,
     main_menu_kb,
     revoke_confirm_kb,
 )
@@ -89,20 +89,27 @@ async def show_config(message: Message, services: Services) -> None:
     await deliver_config(message, message.from_user.id, services)
 
 
-async def deliver_config(message: Message, owner_id: int, services: Services) -> None:
-    """Callbacks must use their sender, not the author of the bot's message."""
-    if message.chat.type != "private" or message.chat.id != owner_id:
-        return
+@dataclass(frozen=True, slots=True)
+class ConfigAccess:
+    """The owner's current link, or the sentence that says why there is none."""
+
+    link: str | None = None
+    expires_at: int | None = None
+    problem: str | None = None
+
+
+async def config_access(owner_id: int, services: Services) -> ConfigAccess:
+    """Checks that gate every delivery of the link: offer, active access, a link."""
     user = await services.db.get_user(owner_id)
     if user is None or not await services.db.has_accepted_offer(owner_id):
-        await message.answer("Сначала примите оферту: нажмите /start.")
-        return
+        return ConfigAccess(problem="Сначала примите оферту: нажмите /start.")
     if user["status"] != "active":
-        await message.answer(
-            f"{status_text(user)}\n\nКонфигурация доступна только при активной аренде. "
-            "Продлить — «💳 Оплата».",
+        return ConfigAccess(
+            problem=(
+                f"{status_text(user)}\n\nКонфигурация доступна только при активной "
+                "аренде. Продлить — «💳 Оплата»."
+            )
         )
-        return
     try:
         link = await services.provisioning.fresh_config(user["telegram_id"])
     except (MarzbanError, ProvisioningError):
@@ -111,20 +118,25 @@ async def deliver_config(message: Message, owner_id: int, services: Services) ->
         )
         link = user["config_link"]
     if not link:
-        await message.answer(
-            "⚠️ Узел временно недоступен. Попробуйте через несколько минут."
+        return ConfigAccess(
+            problem="⚠️ Узел временно недоступен. Попробуйте через несколько минут."
         )
+    return ConfigAccess(link=link, expires_at=user["expires_at"])
+
+
+async def deliver_config(message: Message, owner_id: int, services: Services) -> None:
+    """Callbacks must use their sender, not the author of the bot's message."""
+    if message.chat.type != "private" or message.chat.id != owner_id:
+        return
+    access = await config_access(owner_id, services)
+    if access.link is None:
+        await message.answer(access.problem or "")
         return
     await send_config(
         message,
-        link,
-        user["expires_at"],
+        access.link,
+        access.expires_at,
         awg=services.awg is not None,
-        connect=connect_app_kb(
-            services.settings.public_base_url,
-            services.settings.subscription_base_url,
-            link,
-        ),
     )
     if notice := outage_suffix(services):
         await message.answer(notice.strip())
@@ -187,9 +199,4 @@ async def cb_revoke(callback: CallbackQuery, services: Services) -> None:
         link,
         user["expires_at"] if user else None,
         awg=services.awg is not None,
-        connect=connect_app_kb(
-            services.settings.public_base_url,
-            services.settings.subscription_base_url,
-            link,
-        ),
     )
