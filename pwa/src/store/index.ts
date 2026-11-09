@@ -1,8 +1,8 @@
 import { create } from "zustand";
 
-export type Route = "dashboard" | "pay" | "referral" | "profile" | "legal";
+export type Route = "dashboard" | "connect" | "pay" | "referral" | "profile" | "legal";
 
-const ROUTES: readonly Route[] = ["dashboard", "pay", "referral", "profile", "legal"];
+const ROUTES: readonly Route[] = ["dashboard", "connect", "pay", "referral", "profile", "legal"];
 const REFRESH_KEY = "node.refresh";
 
 function routeFromHash(): Route {
