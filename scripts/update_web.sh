@@ -88,7 +88,11 @@ say "SOURCE $src $(git -C "$src" log -1 --format='%h %s' 2>/dev/null || true)"
 docker tag "$current" "$rollback"
 say "ROLLBACK_IMAGE $rollback (was $current)"
 
-docker build --target web --build-arg "VITE_BOT_USERNAME=$bot_name" \
+# The image carries a digest of what it is built from, so the monthly
+# auto-update can tell whether the checkout still holds the code that runs.
+digest="$(bash "$SCRIPT_ROOT/scripts/source_digest.sh" "$src" 2>/dev/null || true)"
+docker build --target web --label "node.rental.source=$digest" \
+  --build-arg "VITE_BOT_USERNAME=$bot_name" \
   --build-arg "PUBLIC_ORIGIN=$site" -t "$new" "$src" \
   || fail "build failed, live site unchanged"
 docker run --rm --entrypoint sh "$new" -c \

@@ -72,7 +72,7 @@ LOCK_FILE="${LOCK_FILE:-/run/lock/node-cleanup.lock}"
 NOTIFY="${NOTIFY:-always}"
 case "$NOTIFY" in always | problems | never) ;; *) NOTIFY=always ;; esac
 # A maintenance script of this project, started with bash or directly.
-BUSY_PATTERN='bash +[^ ]*(server_update|update_bot|update_web|backup_all|restore_backup|ssh_hardening)\.sh'
+BUSY_PATTERN='bash +[^ ]*(server_update|server_auto_update|update_bot|update_web|backup_all|restore_backup|ssh_hardening)\.sh'
 SRC="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 NOW="$(date +%s)"
 removed_n=0
