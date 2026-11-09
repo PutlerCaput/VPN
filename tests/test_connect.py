@@ -23,7 +23,7 @@ def test_each_app_gets_a_button_to_the_connect_page() -> None:
     markup = connect_app_kb(SITE, SUB, LINK)
     assert markup is not None
     urls = _urls(markup)
-    assert len(urls) == len(CONNECT_APPS) == 3
+    assert len(urls) == len(CONNECT_APPS) == 1
     for (app, _), url in zip(CONNECT_APPS, urls, strict=True):
         assert url == f"{SITE}/connect.html#app={app}&sub={quote(LINK, safe='')}"
 
