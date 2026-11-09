@@ -173,6 +173,9 @@ if [[ "${1:-}" == "--doctor" ]]; then
   # Weekly cleanup of old images, build cache and copies (scripts/install_cleanup.sh).
   row="$(bash "$(dirname "$SELF")/cleanup_status.sh" 2>/dev/null || true)"
   case "$row" in OK\ * | WARN\ *) report "${row%% *}" "${row#* }" ;; *) report WARN "cleanup status could not be read" ;; esac
+  # Monthly update of system packages and base images, and a pending reboot (scripts/install_auto_update.sh).
+  row="$(bash "$(dirname "$SELF")/auto_update_status.sh" 2>/dev/null || true)"
+  case "$row" in OK\ * | WARN\ *) report "${row%% *}" "${row#* }" ;; *) report WARN "auto-update status could not be read" ;; esac
   # SSH: password login off, keys only (scripts/ssh_hardening.sh).
   row="$(bash "$(dirname "$SELF")/ssh_hardening.sh" --status 2>/dev/null || true)"
   case "$row" in OK\ * | WARN\ *) report "${row%% *}" "${row#* }" ;; *) report WARN "ssh status could not be read (run as root)" ;; esac
@@ -348,7 +351,11 @@ docker tag "$(docker inspect -f '{{.Image}}' "$CONTAINER")" "$ROLLBACK"
 say "ROLLBACK_IMAGE_SAVED $ROLLBACK"
 
 NEW="node-rental-bot:update-$STAMP"
-docker build --target bot -t "$NEW" "$SOURCE" || fail "build failed; nothing was changed"
+# The image carries a digest of what it is built from, so the monthly
+# auto-update can tell whether the checkout still holds the code that runs.
+DIGEST="$(bash "$(dirname "$SELF")/source_digest.sh" "$SOURCE" 2>/dev/null || true)"
+docker build --target bot --label "node.rental.source=$DIGEST" -t "$NEW" "$SOURCE" \
+  || fail "build failed; nothing was changed"
 say "BUILD_OK $NEW"
 
 # The new image's tool works whatever the old image contains. SQLite's online
