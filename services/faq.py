@@ -232,6 +232,8 @@ TOPICS: tuple[Topic, ...] = (
             "nekoray",
             "foxray",
             "v2box",
+            "karing",
+            "onexray",
             "впн не работ",
             "vpn не работ",
         ),

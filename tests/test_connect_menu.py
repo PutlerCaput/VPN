@@ -76,18 +76,20 @@ async def active_owner(services: Any, link: str | None = SUBSCRIPTION) -> None:
 
 
 # ---------------------------------------------------------------- the data
-def test_each_device_offers_the_apps_the_owner_chose() -> None:
+def test_each_device_offers_the_apps_that_passed_the_check() -> None:
     assert {d: [a.name for a in g.apps] for d, g in GUIDES.items()} == {
         "android": ["v2rayNG", "NekoBox"],
-        "ios": ["Foxray", "V2Box"],
-        "windows": ["Nekoray", "v2rayN"],
-        "macos": ["V2Box"],
+        "ios": ["Karing", "OneXray"],
+        "windows": ["v2rayN"],
+        "macos": ["OneXray", "v2rayN"],
+        "linux": ["v2rayN"],
     }
     assert {g.title for g in GUIDES.values()} == {
         "Android",
         "iPhone / iPad",
         "Windows",
         "macOS",
+        "Linux",
     }
 
 
@@ -124,19 +126,30 @@ def test_find_app_rejects_stale_buttons() -> None:
     found = find_app("android", "nekobox")
     assert found is not None
     assert found[1] is NEKOBOX
-    assert find_app("android", "foxray") is None  # an iPhone app on Android
-    assert find_app("linux", "nekoray") is None
+    assert find_app("linux", "v2rayn") is not None
+    assert find_app("android", "karing") is None  # an iPhone app on Android
+    # Apps that were taken out: a button from an old message does nothing.
+    for device, app in (
+        ("ios", "foxray"),
+        ("ios", "v2box"),
+        ("macos", "v2box"),
+        ("windows", "nekoray"),
+        ("linux", "nekoray"),
+    ):
+        assert find_app(device, app) is None, (device, app)
+    assert find_app("chromeos", "v2rayn") is None
     assert find_app("android", "") is None
 
 
 # ----------------------------------------------------------- the keyboards
-def test_the_device_menu_lists_four_devices_and_the_help_buttons() -> None:
+def test_the_device_menu_lists_five_devices_and_the_help_buttons() -> None:
     data = [b.callback_data for b in buttons(setup_kb())]
     assert data == [
         "setup:guide:android",
         "setup:guide:ios",
         "setup:guide:windows",
         "setup:guide:macos",
+        "setup:guide:linux",
         "setup:killswitch",
         "setup:help",
     ]
@@ -154,7 +167,7 @@ def test_the_app_menu_has_one_button_per_app() -> None:
         assert all(len(d or "") <= 64 for d in data)
     # guide_kb keeps working for a device key too
     assert next(b.callback_data for b in buttons(guide_kb("ios"))) == (
-        "setup:app:ios:foxray"
+        "setup:app:ios:karing"
     )
 
 
@@ -171,12 +184,13 @@ def test_the_guide_keyboard_copies_installs_and_offers_the_other_app() -> None:
     assert "setup:guide:android" in callbacks  # the other app
     assert "setup:choose" in callbacks
     # One app only on this device: nothing to switch to.
-    mac = find_app("macos", "v2box")
-    assert mac is not None
+    single = find_app("windows", "v2rayn")
+    assert single is not None
     only = [
-        b.callback_data for b in buttons(client_guide_kb("macos", mac[1], SUBSCRIPTION))
+        b.callback_data
+        for b in buttons(client_guide_kb("windows", single[1], SUBSCRIPTION))
     ]
-    assert "setup:guide:macos" not in only
+    assert "setup:guide:windows" not in only
 
 
 def test_a_link_too_long_to_copy_gets_no_copy_button() -> None:
@@ -242,32 +256,59 @@ async def test_choosing_an_app_sends_the_link_the_steps_and_the_buttons(
 ) -> None:
     await active_owner(services)
     message = message_for(OWNER)
-    callback = callback_for("setup:app:ios:foxray", message)
+    callback = callback_for("setup:app:ios:karing", message)
     state = AsyncMock()
     await setup_action(callback, state, services)
     text = message.answer.call_args.args[0]
     markup = message.answer.call_args.kwargs["reply_markup"]
-    assert "iPhone / iPad · Foxray" in text
+    assert "iPhone / iPad · Karing" in text
     assert f"<code>{SUBSCRIPTION}</code>" in text
-    assert "«Subscriptions»" in text
-    assert "NekoBox" not in text  # nothing of the other apps
+    assert "«Добавить профиль»" in text
+    assert "OneXray" not in text  # nothing of the other apps
+    assert "App Store" in text  # the note: Apple removes such apps from the store
     kb = buttons(markup)
     assert kb[0].copy_text.text == SUBSCRIPTION
-    assert any(b.url == "https://apps.apple.com/app/id6448898396" for b in kb)
+    assert any(b.url == "https://apps.apple.com/app/id6472431552" for b in kb)
     services.provisioning.fresh_config.assert_awaited_once_with(OWNER)
     state.clear.assert_awaited()
     callback.answer.assert_awaited_once()
 
 
-async def test_a_device_with_one_app_goes_straight_to_its_guide(services: Any) -> None:
+@pytest.mark.parametrize(
+    ("device", "title", "expected"),
+    [
+        ("windows", "Windows · v2rayN", "v2rayN-windows-64.zip"),
+        ("linux", "Linux · v2rayN", "sudo apt install -y ./v2rayN-linux-64.deb"),
+    ],
+)
+async def test_a_device_with_one_app_goes_straight_to_its_guide(
+    services: Any, device: str, title: str, expected: str
+) -> None:
     await active_owner(services)
     message = message_for(OWNER)
-    callback = callback_for("setup:guide:macos", message)
+    callback = callback_for(f"setup:guide:{device}", message)
     await setup_action(callback, AsyncMock(), services)
     text = message.answer.call_args.args[0]
-    assert "macOS · V2Box" in text
+    assert title in text
     assert f"<code>{SUBSCRIPTION}</code>" in text
-    assert "Mac App Store" in text
+    assert expected in text
+    assert "setup:guide:" + device not in [
+        b.callback_data
+        for b in buttons(message.answer.call_args.kwargs["reply_markup"])
+    ]
+
+
+async def test_macos_asks_which_app_because_it_has_two(services: Any) -> None:
+    await active_owner(services)
+    message = message_for(OWNER)
+    await setup_action(
+        callback_for("setup:guide:macos", message), AsyncMock(), services
+    )
+    markup = message.answer.call_args.kwargs["reply_markup"]
+    assert [b.callback_data for b in buttons(markup)][:2] == [
+        "setup:app:macos:onexray",
+        "setup:app:macos:v2rayn",
+    ]
 
 
 async def test_without_access_the_guide_says_so_and_sends_no_link(
@@ -306,11 +347,14 @@ async def test_without_the_offer_nothing_is_sent_but_the_request_for_it(
 @pytest.mark.parametrize(
     "data",
     [
-        "setup:app:android:foxray",  # another device's app
-        "setup:app:linux:nekoray",  # a device that is no longer offered
+        "setup:app:android:karing",  # another device's app
+        "setup:app:ios:foxray",  # an app that was taken out
+        "setup:app:ios:v2box",
+        "setup:app:windows:nekoray",
+        "setup:app:chromeos:v2rayn",  # a device that is not offered
         "setup:app:android",  # truncated
         "setup:app:android:v2rayng:extra",
-        "setup:guide:linux",
+        "setup:guide:chromeos",
         "setup:guide:amnezia",  # no AmneziaWG server connected
     ],
 )
@@ -343,14 +387,15 @@ async def test_the_link_is_never_sent_to_another_user_or_a_group(
     services.provisioning.fresh_config.assert_not_awaited()
 
 
-async def test_the_connect_command_shows_the_four_devices(services: Any) -> None:
+async def test_the_connect_command_shows_the_five_devices(services: Any) -> None:
     message = message_for(OWNER)
     await start_setup(message, AsyncMock(), services)
     assert message.answer.call_args.args[0] == SETUP_TEXT
     markup = message.answer.call_args.kwargs["reply_markup"]
-    assert [b.text for b in buttons(markup)][:4] == [
+    assert [b.text for b in buttons(markup)][:5] == [
         "Android",
         "iPhone / iPad",
         "Windows",
         "macOS",
+        "Linux",
     ]

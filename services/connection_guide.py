@@ -1,22 +1,27 @@
-"""Static client instructions. Access credentials never appear in download URLs."""
+"""Static client instructions. Access credentials never appear in download URLs.
+
+Which apps are offered, and why only these (docs/CONNECT_APPS.md): free, open
+source, updated lately, offered on the developers' own pages, and, for the App
+Store, present in the Russian storefront when last checked. Apps that fail a
+check are removed from here, from the website and from the Mini App together.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 # The developers' own pages. A wrong link in a security product could send a
-# buyer to a look-alike, so tests/test_connect_screen.py pins every one of them
-# to a short list of official hosts and keeps the site and the Mini App on the
-# same pages.
+# buyer to a look-alike (a search for "Foxray" in the Russian App Store finds an
+# unrelated app), so App Store links name the app by its id, and
+# tests/test_connect_screen.py pins every link to a short list of official hosts
+# and keeps the bot, the site and the Mini App on the same pages.
 V2RAYNG_URL = "https://github.com/2dust/v2rayNG/releases"
 # The project's README says the Google Play build has been controlled by a third
 # party since May 2024: GitHub is the only page offered.
 NEKOBOX_URL = "https://github.com/MatsuriDayo/NekoBoxForAndroid/releases"
-FOXRAY_URL = "https://apps.apple.com/app/id6448898396"
-# The free "V2Box - V2ray Client"; the paid "V2Box Pro" is another listing.
-V2BOX_URL = "https://apps.apple.com/app/id6446814690"
-NEKORAY_URL = "https://github.com/MatsuriDayo/nekoray/releases"
 V2RAYN_URL = "https://github.com/2dust/v2rayN/releases"
+KARING_URL = "https://apps.apple.com/app/id6472431552"
+ONEXRAY_URL = "https://apps.apple.com/app/id6745748773"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +51,10 @@ class DeviceGuide:
 
 # Step 2 of every list is the link the bot sends in the same message. Menu names
 # follow the apps' own wording; they differ a little between versions.
+APPLE_STORE_NOTE = (
+    "ℹ️ Apple время от времени убирает такие приложения из российского App "
+    "Store. Если приложения нет в вашем магазине, напишите в поддержку бота."
+)
 V2RAYNG = ClientApp(
     "v2rayng",
     "v2rayNG",
@@ -74,83 +83,99 @@ NEKOBOX = ClientApp(
     "⚠️ Не ставьте NekoBox из Google Play: по словам авторов, эту версию с мая "
     "2024 года контролирует третья сторона.",
 )
-FOXRAY = ClientApp(
-    "foxray",
-    "Foxray",
-    FOXRAY_URL,
-    "1. Установите Foxray из App Store кнопкой ниже.\n"
+KARING = ClientApp(
+    "karing",
+    "Karing",
+    KARING_URL,
+    "1. Установите Karing из App Store кнопкой ниже.\n"
     "2. Скопируйте ссылку выше.\n"
-    "3. В Foxray внизу откройте «Subscriptions» → «+». Введите любое имя, "
-    "вставьте ссылку в поле URL и нажмите «Subscribe».\n"
-    "4. Если серверов нет, обновите подписку значком обновления в списке "
-    "подписок.\n"
-    "5. Выберите сервер, включите подключение и разрешите добавление "
+    "3. В Karing нажмите значок настроек вверху слева → «Добавить профиль» "
+    "(Add profile) → «Добавить ссылку на профиль» (Add profile link). Вставьте "
+    "ссылку и нажмите кнопку добавления вверху справа.\n"
+    "4. На главном экране сервер выбирается сам; другой можно выбрать по "
+    "названию под переключателем.\n"
+    "5. Включите переключатель подключения и разрешите добавление "
     "VPN-конфигурации в окне iOS.",
+    APPLE_STORE_NOTE,
 )
-V2BOX_IOS = ClientApp(
-    "v2box",
-    "V2Box",
-    V2BOX_URL,
-    "1. Установите V2Box из App Store кнопкой ниже: нужна бесплатная «V2Box - "
-    "V2ray Client».\n"
+ONEXRAY_IOS = ClientApp(
+    "onexray",
+    "OneXray",
+    ONEXRAY_URL,
+    "1. Установите OneXray из App Store кнопкой ниже.\n"
     "2. Скопируйте ссылку выше.\n"
-    "3. Внизу откройте «Configs» → «+» → «Add Subscription». Введите любое имя, "
-    "вставьте ссылку в поле URL и нажмите «Add Subscribe»: серверы проверятся "
-    "сами.\n"
-    "4. На главном экране («Home») выберите сервер и сдвиньте нижнюю кнопку "
-    "вправо, чтобы подключиться. Разрешите добавление VPN-конфигурации в окне "
-    "iOS.",
+    "3. Откройте OneXray и завершите первоначальную настройку до экрана «Go to "
+    "Home». Когда iOS спросит, разрешите добавление VPN-конфигурации.\n"
+    "4. Откройте «Servers» → «Add servers» → «Add subscription»: введите любое "
+    "имя, вставьте ссылку в поле URL и подтвердите.\n"
+    "5. На экране «Connect» выберите источник серверов (для начала подойдёт "
+    "автоматический выбор) и нажмите «Connect»: дождитесь статуса «Connected».",
+    APPLE_STORE_NOTE,
 )
-V2BOX_MAC = ClientApp(
-    "v2box",
-    "V2Box",
-    V2BOX_URL,
-    "1. Установите V2Box из Mac App Store кнопкой ниже: нужна бесплатная "
-    "«V2Box - V2ray Client».\n"
+ONEXRAY_MAC = ClientApp(
+    "onexray",
+    "OneXray",
+    ONEXRAY_URL,
+    "1. Установите OneXray из Mac App Store кнопкой ниже.\n"
     "2. Скопируйте ссылку выше.\n"
-    "3. Откройте «Configs» → «+» → «Add Subscription». Введите любое имя, "
-    "вставьте ссылку в поле URL и нажмите «Add Subscribe»: серверы проверятся "
-    "сами.\n"
-    "4. На главном экране («Home») выберите сервер и подключитесь. Разрешите "
-    "добавление VPN-конфигурации в системном окне macOS.",
+    "3. Откройте OneXray и завершите первоначальную настройку до экрана «Go to "
+    "Home». Когда macOS спросит, разрешите добавление VPN-конфигурации.\n"
+    "4. Откройте «Servers» → «Add servers» → «Add subscription»: введите любое "
+    "имя, вставьте ссылку в поле URL и подтвердите.\n"
+    "5. На экране «Connect» выберите источник серверов (для начала подойдёт "
+    "автоматический выбор) и нажмите «Connect»: дождитесь статуса «Connected».",
+    APPLE_STORE_NOTE,
 )
-NEKORAY = ClientApp(
-    "nekoray",
-    "Nekoray",
-    NEKORAY_URL,
-    "1. Скачайте Nekoray для Windows кнопкой ниже (раздел Releases), распакуйте "
-    "архив и запустите программу.\n"
-    "2. Скопируйте ссылку выше.\n"
-    "3. В Nekoray нажмите Ctrl+V: программа предложит добавить ссылку как "
-    "подписку (создайте новую группу).\n"
-    "4. Чтобы загрузить серверы, выберите в меню «Сервер» пункт «Обновить "
-    "подписку» (Ctrl+U). Для обновления VPN должен быть выключен.\n"
-    "5. Выберите сервер, нажмите Enter и включите «Системный прокси» или «Режим "
-    "TUN» (для TUN нужны права администратора).",
-    "ℹ️ Автор остановил разработку Nekoray (репозиторий в архиве с марта 2025): "
-    "программа работает, но не обновляется. При проблемах попробуйте v2rayN.",
-)
-V2RAYN = ClientApp(
-    "v2rayn",
-    "v2rayN",
-    V2RAYN_URL,
-    "1. Скачайте v2rayN для Windows кнопкой ниже (раздел Releases на GitHub), "
-    "распакуйте архив и запустите программу.\n"
-    "2. Скопируйте ссылку выше.\n"
+# v2rayN has the same menus on Windows, macOS and Linux; steps 3-5 are shared.
+V2RAYN_USE = (
     "3. В меню «Подписки» (Subscription group) откройте «Настройки подписки» и "
     "нажмите «Добавить»: введите любое имя, вставьте ссылку в поле URL и "
     "подтвердите.\n"
     "4. В том же меню выберите «Обновить подписки» (Update subscriptions): "
     "появятся серверы.\n"
     "5. Выберите сервер, нажмите Enter и включите в нижней панели системный "
-    "прокси или режим TUN (для TUN нужны права администратора).",
+    "прокси или режим TUN (для TUN нужны права администратора)."
+)
+V2RAYN_WINDOWS = ClientApp(
+    "v2rayn",
+    "v2rayN",
+    V2RAYN_URL,
+    "1. Скачайте v2rayN для Windows кнопкой ниже (раздел Releases на GitHub): "
+    "для обычного 64-разрядного компьютера — v2rayN-windows-64.zip. Распакуйте "
+    "архив и запустите программу.\n"
+    "2. Скопируйте ссылку выше.\n" + V2RAYN_USE,
+)
+V2RAYN_MAC = ClientApp(
+    "v2rayn",
+    "v2rayN",
+    V2RAYN_URL,
+    "1. Скачайте v2rayN для macOS кнопкой ниже (раздел Releases на GitHub): "
+    "v2rayN-macos-arm64.dmg для Apple Silicon или v2rayN-macos-64.dmg для Intel. "
+    "Установите его; если macOS пишет, что приложение повреждено, выполните в "
+    "Терминале команду из инструкции разработчиков: "
+    "xattr -cr /Applications/v2rayN.app\n"
+    "2. Скопируйте ссылку выше.\n" + V2RAYN_USE,
+    "ℹ️ Сборка для macOS не подписана, поэтому система предупреждает при "
+    "запуске: скачивайте её только по кнопке ниже.",
+)
+V2RAYN_LINUX = ClientApp(
+    "v2rayn",
+    "v2rayN",
+    V2RAYN_URL,
+    "1. Скачайте v2rayN для Linux кнопкой ниже (раздел Releases на GitHub) и "
+    "установите: пакет .deb (Debian 12+, Ubuntu 22.04+) — sudo apt install -y "
+    "./v2rayN-linux-64.deb; пакет .rpm (Fedora 36+, RHEL 9+) — sudo dnf install "
+    "-y ./v2rayN-linux-rhel-x64.rpm; либо распакуйте архив .zip и запустите "
+    "./v2rayN. Имена файлов зависят от версии.\n"
+    "2. Скопируйте ссылку выше.\n" + V2RAYN_USE,
 )
 
 GUIDES: dict[str, DeviceGuide] = {
     "android": DeviceGuide("Android", (V2RAYNG, NEKOBOX)),
-    "ios": DeviceGuide("iPhone / iPad", (FOXRAY, V2BOX_IOS)),
-    "windows": DeviceGuide("Windows", (NEKORAY, V2RAYN)),
-    "macos": DeviceGuide("macOS", (V2BOX_MAC,)),
+    "ios": DeviceGuide("iPhone / iPad", (KARING, ONEXRAY_IOS)),
+    "windows": DeviceGuide("Windows", (V2RAYN_WINDOWS,)),
+    "macos": DeviceGuide("macOS", (ONEXRAY_MAC, V2RAYN_MAC)),
+    "linux": DeviceGuide("Linux", (V2RAYN_LINUX,)),
 }
 
 # For a link that is one server, not a subscription (CONFIG_DELIVERY=single).
