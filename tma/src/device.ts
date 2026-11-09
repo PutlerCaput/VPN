@@ -1,15 +1,17 @@
 // Which apps to suggest for the visitor's device and where to get them. Inside
 // Telegram the Mini App knows the platform exactly (WebApp.platform), so it is
 // trusted first and the user agent is only a fallback. The steps for each app are
-// in i18n/ru.ts. The install links are the developers' own pages, pinned by
-// tests/test_connect_screen.py so a typo cannot send a buyer of a security product
-// to a look-alike; the same test keeps them equal to the bot's
-// (services/connection_guide.py) and to the website's.
+// in i18n/ru.ts. Only apps that are free, open source, updated lately and offered
+// on the developers' own pages are here, and the App Store ones were present in
+// the Russian storefront when last checked (docs/CONNECT_APPS.md). The install
+// links are pinned by tests/test_connect_screen.py so a typo cannot send a buyer
+// of a security product to a look-alike; the same test keeps them equal to the
+// bot's (services/connection_guide.py) and to the website's.
 import { getWebApp } from "./telegram";
 
-export type Platform = "android" | "ios" | "windows" | "macos";
+export type Platform = "android" | "ios" | "windows" | "macos" | "linux";
 
-export const PLATFORMS: Platform[] = ["android", "ios", "windows", "macos"];
+export const PLATFORMS: Platform[] = ["android", "ios", "windows", "macos", "linux"];
 
 export interface ClientApp {
   key: string;
@@ -24,22 +26,24 @@ export const APPS: Record<Platform, ClientApp[]> = {
     { key: "nekobox", name: "NekoBox", install: "https://github.com/MatsuriDayo/NekoBoxForAndroid/releases" },
   ],
   ios: [
-    { key: "foxray", name: "Foxray", install: "https://apps.apple.com/app/id6448898396" },
-    { key: "v2box", name: "V2Box", install: "https://apps.apple.com/app/id6446814690" },
+    { key: "karing", name: "Karing", install: "https://apps.apple.com/app/id6472431552" },
+    { key: "onexray", name: "OneXray", install: "https://apps.apple.com/app/id6745748773" },
   ],
-  windows: [
-    { key: "nekoray", name: "Nekoray", install: "https://github.com/MatsuriDayo/nekoray/releases" },
+  windows: [{ key: "v2rayn", name: "v2rayN", install: "https://github.com/2dust/v2rayN/releases" }],
+  macos: [
+    { key: "onexray", name: "OneXray", install: "https://apps.apple.com/app/id6745748773" },
     { key: "v2rayn", name: "v2rayN", install: "https://github.com/2dust/v2rayN/releases" },
   ],
-  macos: [{ key: "v2box", name: "V2Box", install: "https://apps.apple.com/app/id6446814690" }],
+  linux: [{ key: "v2rayn", name: "v2rayN", install: "https://github.com/2dust/v2rayN/releases" }],
 };
 
 function fromUserAgent(): Platform {
   const ua = navigator.userAgent;
   if (/iPhone|iPad|iPod/i.test(ua)) return "ios";
   if (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) return "ios";
-  if (/Android/i.test(ua)) return "android";
+  if (/Android/i.test(ua)) return "android"; // its user agent also says Linux
   if (/Macintosh|Mac OS X/i.test(ua)) return "macos";
+  if (/Linux|X11/i.test(ua) && !/CrOS/i.test(ua)) return "linux";
   // Windows, and the default for anything unknown: the chips switch it.
   return "windows";
 }

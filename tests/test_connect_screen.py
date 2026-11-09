@@ -15,11 +15,10 @@ from pathlib import Path
 import pytest
 
 from services.connection_guide import (
-    FOXRAY_URL,
     GUIDES,
+    KARING_URL,
     NEKOBOX_URL,
-    NEKORAY_URL,
-    V2BOX_URL,
+    ONEXRAY_URL,
     V2RAYN_URL,
     V2RAYNG_URL,
 )
@@ -34,10 +33,21 @@ OFFICIAL_INSTALL_HOSTS = {"apps.apple.com", "play.google.com", "github.com"}
 OFFICIAL_INSTALL_URLS = {
     V2RAYNG_URL,
     NEKOBOX_URL,
-    FOXRAY_URL,
-    V2BOX_URL,
-    NEKORAY_URL,
     V2RAYN_URL,
+    KARING_URL,
+    ONEXRAY_URL,
+}
+# Apps the owner once chose and that were taken out, with the reason. A removed
+# app must not come back by accident; bringing one back means checking it again
+# (docs/CONNECT_APPS.md).
+REMOVED_APPS = {
+    "nekoray": "its repository was archived in March 2025",
+    "foxray": "gone from the App Store; a search finds an unrelated look-alike",
+    "v2box": "removed from the Russian App Store in March 2026",
+    "hiddify": "not in the Russian App Store",
+    "streisand": "removed from the Russian App Store in March 2026",
+    "happ": "removed from the Russian App Store in March 2026",
+    "v2raytun": "removed from the Russian App Store in March 2026",
 }
 
 # "key", "name" and "install", in this order, are what both device modules share.
@@ -57,7 +67,7 @@ def _apps_by_platform(app: str) -> dict[str, list[tuple[str, str, str]]]:
     """{platform: [(key, name, install)]} read from the APPS table of device.ts."""
     block = _device(app).split("export const APPS", 1)[1]
     block = block.split("\n};", 1)[0]
-    parts = re.split(r"^  (android|ios|windows|macos): \[", block, flags=re.M)
+    parts = re.split(r"^  (android|ios|windows|macos|linux): \[", block, flags=re.M)
     # re.split keeps the platform names: [before, name, body, name, body, ...]
     return {parts[i]: ENTRY.findall(parts[i + 1]) for i in range(1, len(parts) - 1, 2)}
 
@@ -83,14 +93,45 @@ def test_the_apps_for_each_device_are_the_bots(app: str) -> None:
     assert found == expected
 
 
-def test_the_apps_are_the_ones_the_owner_chose() -> None:
-    chosen = {
+def test_the_apps_offered_for_each_device() -> None:
+    offered = {
         "android": ["v2rayNG", "NekoBox"],
-        "ios": ["Foxray", "V2Box"],
-        "windows": ["Nekoray", "v2rayN"],
-        "macos": ["V2Box"],
+        "ios": ["Karing", "OneXray"],
+        "windows": ["v2rayN"],
+        "macos": ["OneXray", "v2rayN"],
+        "linux": ["v2rayN"],
     }
-    assert {d: [a.name for a in g.apps] for d, g in GUIDES.items()} == chosen
+    assert {d: [a.name for a in g.apps] for d, g in GUIDES.items()} == offered
+
+
+@pytest.mark.parametrize("app", ["bot", *APPS])
+def test_removed_apps_do_not_come_back(app: str) -> None:
+    if app == "bot":
+        keys = {a.key for g in GUIDES.values() for a in g.apps}
+        names = {a.name.lower() for g in GUIDES.values() for a in g.apps}
+    else:
+        entries = [e for found in _apps_by_platform(app).values() for e in found]
+        keys = {key for key, _, _ in entries}
+        names = {name.lower() for _, name, _ in entries}
+    assert not keys & set(REMOVED_APPS)
+    assert not names & set(REMOVED_APPS)
+
+
+def test_app_store_links_name_the_app_by_its_id() -> None:
+    # A search by name finds look-alikes: the link must be the app's own page.
+    for url in OFFICIAL_INSTALL_URLS:
+        if "apps.apple.com" in url:
+            assert re.fullmatch(r"https://apps\.apple\.com/app/id\d+", url), url
+
+
+@pytest.mark.parametrize("app", APPS)
+def test_linux_is_detected_after_android_and_never_for_chromebooks(app: str) -> None:
+    device = _device(app)
+    # An Android user agent also says "Linux": Android must be asked first.
+    assert device.index('"android"; //') < device.index("Linux|X11") or (
+        device.index("/Android/i") < device.index("/Linux|X11/i")
+    )
+    assert "CrOS" in device
 
 
 def test_the_platforms_are_in_the_same_order_everywhere() -> None:
@@ -120,7 +161,7 @@ def test_the_website_keeps_the_steps_with_the_apps() -> None:
         for app in guide.apps:
             # Each app brings its own steps; the first one installs that very app.
             assert f'key: "{app.key}"' in device
-    assert device.count("steps: [") + device.count("steps: V2BOX_STEPS") == 7
+    assert device.count("steps: [") == sum(len(g.apps) for g in GUIDES.values())
 
 
 @pytest.mark.parametrize("app", APPS)
@@ -149,4 +190,6 @@ def test_the_one_tap_bouncer_is_gone() -> None:
             if path.suffix in {".ts", ".tsx", ".py"}:
                 text = path.read_text(encoding="utf-8")
                 assert "connect.html" not in text, path
-                assert "CONNECT_APPS" not in text, path
+                # (docs/CONNECT_APPS.md is the list of offered apps, not the old table)
+                assert not re.search(r"\bCONNECT_APPS\b(?!\.md)", text), path
+                assert "connect_app_kb" not in text, path
