@@ -45,6 +45,27 @@
 .small { font-size: 0.875rem; }
 .error { color: var(--danger); }
 
+/* A text button that reads as a link: back, "show link", "install …". */
+.back,
+.install {
+  display: inline-flex;
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0.2rem 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.back { margin-bottom: 0.3rem; }
+.install { display: block; margin-top: 0.35rem; font-size: 0.85rem; }
+.cta { min-height: 52px; font-size: 1.05rem; }
+.qrCaption { text-align: center; margin-top: -0.5rem; }
+
 .qr { display: flex; justify-content: center; margin: 0.9rem 0; }
 /* The code itself stays black on white: scanners need the contrast. */
 .qr svg { border-radius: 12px; max-width: 100%; height: auto; box-shadow: var(--glow); }

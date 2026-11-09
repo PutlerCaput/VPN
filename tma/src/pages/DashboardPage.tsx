@@ -1,14 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { endpoints, formatTraffic, isApiError, type Status } from "../api/client";
+import { endpoints, formatTraffic, type Status } from "../api/client";
 import { BrandHeader } from "../components/Brand";
-import { CONNECT_APPS, connectUrl } from "../connect";
-import { QRCode } from "../components/QRCode";
 import { ServersCard } from "../components/ServersCard";
 import { formatDate, ru } from "../i18n/ru";
 import { startPayment } from "../payments";
-import { haptic, openExternal } from "../telegram";
+import { useSession } from "../store/session";
 import styles from "../styles/Dashboard.module.css";
 import ui from "../styles/components.module.css";
 
@@ -33,20 +31,11 @@ function useCountdown(expiresAt: number | null): string | null {
 }
 
 export function DashboardPage() {
+  const navigate = useSession((s) => s.navigate);
   const queryClient = useQueryClient();
-  const [showConfig, setShowConfig] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [copyFailed, setCopyFailed] = useState(false);
   const [paying, setPaying] = useState(false);
   const sub = useQuery({ queryKey: ["subscription"], queryFn: endpoints.subscription });
   const active = sub.data?.status === "active";
-  const config = useQuery({
-    queryKey: ["config"],
-    queryFn: endpoints.config,
-    enabled: showConfig && active,
-    staleTime: 60_000,
-    retry: false,
-  });
   const countdown = useCountdown(active ? (sub.data?.expires_at ?? null) : null);
 
   // Returning from the bot after paying: re-fetch once, no polling.
@@ -57,12 +46,6 @@ export function DashboardPage() {
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [queryClient]);
-
-  const configError = isApiError(config.error)
-    ? config.error.status === 429
-      ? ru.dashboard.rateLimited
-      : ru.dashboard.unavailable
-    : null;
 
   return (
     <main className={ui.page}>
@@ -84,22 +67,19 @@ export function DashboardPage() {
                   <dd className={styles.countdown}>{countdown}</dd>
                 </>
               )}
-              {sub.data.status === "active" && sub.data.traffic && (
+              {active && sub.data.traffic && (
                 <>
                   <dt>{ru.dashboard.traffic}</dt>
                   <dd>{formatTraffic(sub.data.traffic)}</dd>
                 </>
               )}
-              {sub.data.node_username && (
-                <>
-                  <dt>{ru.dashboard.node}</dt>
-                  <dd>
-                    <code>{sub.data.node_username}</code>
-                  </dd>
-                </>
-              )}
             </dl>
           </>
+        )}
+        {active && (
+          <button type="button" className={`${ui.btn} ${ui.primary} ${ui.cta}`} onClick={() => navigate("connect")}>
+            {ru.dashboard.connect}
+          </button>
         )}
         <button type="button" className={ui.btn} disabled={sub.isFetching} onClick={() => void sub.refetch()}>
           🔄 {sub.isFetching ? ru.dashboard.checking : ru.dashboard.checkStatus}
@@ -120,57 +100,6 @@ export function DashboardPage() {
       {sub.data?.status === "suspended" && <section className={ui.card}>{ru.dashboard.suspended}</section>}
 
       <ServersCard />
-
-      {active && (
-        <section className={ui.card}>
-          <h2>{ru.dashboard.configTitle}</h2>
-          <button type="button" className={ui.btn} onClick={() => setShowConfig((v) => !v)}>
-            🔐 {showConfig ? ru.dashboard.hideConfig : ru.dashboard.showConfig}
-          </button>
-          {showConfig && config.isLoading && <p className={ui.muted}>{ru.common.loading}</p>}
-          {showConfig && configError && <p className={ui.error}>{configError}</p>}
-          {showConfig && config.data && (
-            <>
-              <QRCode value={config.data.qr_payload} />
-              <textarea className={ui.mono} readOnly rows={4} value={config.data.config_link} onFocus={(e) => e.target.select()} />
-              <button
-                type="button"
-                className={ui.btn}
-                onClick={async () => {
-                  setCopyFailed(false);
-                  setCopied(false);
-                  try {
-                    await navigator.clipboard.writeText(config.data.config_link);
-                    haptic("success");
-                    setCopied(true);
-                    window.setTimeout(() => setCopied(false), 2000);
-                  } catch {
-                    setCopyFailed(true);
-                  }
-                }}
-              >
-                📋 {copied ? ru.common.copied : ru.common.copy}
-              </button>
-              {copyFailed && <p role="alert" className={ui.error}>Не удалось скопировать. Выделите ссылку в поле выше и скопируйте её вручную.</p>}
-              {config.data.config_link.startsWith("https://") && (
-                <>
-                  <p className={ui.small}>{ru.dashboard.connectTitle}</p>
-                  {CONNECT_APPS.map(({ app, label }) => {
-                    const url = connectUrl(app, config.data.config_link);
-                    return url ? (
-                      <button key={app} type="button" className={ui.btn} onClick={() => openExternal(url)}>
-                        {label}
-                      </button>
-                    ) : null;
-                  })}
-                  <p className={`${ui.small} ${ui.muted}`}>{ru.dashboard.connectHint}</p>
-                </>
-              )}
-              <p className={`${ui.small} ${ui.muted}`}>{ru.dashboard.configHint}</p>
-            </>
-          )}
-        </section>
-      )}
     </main>
   );
 }

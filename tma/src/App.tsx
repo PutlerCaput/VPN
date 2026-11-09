@@ -6,6 +6,7 @@ import { bootstrapSession } from "./auth/initData";
 import { Splash } from "./components/Brand";
 import { Nav } from "./components/Nav";
 import { ru } from "./i18n/ru";
+import { ConnectPage } from "./pages/ConnectPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LegalPage } from "./pages/LegalPage";
 import { PaymentPage } from "./pages/PaymentPage";
@@ -93,6 +94,7 @@ export function App() {
   return (
     <>
       {route === "dashboard" && <DashboardPage />}
+      {route === "connect" && <ConnectPage />}
       {route === "pay" && <PaymentPage />}
       {route === "referral" && <ReferralPage />}
       {route === "profile" && <ProfilePage me={me.data} />}
