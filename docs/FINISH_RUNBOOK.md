@@ -225,6 +225,8 @@ cd "$WORKDIR" && docker compose -p "$PROJECT" up -d --no-deps --no-build --force
 2. Отчёт без изменений: `bash scripts/server_cleanup.sh`. Прочитайте список.
 3. Удаление: `bash scripts/server_cleanup.sh --apply`.
 4. Проверка: `bash scripts/update_bot.sh --doctor` (ожидаем `0 problems`).
+5. Чтобы безопасная часть шла сама раз в неделю: `bash scripts/install_cleanup.sh`
+   (`docs/SERVER_MAINTENANCE.md`, «Автоочистка раз в неделю»).
 
 Как читать отчёт базы (строки `rows`, `technical`, `housekeeping backlog`):
 
