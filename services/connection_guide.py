@@ -4,6 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# The developers' own pages. A wrong link in a security product could send a
+# buyer to a look-alike, so tests/test_connect_screen.py pins every one of them
+# to a short list of official hosts and keeps the site and the Mini App on the
+# same pages.
+V2RAYNG_URL = "https://github.com/2dust/v2rayNG/releases"
+# The project's README says the Google Play build has been controlled by a third
+# party since May 2024: GitHub is the only page offered.
+NEKOBOX_URL = "https://github.com/MatsuriDayo/NekoBoxForAndroid/releases"
+FOXRAY_URL = "https://apps.apple.com/app/id6448898396"
+# The free "V2Box - V2ray Client"; the paid "V2Box Pro" is another listing.
+V2BOX_URL = "https://apps.apple.com/app/id6446814690"
+NEKORAY_URL = "https://github.com/MatsuriDayo/nekoray/releases"
+V2RAYN_URL = "https://github.com/2dust/v2rayN/releases"
+
 
 @dataclass(frozen=True, slots=True)
 class ClientGuide:
@@ -13,79 +27,153 @@ class ClientGuide:
     steps: str
 
 
-AMNEZIA_APP_URL = "https://github.com/amnezia-vpn/amnezia-client/releases"
+@dataclass(frozen=True, slots=True)
+class ClientApp:
+    """One client app on one device: where to get it and how to add the link."""
 
-GUIDES: dict[str, ClientGuide] = {
-    "android": ClientGuide(
-        "Android",
-        "v2rayNG",
-        "https://github.com/2dust/v2rayNG/releases",
-        "1. Установите v2rayNG из официального раздела Releases.\n"
-        "2. Нажмите «Получить мою конфигурацию» ниже и скопируйте ссылку.\n"
-        "3. В v2rayNG нажмите «+» и выберите импорт из буфера обмена. "
-        "Если добавлена подписка, обновите её и выберите сервер.\n"
-        "4. Нажмите кнопку подключения и разрешите создание VPN-соединения "
-        "в системном окне Android.\n"
-        "5. Откройте браузер и проверьте обычный сайт.\n\n"
-        "Если уже используете AmneziaVPN, сохраните рабочий профиль. "
-        "Эта инструкция относится к VLESS-профилю сервиса. "
-        "Два VPN-клиента одновременно не включайте.",
-    ),
-    "ios": ClientGuide(
-        "iPhone / iPad",
-        "Hiddify",
-        "https://apps.apple.com/search?term=Hiddify",
-        "1. Установите Hiddify из App Store: откройте ссылку ниже или найдите "
-        "«Hiddify».\n"
-        "2. Получите и скопируйте свою конфигурацию кнопкой ниже.\n"
-        "3. В Hiddify добавьте профиль из буфера обмена. Для ссылки подписки "
-        "обновите список серверов и выберите сервер.\n"
-        "4. Включите подключение и разрешите добавление VPN-конфигурации "
-        "в системном окне iOS.\n"
-        "5. Проверьте обычный сайт в Safari. Если приложения нет в вашем "
-        "App Store, напишите в поддержку бота: подскажем, что делать.",
-    ),
-    "windows": ClientGuide(
-        "Windows",
-        "Hiddify",
-        "https://github.com/hiddify/hiddify-app/releases",
-        "1. Скачайте Windows-версию Hiddify из официального раздела Releases.\n"
-        "2. Получите свою конфигурацию кнопкой ниже и скопируйте ссылку.\n"
-        "3. В Hiddify добавьте профиль из буфера обмена. Для подписки "
-        "обновите список серверов.\n"
-        "4. В настройках маршрутизации выберите VPN/TUN, чтобы подключение "
-        "применялось к приложениям, поддерживаемым клиентом. "
-        "При необходимости подтвердите системный запрос прав администратора.\n"
-        "5. Включите подключение и проверьте обычный сайт в браузере. "
-        "Названия пунктов могут отличаться между версиями.",
-    ),
-    "macos": ClientGuide(
-        "macOS",
-        "Hiddify",
-        "https://github.com/hiddify/hiddify-app/releases",
-        "1. Скачайте macOS-версию Hiddify для вашего процессора "
-        "из официального раздела Releases.\n"
-        "2. Получите свою конфигурацию кнопкой ниже и скопируйте ссылку.\n"
-        "3. Добавьте профиль из буфера обмена; обновите подписку, если нужно.\n"
-        "4. Выберите VPN/TUN и разрешите системное VPN-подключение.\n"
-        "5. Включите подключение и проверьте обычный сайт в браузере. "
-        "При ошибке установки напишите в поддержку; системную защиту "
-        "отключать не нужно.",
-    ),
-    "linux": ClientGuide(
-        "Linux",
-        "Hiddify",
-        "https://github.com/hiddify/hiddify-app/releases",
-        "1. Выберите пакет Hiddify для своей системы и архитектуры "
-        "в официальном разделе Releases.\n"
-        "2. Получите конфигурацию кнопкой ниже и добавьте профиль "
-        "из буфера обмена. Обновите подписку, если нужно.\n"
-        "3. Включите VPN/TUN по инструкции клиента и подключитесь.\n"
-        "4. Проверьте обычный сайт в браузере. Если TUN требует настройки, "
-        "сообщите поддержке название дистрибутива и версию клиента. "
-        "Не запускайте команды из неизвестных источников.",
-    ),
+    key: str
+    name: str
+    download_url: str
+    steps: str
+    note: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceGuide:
+    title: str
+    apps: tuple[ClientApp, ...]
+
+
+# Step 2 of every list is the link the bot sends in the same message. Menu names
+# follow the apps' own wording; they differ a little between versions.
+V2RAYNG = ClientApp(
+    "v2rayng",
+    "v2rayNG",
+    V2RAYNG_URL,
+    "1. Установите v2rayNG кнопкой ниже: это официальная страница на GitHub.\n"
+    "2. Скопируйте ссылку выше.\n"
+    "3. В v2rayNG откройте меню ☰ → «Группа подписки» (Subscription group "
+    "setting) → «+». Введите любое имя, вставьте ссылку в поле URL и сохраните.\n"
+    "4. На главном экране нажмите ⋮ → «Обновить подписку» (Update subscription): "
+    "появятся серверы.\n"
+    "5. Выберите сервер, нажмите кнопку подключения и разрешите создание "
+    "VPN-соединения в окне Android.",
+)
+NEKOBOX = ClientApp(
+    "nekobox",
+    "NekoBox",
+    NEKOBOX_URL,
+    "1. Установите NekoBox кнопкой ниже, только с GitHub (раздел Releases).\n"
+    "2. Скопируйте ссылку выше.\n"
+    "3. Откройте меню ☰ → «Группы» (Groups) → «+». Тип группы — «Подписка» "
+    "(Subscription), в поле ссылки вставьте ссылку, включите автообновление и "
+    "сохраните.\n"
+    "4. Дождитесь обновления: в группе появятся серверы. Выберите сервер.\n"
+    "5. Нажмите кнопку подключения и разрешите создание VPN-соединения в окне "
+    "Android.",
+    "⚠️ Не ставьте NekoBox из Google Play: по словам авторов, эту версию с мая "
+    "2024 года контролирует третья сторона.",
+)
+FOXRAY = ClientApp(
+    "foxray",
+    "Foxray",
+    FOXRAY_URL,
+    "1. Установите Foxray из App Store кнопкой ниже.\n"
+    "2. Скопируйте ссылку выше.\n"
+    "3. В Foxray внизу откройте «Subscriptions» → «+». Введите любое имя, "
+    "вставьте ссылку в поле URL и нажмите «Subscribe».\n"
+    "4. Если серверов нет, обновите подписку значком обновления в списке "
+    "подписок.\n"
+    "5. Выберите сервер, включите подключение и разрешите добавление "
+    "VPN-конфигурации в окне iOS.",
+)
+V2BOX_IOS = ClientApp(
+    "v2box",
+    "V2Box",
+    V2BOX_URL,
+    "1. Установите V2Box из App Store кнопкой ниже: нужна бесплатная «V2Box - "
+    "V2ray Client».\n"
+    "2. Скопируйте ссылку выше.\n"
+    "3. Внизу откройте «Configs» → «+» → «Add Subscription». Введите любое имя, "
+    "вставьте ссылку в поле URL и нажмите «Add Subscribe»: серверы проверятся "
+    "сами.\n"
+    "4. На главном экране («Home») выберите сервер и сдвиньте нижнюю кнопку "
+    "вправо, чтобы подключиться. Разрешите добавление VPN-конфигурации в окне "
+    "iOS.",
+)
+V2BOX_MAC = ClientApp(
+    "v2box",
+    "V2Box",
+    V2BOX_URL,
+    "1. Установите V2Box из Mac App Store кнопкой ниже: нужна бесплатная "
+    "«V2Box - V2ray Client».\n"
+    "2. Скопируйте ссылку выше.\n"
+    "3. Откройте «Configs» → «+» → «Add Subscription». Введите любое имя, "
+    "вставьте ссылку в поле URL и нажмите «Add Subscribe»: серверы проверятся "
+    "сами.\n"
+    "4. На главном экране («Home») выберите сервер и подключитесь. Разрешите "
+    "добавление VPN-конфигурации в системном окне macOS.",
+)
+NEKORAY = ClientApp(
+    "nekoray",
+    "Nekoray",
+    NEKORAY_URL,
+    "1. Скачайте Nekoray для Windows кнопкой ниже (раздел Releases), распакуйте "
+    "архив и запустите программу.\n"
+    "2. Скопируйте ссылку выше.\n"
+    "3. В Nekoray нажмите Ctrl+V: программа предложит добавить ссылку как "
+    "подписку (создайте новую группу).\n"
+    "4. Чтобы загрузить серверы, выберите в меню «Сервер» пункт «Обновить "
+    "подписку» (Ctrl+U). Для обновления VPN должен быть выключен.\n"
+    "5. Выберите сервер, нажмите Enter и включите «Системный прокси» или «Режим "
+    "TUN» (для TUN нужны права администратора).",
+    "ℹ️ Автор остановил разработку Nekoray (репозиторий в архиве с марта 2025): "
+    "программа работает, но не обновляется. При проблемах попробуйте v2rayN.",
+)
+V2RAYN = ClientApp(
+    "v2rayn",
+    "v2rayN",
+    V2RAYN_URL,
+    "1. Скачайте v2rayN для Windows кнопкой ниже (раздел Releases на GitHub), "
+    "распакуйте архив и запустите программу.\n"
+    "2. Скопируйте ссылку выше.\n"
+    "3. В меню «Подписки» (Subscription group) откройте «Настройки подписки» и "
+    "нажмите «Добавить»: введите любое имя, вставьте ссылку в поле URL и "
+    "подтвердите.\n"
+    "4. В том же меню выберите «Обновить подписки» (Update subscriptions): "
+    "появятся серверы.\n"
+    "5. Выберите сервер, нажмите Enter и включите в нижней панели системный "
+    "прокси или режим TUN (для TUN нужны права администратора).",
+)
+
+GUIDES: dict[str, DeviceGuide] = {
+    "android": DeviceGuide("Android", (V2RAYNG, NEKOBOX)),
+    "ios": DeviceGuide("iPhone / iPad", (FOXRAY, V2BOX_IOS)),
+    "windows": DeviceGuide("Windows", (NEKORAY, V2RAYN)),
+    "macos": DeviceGuide("macOS", (V2BOX_MAC,)),
 }
+
+# For a link that is one server, not a subscription (CONFIG_DELIVERY=single).
+SINGLE_LINK_STEPS = (
+    "Это ссылка на один сервер, а не подписка. Установите приложение кнопкой "
+    "ниже, скопируйте ссылку и добавьте её из буфера обмена: в приложениях для "
+    "телефона кнопка «+» → импорт из буфера обмена (Import from clipboard), в "
+    "программах для компьютера — Ctrl+V. Затем выберите сервер и подключитесь."
+)
+
+
+def find_app(device_key: str, app_key: str) -> tuple[DeviceGuide, ClientApp] | None:
+    """The device and the app a menu button names, or None for a stale button."""
+    device = GUIDES.get(device_key)
+    if device is None:
+        return None
+    for app in device.apps:
+        if app.key == app_key:
+            return device, app
+    return None
+
+
+AMNEZIA_APP_URL = "https://github.com/amnezia-vpn/amnezia-client/releases"
 
 # Shown only when the AmneziaWG server is connected (AWG_ENABLED).
 AMNEZIA_GUIDE = ClientGuide(

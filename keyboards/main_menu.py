@@ -240,43 +240,6 @@ def revoke_confirm_kb() -> InlineKeyboardMarkup:
     )
 
 
-# Apps that take a subscription link through their own URL scheme. The page on
-# the site (connect.html) checks the link before it hands the link to an app.
-CONNECT_APPS: tuple[tuple[str, str], ...] = (
-    # The one app offered with a one-tap link; others get the copy and QR paths.
-    ("hiddify", "💻 Подключить в Hiddify"),
-)
-CONNECT_PAGE = "/connect.html"
-
-
-def connect_app_kb(
-    public_base_url: str | None,
-    subscription_base_url: str | None,
-    link: str | None,
-) -> InlineKeyboardMarkup | None:
-    """One-tap buttons that open a VPN app with this subscription link.
-
-    Only a link on this service's subscription host gets buttons: the connect
-    page refuses any other address, so the bot does not offer one either.
-    """
-    if not (public_base_url and subscription_base_url and link):
-        return None
-    site = public_base_url.rstrip("/")
-    base = subscription_base_url.rstrip("/")
-    if not site.startswith("https://") or not link.startswith(f"{base}/sub/"):
-        return None
-    rows = [
-        [
-            InlineKeyboardButton(
-                text=label,
-                url=f"{site}{CONNECT_PAGE}#app={app}&sub={quote(link, safe='')}",
-            )
-        ]
-        for app, label in CONNECT_APPS
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
 def subscription_link_kb(link: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
 
-from services.connection_guide import AMNEZIA_GUIDE, GUIDES
+from services.connection_guide import AMNEZIA_GUIDE, GUIDES, ClientApp
+
+# The Bot API copies at most this many characters with a copy button.
+COPY_LIMIT = 256
 
 
 def setup_kb(awg: bool = False) -> InlineKeyboardMarkup:
@@ -32,9 +35,73 @@ def setup_kb(awg: bool = False) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def client_apps_kb(device_key: str) -> InlineKeyboardMarkup:
+    """The apps offered for one device; tapping one sends the link and the steps."""
+    device = GUIDES[device_key]
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=app.name, callback_data=f"setup:app:{device_key}:{app.key}"
+            )
+        ]
+        for app in device.apps
+    ]
+    rows.append(
+        [InlineKeyboardButton(text="Другое устройство", callback_data="setup:choose")]
+    )
+    rows.append(
+        [InlineKeyboardButton(text="Не получается", callback_data="setup:help")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def client_guide_kb(
+    device_key: str, app: ClientApp, link: str | None
+) -> InlineKeyboardMarkup:
+    """Under the steps: copy the link, install the app, another app or device."""
+    rows: list[list[InlineKeyboardButton]] = []
+    if link and len(link) <= COPY_LIMIT:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="📋 Скопировать ссылку", copy_text=CopyTextButton(text=link)
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(text=f"Установить {app.name}", url=app.download_url)]
+    )
+    if link:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="QR-код и сброс ссылки", callback_data="setup:config"
+                )
+            ]
+        )
+    if len(GUIDES[device_key].apps) > 1:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Другое приложение",
+                    callback_data=f"setup:guide:{device_key}",
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(text="Другое устройство", callback_data="setup:choose")]
+    )
+    rows.append(
+        [InlineKeyboardButton(text="Не получается", callback_data="setup:help")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def guide_kb(key: str) -> InlineKeyboardMarkup:
-    guide = AMNEZIA_GUIDE if key == "amnezia" else GUIDES[key]
-    config_action = "awg:menu" if key == "amnezia" else "setup:config"
+    """The AmneziaVPN page; any other device key shows that device's apps."""
+    if key != "amnezia":
+        return client_apps_kb(key)
+    guide = AMNEZIA_GUIDE
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -44,7 +111,7 @@ def guide_kb(key: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="Получить мою конфигурацию", callback_data=config_action
+                    text="Получить мою конфигурацию", callback_data="awg:menu"
                 )
             ],
             [InlineKeyboardButton(text="Не получается", callback_data="setup:help")],

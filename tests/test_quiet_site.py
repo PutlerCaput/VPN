@@ -16,7 +16,6 @@ from scripts.render_legal import DOCUMENTS, render_document
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY_PAGES = (
     "pwa/index.html",
-    "pwa/public/connect.html",
     "tma/index.html",
     "scripts/legal_page/page.html",
 )

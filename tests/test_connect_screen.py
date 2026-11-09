@@ -1,10 +1,10 @@
-"""The connect screen (PWA and Mini App): device-aware picks, official links only.
+"""The connect screen (PWA and Mini App): the same apps as the bot, official links only.
 
-The deep link that hands a subscription to a VPN app (hiddify://) is built in
-one place, public/connect.js, which first checks the link is this service's own
-subscription (tests/test_connect.py). Each screen and its device module must go
-through it and must never point an install button at anything but the developers'
-own pages.
+Each screen offers the apps the owner chose for the visitor's device, copies the
+link when an app is chosen and shows a short list of steps. The install links
+are the developers' own pages; they are checked here against a closed list of
+hosts and against the bot's (services/connection_guide.py), so that a typo in one
+of the three places cannot send a buyer of a security product to a look-alike.
 """
 
 from __future__ import annotations
@@ -14,15 +14,34 @@ from pathlib import Path
 
 import pytest
 
-from keyboards.main_menu import CONNECT_APPS
+from services.connection_guide import (
+    FOXRAY_URL,
+    GUIDES,
+    NEKOBOX_URL,
+    NEKORAY_URL,
+    V2BOX_URL,
+    V2RAYN_URL,
+    V2RAYNG_URL,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 APPS = ["pwa", "tma"]
 
 # A wrong install link in a security product could send a buyer to a look-alike,
-# so the set of hosts is closed and checked: Hiddify ships on GitHub and in the
+# so the set of hosts is closed and checked: the apps ship on GitHub and in the
 # app stores.
 OFFICIAL_INSTALL_HOSTS = {"apps.apple.com", "play.google.com", "github.com"}
+OFFICIAL_INSTALL_URLS = {
+    V2RAYNG_URL,
+    NEKOBOX_URL,
+    FOXRAY_URL,
+    V2BOX_URL,
+    NEKORAY_URL,
+    V2RAYN_URL,
+}
+
+# "key", "name" and "install", in this order, are what both device modules share.
+ENTRY = re.compile(r'key: "(\w+)",\s*name: "([^"]+)",\s*install: "([^"]+)"', re.DOTALL)
 
 
 def _device(app: str) -> str:
@@ -34,6 +53,15 @@ def _page(app: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _apps_by_platform(app: str) -> dict[str, list[tuple[str, str, str]]]:
+    """{platform: [(key, name, install)]} read from the APPS table of device.ts."""
+    block = _device(app).split("export const APPS", 1)[1]
+    block = block.split("\n};", 1)[0]
+    parts = re.split(r"^  (android|ios|windows|macos): \[", block, flags=re.M)
+    # re.split keeps the platform names: [before, name, body, name, body, ...]
+    return {parts[i]: ENTRY.findall(parts[i + 1]) for i in range(1, len(parts) - 1, 2)}
+
+
 @pytest.mark.parametrize("app", APPS)
 def test_install_links_point_only_to_official_pages(app: str) -> None:
     urls = re.findall(r'"(https?://[^"]+)"', _device(app))
@@ -42,18 +70,83 @@ def test_install_links_point_only_to_official_pages(app: str) -> None:
         assert url.startswith("https://"), url
         host = re.sub(r"^https://([^/]+).*$", r"\1", url)
         assert host in OFFICIAL_INSTALL_HOSTS, url
+    assert set(urls) == OFFICIAL_INSTALL_URLS
 
 
 @pytest.mark.parametrize("app", APPS)
-def test_device_module_covers_exactly_the_wired_apps(app: str) -> None:
-    apps = set(re.findall(r"^  (\w+): \{$", _device(app), re.M))
-    assert apps == {a for a, _ in CONNECT_APPS}
+def test_the_apps_for_each_device_are_the_bots(app: str) -> None:
+    found = _apps_by_platform(app)
+    expected = {
+        device: [(a.key, a.name, a.download_url) for a in guide.apps]
+        for device, guide in GUIDES.items()
+    }
+    assert found == expected
+
+
+def test_the_apps_are_the_ones_the_owner_chose() -> None:
+    chosen = {
+        "android": ["v2rayNG", "NekoBox"],
+        "ios": ["Foxray", "V2Box"],
+        "windows": ["Nekoray", "v2rayN"],
+        "macos": ["V2Box"],
+    }
+    assert {d: [a.name for a in g.apps] for d, g in GUIDES.items()} == chosen
+
+
+def test_the_platforms_are_in_the_same_order_everywhere() -> None:
+    for app in APPS:
+        order = re.search(r"PLATFORMS: Platform\[\] = \[([^\]]+)\]", _device(app))
+        assert order
+        assert re.findall(r'"(\w+)"', order[1]) == list(GUIDES)
+
+
+def test_the_mini_app_has_steps_for_every_app_it_offers() -> None:
+    strings = (ROOT / "tma" / "src" / "i18n" / "ru.ts").read_text(encoding="utf-8")
+    block = strings.split("const guides", 1)[1].split("\n};\n", 1)[0]
+    found: dict[str, list[str]] = {}
+    platform = ""
+    for line in block.splitlines():
+        if match := re.match(r"^  (\w+): \{$", line):
+            platform = match[1]
+            found[platform] = []
+        elif match := re.match(r"^    (\w+): \{$", line):
+            found[platform].append(match[1])
+    assert found == {d: [a.key for a in g.apps] for d, g in GUIDES.items()}
+
+
+def test_the_website_keeps_the_steps_with_the_apps() -> None:
+    device = _device("pwa")
+    for guide in GUIDES.values():
+        for app in guide.apps:
+            # Each app brings its own steps; the first one installs that very app.
+            assert f'key: "{app.key}"' in device
+    assert device.count("steps: [") + device.count("steps: V2BOX_STEPS") == 7
 
 
 @pytest.mark.parametrize("app", APPS)
-def test_only_the_checked_bouncer_builds_scheme_links(app: str) -> None:
-    for scheme in ("happ://", "v2raytun://", "hiddify://"):
-        assert scheme not in _device(app)
-        assert scheme not in _page(app)
-    # The screen hands links to the bouncer through connectUrl, nowhere else.
-    assert "connectUrl(" in _page(app)
+def test_the_screen_asks_for_nothing_but_the_link_and_the_platform(app: str) -> None:
+    page = _page(app)
+    # The link is copied inside the tap that chooses the app.
+    assert "navigator.clipboard.writeText(link)" in page
+    assert "function choose(" in page
+    assert "chosen.install" in page
+    # No scheme link opens an app: none of these apps has one that is checked.
+    for text in (page, _device(app)):
+        assert not re.search(r"\b(?!https\b)[a-z][a-z0-9+.-]*://", text), text[:80]
+    assert "connectUrl" not in page
+
+
+def test_the_one_tap_bouncer_is_gone() -> None:
+    for gone in (
+        "pwa/public/connect.html",
+        "pwa/public/connect.js",
+        "pwa/src/connect.ts",
+        "tma/src/connect.ts",
+    ):
+        assert not (ROOT / gone).exists(), gone
+    for folder in ("pwa/src", "tma/src", "keyboards", "handlers"):
+        for path in (ROOT / folder).rglob("*"):
+            if path.suffix in {".ts", ".tsx", ".py"}:
+                text = path.read_text(encoding="utf-8")
+                assert "connect.html" not in text, path
+                assert "CONNECT_APPS" not in text, path

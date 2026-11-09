@@ -1,76 +1,54 @@
-// Which client app to suggest first for the visitor's device, and where to get
-// it. Inside Telegram the Mini App knows the platform exactly (WebApp.platform),
-// so it is trusted first and the user agent is only a fallback. Every app imports
-// a subscription link; the scheme deep links live only in connect.ts and the
-// checked bouncer /connect.html. The install links are the developers' own pages,
-// pinned by tests/test_connect_screen.py so a typo cannot send a buyer of a
-// security product to a look-alike.
-import type { ConnectApp } from "./connect";
+// Which apps to suggest for the visitor's device and where to get them. Inside
+// Telegram the Mini App knows the platform exactly (WebApp.platform), so it is
+// trusted first and the user agent is only a fallback. The steps for each app are
+// in i18n/ru.ts. The install links are the developers' own pages, pinned by
+// tests/test_connect_screen.py so a typo cannot send a buyer of a security product
+// to a look-alike; the same test keeps them equal to the bot's
+// (services/connection_guide.py) and to the website's.
 import { getWebApp } from "./telegram";
 
-export type Platform = "ios" | "android" | "desktop";
+export type Platform = "android" | "ios" | "windows" | "macos";
 
-interface AppInfo {
+export const PLATFORMS: Platform[] = ["android", "ios", "windows", "macos"];
+
+export interface ClientApp {
+  key: string;
   name: string;
-  icon: string;
-  /** Platforms where this app is a first choice. */
-  best: Platform[];
-  /** Every platform it runs on. */
-  runs: Platform[];
-  /** The developer's own download page, per platform. */
-  install: Partial<Record<Platform, string>>;
+  /** The developer's own download page. */
+  install: string;
 }
 
-const HIDDIFY = "https://github.com/hiddify/hiddify-app/releases";
-
-// Hiddify is open source and free; its Releases page covers every platform.
-// On iPhone the App Store search is the only route the site offers: the store
-// may not list the app in every country, and the support page covers that.
-export const APP_INFO: Record<ConnectApp, AppInfo> = {
-  hiddify: {
-    name: "Hiddify",
-    icon: "💻",
-    best: ["desktop", "android", "ios"],
-    runs: ["ios", "android", "desktop"],
-    install: {
-      ios: "https://apps.apple.com/search?term=Hiddify",
-      android: HIDDIFY,
-      desktop: HIDDIFY,
-    },
-  },
+export const APPS: Record<Platform, ClientApp[]> = {
+  android: [
+    { key: "v2rayng", name: "v2rayNG", install: "https://github.com/2dust/v2rayNG/releases" },
+    { key: "nekobox", name: "NekoBox", install: "https://github.com/MatsuriDayo/NekoBoxForAndroid/releases" },
+  ],
+  ios: [
+    { key: "foxray", name: "Foxray", install: "https://apps.apple.com/app/id6448898396" },
+    { key: "v2box", name: "V2Box", install: "https://apps.apple.com/app/id6446814690" },
+  ],
+  windows: [
+    { key: "nekoray", name: "Nekoray", install: "https://github.com/MatsuriDayo/nekoray/releases" },
+    { key: "v2rayn", name: "v2rayN", install: "https://github.com/2dust/v2rayN/releases" },
+  ],
+  macos: [{ key: "v2box", name: "V2Box", install: "https://apps.apple.com/app/id6446814690" }],
 };
+
+function fromUserAgent(): Platform {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/i.test(ua)) return "ios";
+  if (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) return "ios";
+  if (/Android/i.test(ua)) return "android";
+  if (/Macintosh|Mac OS X/i.test(ua)) return "macos";
+  // Windows, and the default for anything unknown: the chips switch it.
+  return "windows";
+}
 
 export function detectPlatform(): Platform {
   const tg = getWebApp()?.platform;
   if (tg === "ios") return "ios";
   if (tg === "android" || tg === "android_x") return "android";
-  if (tg && tg !== "unknown") return "desktop"; // macos, tdesktop, weba, webk, …
-  // Outside Telegram or an unknown client: read the user agent instead.
-  const ua = navigator.userAgent;
-  if (/iPhone|iPad|iPod/i.test(ua)) return "ios";
-  if (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) return "ios";
-  if (/Android/i.test(ua)) return "android";
-  return "desktop";
-}
-
-export interface AppChoice {
-  app: ConnectApp;
-  name: string;
-  icon: string;
-  recommended: boolean;
-  install: string | null;
-}
-
-/** The apps that run on this platform, the recommended ones first. */
-export function appsForPlatform(platform: Platform): AppChoice[] {
-  return (Object.keys(APP_INFO) as ConnectApp[])
-    .filter((app) => APP_INFO[app].runs.includes(platform))
-    .map((app) => ({
-      app,
-      name: APP_INFO[app].name,
-      icon: APP_INFO[app].icon,
-      recommended: APP_INFO[app].best.includes(platform),
-      install: APP_INFO[app].install[platform] ?? null,
-    }))
-    .sort((a, b) => Number(b.recommended) - Number(a.recommended));
+  if (tg === "macos") return "macos";
+  // tdesktop is Windows or Linux, weba and webk are any browser: read the user agent.
+  return fromUserAgent();
 }

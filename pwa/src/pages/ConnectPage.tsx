@@ -1,16 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { ApiError, endpoints } from "../api/client";
-import { connectUrl } from "../connect";
-import { appsForPlatform, detectPlatform, PLATFORM_LABEL } from "../device";
+import { APPS, PLATFORMS, PLATFORM_LABEL, SINGLE_LINK_STEPS, detectPlatform } from "../device";
+import type { ClientApp, Platform } from "../device";
 import { QRCode } from "../components/QRCode";
 import { useAppStore } from "../store";
 
 export function ConnectPage() {
   const navigate = useAppStore((s) => s.navigate);
-  const platform = useMemo(() => detectPlatform(), []);
-  const apps = useMemo(() => appsForPlatform(platform), [platform]);
+  const [platform, setPlatform] = useState<Platform>(() => detectPlatform());
+  const [chosen, setChosen] = useState<ClientApp | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const [showLink, setShowLink] = useState(false);
@@ -34,10 +34,22 @@ export function ConnectPage() {
     try {
       await navigator.clipboard.writeText(link);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
     } catch {
       setCopyFailed(true);
     }
+  }
+
+  function choosePlatform(next: Platform) {
+    setPlatform(next);
+    setChosen(null);
+    setCopied(false);
+    setCopyFailed(false);
+  }
+
+  // The copy starts inside the tap, which is when browsers allow the clipboard.
+  function choose(app: ClientApp) {
+    setChosen(app);
+    void copy();
   }
 
   return (
@@ -67,8 +79,21 @@ export function ConnectPage() {
       {active && (
         <>
           <p className="small muted">
-            Ваше устройство: {PLATFORM_LABEL[platform]}. Нажмите приложение — профиль добавится сам.
+            Выберите устройство и приложение: ссылка скопируется сама, ниже — короткая инструкция.
           </p>
+          <div className="chips" role="group" aria-label="Устройство">
+            {PLATFORMS.map((p) => (
+              <button
+                key={p}
+                type="button"
+                className={p === platform ? "chip active" : "chip"}
+                aria-pressed={p === platform}
+                onClick={() => choosePlatform(p)}
+              >
+                {PLATFORM_LABEL[p]}
+              </button>
+            ))}
+          </div>
 
           {config.isLoading && (
             <section className="card">
@@ -85,58 +110,52 @@ export function ConnectPage() {
 
           {config.data && (
             <>
-              {isSub ? (
+              <section className="card">
+                <h2>Выберите приложение</h2>
+                {APPS[platform].map((app) => (
+                  <button
+                    key={app.key}
+                    type="button"
+                    className={chosen?.key === app.key ? "btn primary block" : "btn block"}
+                    aria-pressed={chosen?.key === app.key}
+                    onClick={() => choose(app)}
+                  >
+                    {app.name}
+                  </button>
+                ))}
+              </section>
+
+              {chosen && (
                 <section className="card">
-                  <h2>Подключиться в один тап</h2>
-                  {apps.map((choice) => {
-                    const url = connectUrl(choice.app, link);
-                    if (!url) return null;
-                    return (
-                      <div key={choice.app} className="approw">
-                        <button
-                          type="button"
-                          className={choice.recommended ? "btn primary block" : "btn block"}
-                          onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
-                        >
-                          {choice.icon} Открыть в {choice.name}
-                          {choice.recommended ? " — советуем" : ""}
-                        </button>
-                        {choice.install && (
-                          <a className="small muted install" href={choice.install} target="_blank" rel="noopener noreferrer">
-                            Нет приложения? Установить {choice.name}
-                          </a>
-                        )}
-                      </div>
-                    );
-                  })}
-                  <p className="small muted">
-                    Ничего не открылось — сначала установите приложение по ссылке под кнопкой, затем нажмите её снова. Если приложения нет в вашем магазине, напишите в поддержку бота.
+                  <h2>{chosen.name}</h2>
+                  <p role="status" className="small">
+                    {copied && "✅ Ссылка скопирована."}
+                    {copyFailed && "Не удалось скопировать. Нажмите «Показать ссылку вручную» ниже."}
                   </p>
-                </section>
-              ) : (
-                <section className="card">
-                  <h2>Отсканируйте в приложении</h2>
-                  <p className="small muted">
-                    Откройте приложение ({apps.map((c) => c.name).join(", ")}), нажмите «+» и отсканируйте код.
-                  </p>
-                  <QRCode value={config.data.qr_payload} label="Импорт профиля по QR-коду" />
-                  {apps.map((choice) =>
-                    choice.install ? (
-                      <a key={choice.app} className="small muted install" href={choice.install} target="_blank" rel="noopener noreferrer">
-                        Установить {choice.name}
-                      </a>
-                    ) : null,
-                  )}
+                  <button type="button" className="btn block" onClick={copy}>
+                    📋 Скопировать ссылку
+                  </button>
+                  <ol className="steps">
+                    {(isSub ? chosen.steps : [SINGLE_LINK_STEPS]).map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ol>
+                  {chosen.note && <p className="small muted">{chosen.note}</p>}
+                  <a className="btn primary block" href={chosen.install} target="_blank" rel="noopener noreferrer">
+                    Установить {chosen.name}
+                  </a>
+                  <p className="small muted">Названия пунктов в приложении могут немного отличаться.</p>
                 </section>
               )}
 
-              {isSub && (
-                <section className="card">
-                  <h2>С другого устройства</h2>
-                  <p className="small muted">Отсканируйте код приложением на другом телефоне или компьютере.</p>
-                  <QRCode value={link} label="Ссылка-подписка" />
-                </section>
-              )}
+              <section className="card">
+                <h2>С другого устройства</h2>
+                <p className="small muted">Отсканируйте код приложением на другом телефоне или компьютере.</p>
+                <QRCode
+                  value={isSub ? link : config.data.qr_payload}
+                  label={isSub ? "Ссылка-подписка" : "Импорт профиля по QR-коду"}
+                />
+              </section>
 
               <section className="card">
                 <button type="button" className="btn link" onClick={() => setShowLink((v) => !v)}>
