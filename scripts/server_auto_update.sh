@@ -351,8 +351,8 @@ if [[ -z "$folder_digest" ]]; then
   code_ru="не удалось сверить код в папке проекта с запущенным"
 elif [[ -z "$bot_digest" || -z "$web_digest" ]]; then
   code_state=unstamped
-  code_en="the running images carry no source stamp yet (run bash scripts/server_update.sh --apply once)"
-  code_ru="у запущенных образов ещё нет метки кода (один раз выполните вручную bash scripts/server_update.sh --apply)"
+  code_en="the running images carry no source stamp yet (rebuild them once by hand: update_bot.sh and update_web.sh with --apply)"
+  code_ru="у запущенных образов ещё нет метки кода (один раз пересоберите их вручную: update_bot.sh и update_web.sh с --apply)"
 elif [[ "$folder_digest" != "$bot_digest" || "$folder_digest" != "$web_digest" ]]; then
   code_state=differs
   code_en="the project folder holds code that is not deployed yet"
