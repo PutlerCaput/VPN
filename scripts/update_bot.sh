@@ -170,6 +170,9 @@ if [[ "${1:-}" == "--doctor" ]]; then
   # A copy of everything that cannot be re-created, kept encrypted and sent off the server.
   row="$(bash "$(dirname "$SELF")/backup_status.sh" 2>/dev/null || true)"
   case "$row" in OK\ * | WARN\ *) report "${row%% *}" "${row#* }" ;; *) report WARN "backup status could not be read" ;; esac
+  # Weekly cleanup of old images, build cache and copies (scripts/install_cleanup.sh).
+  row="$(bash "$(dirname "$SELF")/cleanup_status.sh" 2>/dev/null || true)"
+  case "$row" in OK\ * | WARN\ *) report "${row%% *}" "${row#* }" ;; *) report WARN "cleanup status could not be read" ;; esac
   # SSH: password login off, keys only (scripts/ssh_hardening.sh).
   row="$(bash "$(dirname "$SELF")/ssh_hardening.sh" --status 2>/dev/null || true)"
   case "$row" in OK\ * | WARN\ *) report "${row%% *}" "${row#* }" ;; *) report WARN "ssh status could not be read (run as root)" ;; esac

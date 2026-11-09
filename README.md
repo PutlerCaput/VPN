@@ -55,7 +55,8 @@ Telegram Stars внутри бота ([правила и устройство](d
 
 **Обслуживание сервера** — [SERVER_MAINTENANCE.md](docs/SERVER_MAINTENANCE.md):
 обновление системы, Docker, бота и сайта одной командой `scripts/server_update.sh`
-(сначала отчёт, затем `--apply`) с копиями и откатом, очистка `scripts/server_cleanup.sh`,
+(сначала отчёт, затем `--apply`) с копиями и откатом, очистка `scripts/server_cleanup.sh`
+(безопасная часть раз в неделю сама: `scripts/install_cleanup.sh`),
 прогноз трафика сервера против лимита тарифа хостинга (`/traffic`).
 
 **Тихая работа** — [OWNER_OPERATIONS.md](docs/OWNER_OPERATIONS.md#тихая-работа): без рекламы,
