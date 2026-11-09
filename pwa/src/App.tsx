@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ApiError, endpoints, refreshSession } from "./api/client";
 import { Splash } from "./components/Brand";
 import { Nav } from "./components/Nav";
+import { ConnectPage } from "./pages/ConnectPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LegalPage } from "./pages/LegalPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -80,6 +81,7 @@ export function App() {
   return (
     <>
       {route === "dashboard" && <DashboardPage />}
+      {route === "connect" && <ConnectPage />}
       {route === "pay" && <PaymentPage />}
       {route === "referral" && <ReferralPage />}
       {route === "profile" && <ProfilePage me={me.data} />}
