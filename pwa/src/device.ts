@@ -60,6 +60,19 @@ export const DIRECT_INTRO =
 export const DIRECT_CHECK =
   "Проверка: на странице yandex.ru/internet должен быть ваш обычный адрес, а на ifconfig.me — адрес сервера.";
 
+// Apps that receive the rule with the subscription once the server sends it
+// (ru_direct_auto from /config): Marzban sends v2rayNG full configs with it.
+export const AUTO_DIRECT_APPS = ["v2rayng"];
+
+export const AUTO_DIRECT_NOTE =
+  "🇷🇺 Российские сайты v2rayNG открывает напрямую сам: правила приходят вместе с подпиской, настраивать ничего не нужно.";
+
+export const AUTO_DIRECT_STEPS = [
+  "Ничего настраивать не нужно: правила приходят вместе с подпиской.",
+  "Если подписку добавили раньше, обновите её: на главном экране ⋮ → «Обновить подписку» (Update subscription), затем выберите сервер заново.",
+  "Чтобы и российские сайты шли через сервер, используйте NekoBox: в нём по умолчанию весь трафик идёт через сервер.",
+];
+
 const V2RAYNG_DIRECT = [
   "В v2rayNG откройте меню ☰ → «Маршрутизация» (Routing Settings).",
   "Нажмите ⋮ вверху справа → «Импорт набора правил» (Import predefined rulesets) → «Белый список России» и подтвердите замену прежних правил.",

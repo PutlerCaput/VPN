@@ -86,7 +86,8 @@ SETTABLE_KEYS="ENABLED_TIERS CONFIG_DELIVERY SUBSCRIPTION_BASE_URL MAIN_LOCATION
 STARS_ENABLED STARS_AUTORENEW_ENABLED STARS_RUB_PER_STAR YOOKASSA_IN_BOT TRIAL_TRAFFIC_GB \
 AWG_ENABLED AWG_AGENT_URL AWG_AGENT_TOKEN TELEGRAM_PAYMENT_TOKEN \
 YOOKASSA_RECEIPT_MODE ACTIVITY_LOGGING_ENABLED AUTOBAN_MODE TELEGRAM_PROXY_URL \
-SERVER_TRAFFIC_LIMIT_GB SERVER_TRAFFIC_COUNTS SERVER_TRAFFIC_RESET_DAY SERVER_TRAFFIC_PAUSE_TRIALS"
+SERVER_TRAFFIC_LIMIT_GB SERVER_TRAFFIC_COUNTS SERVER_TRAFFIC_RESET_DAY SERVER_TRAFFIC_PAUSE_TRIALS \
+RU_DIRECT_SUBSCRIPTION"
 
 if [[ "${1:-}" == "--payment-status" ]]; then
   # Safe summary only: which payment paths are configured, never any value.
@@ -291,6 +292,9 @@ if [[ "${1:-}" == "--set" ]]; then
     fi
     if [[ "$key" == SERVER_TRAFFIC_PAUSE_TRIALS && ! "$value" =~ ^(true|false)$ ]]; then
       fail "usage: --set SERVER_TRAFFIC_PAUSE_TRIALS=false"
+    fi
+    if [[ "$key" == RU_DIRECT_SUBSCRIPTION && ! "$value" =~ ^(true|false)$ ]]; then
+      fail "usage: --set RU_DIRECT_SUBSCRIPTION=true  (set by scripts/ru_direct.sh)"
     fi
     if [[ "$key" == ENABLED_TIERS ]]; then
       [[ "$value" =~ ^(standard|basic|complete|prime)(,(standard|basic|complete|prime))*$ ]] \

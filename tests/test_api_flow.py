@@ -63,6 +63,8 @@ async def test_full_flow(services: Any, monkeypatch: Any) -> None:
         assert accept["trial"] == "provisioned"
         config = await (await client.get("/api/v1/config", headers=headers)).json()
         assert config["config_link"].startswith("vless://")
+        # Off until scripts/ru_direct.sh puts the rule into the subscription.
+        assert config["ru_direct_auto"] is False
 
         pay = await client.post(
             "/api/v1/payments/create",

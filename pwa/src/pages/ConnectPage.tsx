@@ -4,6 +4,9 @@ import { useState } from "react";
 import { ApiError, endpoints } from "../api/client";
 import {
   APPS,
+  AUTO_DIRECT_APPS,
+  AUTO_DIRECT_NOTE,
+  AUTO_DIRECT_STEPS,
   DIRECT_CHECK,
   DIRECT_INTRO,
   PLATFORMS,
@@ -35,6 +38,9 @@ export function ConnectPage() {
 
   const link = config.data?.config_link ?? "";
   const isSub = link.startsWith("https://");
+  // This app gets "Russian sites directly" with the subscription itself.
+  const autoDirect =
+    isSub && config.data?.ru_direct_auto === true && chosen !== null && AUTO_DIRECT_APPS.includes(chosen.key);
 
   async function copy() {
     setCopyFailed(false);
@@ -149,6 +155,7 @@ export function ConnectPage() {
                     ))}
                   </ol>
                   {chosen.note && <p className="small muted">{chosen.note}</p>}
+                  {autoDirect && <p className="small">{AUTO_DIRECT_NOTE}</p>}
                   <a className="btn primary block" href={chosen.install} target="_blank" rel="noopener noreferrer">
                     Установить {chosen.name}
                   </a>
@@ -162,7 +169,7 @@ export function ConnectPage() {
                     <summary>🇷🇺 Российские сайты напрямую</summary>
                     <p className="small">{DIRECT_INTRO}</p>
                     <ol className="steps">
-                      {chosen.direct.map((step) => (
+                      {(autoDirect ? AUTO_DIRECT_STEPS : chosen.direct).map((step) => (
                         <li key={step}>{step}</li>
                       ))}
                     </ol>

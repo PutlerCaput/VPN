@@ -19,6 +19,8 @@ from keyboards.onboarding import (
 )
 from services.connection_guide import (
     AMNEZIA_GUIDE,
+    AUTO_DIRECT_NOTE,
+    AUTO_DIRECT_STEPS,
     DIRECT_CHECK,
     DIRECT_INTRO,
     GUIDES,
@@ -27,6 +29,7 @@ from services.connection_guide import (
     SINGLE_LINK_STEPS,
     ClientApp,
     DeviceGuide,
+    direct_is_automatic,
     find_app,
 )
 from services.container import Services
@@ -40,8 +43,8 @@ SETUP_TEXT = (
     "нужна активная подписка или пробный доступ после /start.\n\n"
     "Для другой системы подойдёт любое приложение, которое умеет добавлять "
     "подписку по ссылке.\n\n"
-    "Чтобы российские сайты открывались напрямую, без сервера, нажмите в "
-    "инструкции приложения «🇷🇺 Российские сайты напрямую»."
+    "Российские сайты можно открывать напрямую, без сервера: как это сделать "
+    "в выбранном приложении, сказано в его инструкции."
 )
 
 
@@ -53,7 +56,9 @@ def apps_text(device: DeviceGuide) -> str:
     )
 
 
-def app_guide_text(device: DeviceGuide, app: ClientApp, link: str) -> str:
+def app_guide_text(
+    device: DeviceGuide, app: ClientApp, link: str, auto_direct: bool = False
+) -> str:
     """The link and the steps in one message, so the link is at hand for step 2."""
     subscription = link.startswith("https://")
     label = (
@@ -63,6 +68,8 @@ def app_guide_text(device: DeviceGuide, app: ClientApp, link: str) -> str:
     )
     steps = app.steps if subscription else SINGLE_LINK_STEPS
     note = f"\n\n{app.note}" if app.note else ""
+    if subscription and direct_is_automatic(app, auto_direct):
+        note += f"\n\n{AUTO_DIRECT_NOTE}"
     return (
         f"📱 <b>{device.title} · {app.name}</b>\n\n"
         f"{label}\n<code>{html_escape(link)}</code>\n\n"
@@ -73,12 +80,13 @@ def app_guide_text(device: DeviceGuide, app: ClientApp, link: str) -> str:
     )
 
 
-def direct_text(device: DeviceGuide, app: ClientApp) -> str:
+def direct_text(device: DeviceGuide, app: ClientApp, auto_direct: bool = False) -> str:
     """How to send Russian sites past the server in this very app."""
+    steps = AUTO_DIRECT_STEPS if direct_is_automatic(app, auto_direct) else app.direct
     return (
         f"🇷🇺 <b>Российские сайты напрямую · {app.name}</b>\n\n"
         f"{DIRECT_INTRO}\n\n"
-        f"{app.direct}\n\n"
+        f"{steps}\n\n"
         f"{DIRECT_CHECK}\n\n"
         f"Это настройка приложения на устройстве ({device.title}), сервис её не "
         "видит и не меняет. Названия пунктов могут немного отличаться между "
@@ -103,15 +111,24 @@ async def send_app_guide(
     app: ClientApp,
 ) -> None:
     access = await config_access(owner_id, services)
+    auto = services.settings.ru_direct_subscription
     if access.link is None:
         await message.answer(
             app_blocked_text(device, app, access.problem or ""),
-            reply_markup=client_guide_kb(device_key, app, None),
+            reply_markup=client_guide_kb(
+                device_key, app, None, direct_is_automatic(app, auto)
+            ),
         )
         return
+    subscription = access.link.startswith("https://")
     await message.answer(
-        app_guide_text(device, app, access.link),
-        reply_markup=client_guide_kb(device_key, app, access.link),
+        app_guide_text(device, app, access.link, auto),
+        reply_markup=client_guide_kb(
+            device_key,
+            app,
+            access.link,
+            subscription and direct_is_automatic(app, auto),
+        ),
     )
 
 
@@ -190,7 +207,7 @@ async def setup_action(
         await callback.answer()
         await state.clear()
         await message.answer(
-            direct_text(found[0], found[1]),
+            direct_text(found[0], found[1], services.settings.ru_direct_subscription),
             reply_markup=direct_kb(parts[2], found[1]),
         )
     elif action == "setup:choose":

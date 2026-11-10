@@ -32,6 +32,8 @@ from keyboards.onboarding import (
     setup_kb,
 )
 from services.connection_guide import (
+    AUTO_DIRECT_NOTE,
+    AUTO_DIRECT_STEPS,
     DIRECT_CHECK,
     DIRECT_INTRO,
     GUIDES,
@@ -464,8 +466,8 @@ def test_the_routing_steps_lead_back_to_the_app_guide() -> None:
     assert kb[0].text == "‹ Инструкция NekoBox"
 
 
-def test_the_device_menu_mentions_the_russian_sites_button() -> None:
-    assert DIRECT_BUTTON in SETUP_TEXT
+def test_the_device_menu_mentions_russian_sites_directly() -> None:
+    assert "Российские сайты можно открывать напрямую" in SETUP_TEXT
 
 
 @pytest.mark.parametrize(
@@ -512,3 +514,50 @@ async def test_a_stale_routing_button_changes_nothing(services: Any, data: str) 
     await setup_action(callback, AsyncMock(), services)
     message.answer.assert_not_awaited()
     assert "/connect" in callback.answer.call_args.args[0]
+
+
+# ------------------------------- the rule arrives with the subscription
+def test_with_the_rule_in_the_subscription_v2rayng_needs_no_button() -> None:
+    kb = buttons(client_guide_kb("android", V2RAYNG, SUBSCRIPTION, auto_direct=True))
+    assert DIRECT_BUTTON not in [b.text for b in kb]
+    text = app_guide_text(GUIDES["android"], V2RAYNG, SUBSCRIPTION, auto_direct=True)
+    assert AUTO_DIRECT_NOTE in text
+    # Off by default: the steps stay where they were.
+    plain = app_guide_text(GUIDES["android"], V2RAYNG, SUBSCRIPTION)
+    assert AUTO_DIRECT_NOTE not in plain
+
+
+def test_apps_that_get_only_server_links_keep_their_steps() -> None:
+    text = app_guide_text(GUIDES["android"], NEKOBOX, SUBSCRIPTION, auto_direct=True)
+    assert AUTO_DIRECT_NOTE not in text
+    assert NEKOBOX.direct in direct_text(GUIDES["android"], NEKOBOX, auto_direct=True)
+    # A single server link is not the subscription: nothing comes with it.
+    single = app_guide_text(GUIDES["android"], V2RAYNG, "vless://x", auto_direct=True)
+    assert AUTO_DIRECT_NOTE not in single
+
+
+def test_the_routing_page_of_v2rayng_says_there_is_nothing_to_do() -> None:
+    text = direct_text(GUIDES["android"], V2RAYNG, auto_direct=True)
+    assert AUTO_DIRECT_STEPS in text
+    assert "«Белый список России»" not in text
+    assert DIRECT_CHECK in text  # how to see it work stays
+    assert "«Белый список России»" in direct_text(GUIDES["android"], V2RAYNG)
+
+
+async def test_the_bot_follows_the_owners_setting(services: Any) -> None:
+    await active_owner(services)
+    services.settings = services.settings.model_copy(
+        update={"ru_direct_subscription": True}
+    )
+    message = message_for(OWNER)
+    await setup_action(
+        callback_for("setup:app:android:v2rayng", message), AsyncMock(), services
+    )
+    assert AUTO_DIRECT_NOTE in message.answer.call_args.args[0]
+    markup = message.answer.call_args.kwargs["reply_markup"]
+    assert DIRECT_BUTTON not in [b.text for b in buttons(markup)]
+    message = message_for(OWNER)
+    await setup_action(
+        callback_for("setup:direct:android:v2rayng", message), AsyncMock(), services
+    )
+    assert AUTO_DIRECT_STEPS in message.answer.call_args.args[0]

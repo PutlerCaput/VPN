@@ -247,6 +247,10 @@ class Settings(BaseSettings):
     # Public origin of the Marzban subscription endpoint, used when Marzban
     # reports a relative /sub/... path (XRAY_SUBSCRIPTION_URL_PREFIX unset).
     subscription_base_url: str | None = None
+    # True once scripts/ru_direct.sh --apply has put the rule "Russian sites
+    # directly" into Marzban's subscription: v2rayNG then needs no setup and the
+    # bot, the site and the Mini App say so instead of showing steps.
+    ru_direct_subscription: bool = False
     # Display name of the server that runs the Marzban core itself.
     main_location_name: str = Field("Основной сервер", min_length=1, max_length=64)
 
