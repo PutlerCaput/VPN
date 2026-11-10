@@ -15,6 +15,7 @@ protocol is used, the total stays within the tariff.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import math
@@ -249,6 +250,11 @@ class AwgService:
         self.agent = agent
         self.marzban = marzban
         self.settings = settings
+        # One lock per owner: the count-then-create in add_device and the
+        # delete in remove_device must not interleave, or many parallel taps
+        # would each pass the device-limit check and create more peers than the
+        # tier allows (a single-process bot, so an asyncio lock is enough).
+        self._locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     # ---------------------------------------------------------- devices
     async def device_limit(self, user: dict[str, Any]) -> int:
@@ -259,6 +265,10 @@ class AwgService:
         return await self.db.awg_devices(telegram_id)
 
     async def add_device(self, telegram_id: int) -> dict[str, Any]:
+        async with self._locks[telegram_id]:
+            return await self._add_device(telegram_id)
+
+    async def _add_device(self, telegram_id: int) -> dict[str, Any]:
         user = await self.db.get_user(telegram_id)
         if user is None or user["status"] != "active":
             raise AwgInactiveError("subscription inactive")
@@ -284,13 +294,14 @@ class AwgService:
         return device
 
     async def remove_device(self, telegram_id: int, device_id: int) -> bool:
-        device = await self.db.get_awg_device(device_id)
-        if device is None or int(device["telegram_id"]) != telegram_id:
-            return False
-        await self.agent.delete(str(device["public_key"]))
-        await self.db.delete_awg_device(device_id)
-        await audit(self.db, telegram_id, "awg_device_removed", str(device_id))
-        return True
+        async with self._locks[telegram_id]:
+            device = await self.db.get_awg_device(device_id)
+            if device is None or int(device["telegram_id"]) != telegram_id:
+                return False
+            await self.agent.delete(str(device["public_key"]))
+            await self.db.delete_awg_device(device_id)
+            await audit(self.db, telegram_id, "awg_device_removed", str(device_id))
+            return True
 
     async def config_for(self, telegram_id: int, device_id: int) -> str | None:
         device = await self.db.get_awg_device(device_id)

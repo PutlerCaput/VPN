@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import importlib.util
 import json
@@ -355,6 +356,27 @@ async def test_device_limit_follows_the_tier(services: Any, awg: AwgService) -> 
     assert await awg.remove_device(640001, int(first["id"]))
     third = await awg.add_device(640001)
     assert third["name"] == "Устройство 1"
+
+
+async def test_parallel_add_device_never_exceeds_the_limit(
+    services: Any, awg: AwgService
+) -> None:
+    # Many simultaneous taps must not each pass the limit check and overshoot:
+    # the per-owner lock serialises count-then-create.
+    user = await _active(services, 645001)
+    limit = await awg.device_limit(user)
+    results = await asyncio.gather(
+        *[awg.add_device(645001) for _ in range(limit + 8)],
+        return_exceptions=True,
+    )
+    created = [r for r in results if not isinstance(r, Exception)]
+    assert len(created) == limit
+    errs = [r for r in results if isinstance(r, Exception)]
+    assert all(isinstance(r, AwgLimitError) for r in errs)
+    stored = await services.db.awg_devices(645001)
+    assert len(stored) == limit
+    # The names stay unique: no two devices collide under the race either.
+    assert len({d["name"] for d in stored}) == limit
 
 
 async def test_inactive_user_cannot_add_and_others_cannot_touch(
