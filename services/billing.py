@@ -414,7 +414,6 @@ class BillingService:
                     months=months,
                     email=user.get("receipt_email"),
                     tier=tier,
-                    tier_title=TIERS[tier].title,
                     max_pending=MAX_PENDING_PAYMENTS,
                 )
                 created = await creation.issue(job)

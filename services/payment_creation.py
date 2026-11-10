@@ -103,7 +103,6 @@ class YooKassaCreationService:
         amount_rub: int,
         months: int,
         tier: str,
-        tier_title: str,
         email: str | None,
         max_pending: int,
     ) -> dict[str, Any]:
@@ -119,7 +118,6 @@ class YooKassaCreationService:
             amount_rub=amount_rub,
             months=months,
             email=email,
-            tier_title=tier_title,
         )
         return await self.db.prepare_yookassa_creation(
             payment_id=payment_id,

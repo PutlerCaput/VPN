@@ -24,19 +24,17 @@ from typing import Any
 import httpx
 
 API_BASE_URL = "https://api.yookassa.ru/v3"
-RECEIPT_ITEM_DESCRIPTION = (
-    "Информационно-техническая услуга «Сервис защищённого доступа», {months} мес."
-)
-RECEIPT_ITEM_TIER_DESCRIPTION = (
-    "Информационно-техническая услуга «Сервис защищённого доступа», "
-    "тариф {tier}, {months} мес."
-)
-PAYMENT_DESCRIPTION = "Сервис защищённого доступа, {months} мес. Платёж {payment_id}"
+# The service as the offer names it (legal/oferta.md, п. 1.1; a test keeps the two
+# equal). It is the name on the receipt and the purpose of the payment that the
+# customer's bank shows, and the one line to change when the wording changes. The
+# tariff is deliberately not in it.
+SERVICE_NAME = "Информационно-техническая услуга «Сервис защищённого доступа»"
+RECEIPT_ITEM_DESCRIPTION = SERVICE_NAME + ", {months} мес."
+# YooKassa takes at most 128 characters; the order number finds the payment.
+PAYMENT_DESCRIPTION = RECEIPT_ITEM_DESCRIPTION + " Платёж {payment_id}"
 
 
-def receipt_item_description(months: int, tier_title: str | None) -> str:
-    if tier_title:
-        return RECEIPT_ITEM_TIER_DESCRIPTION.format(tier=tier_title, months=months)
+def receipt_item_description(months: int) -> str:
     return RECEIPT_ITEM_DESCRIPTION.format(months=months)
 
 
@@ -212,7 +210,6 @@ class YooKassaClient:
         amount_rub: int,
         months: int,
         email: str | None,
-        tier_title: str | None = None,
     ) -> dict[str, Any]:
         amount = {"value": rub_value(amount_rub), "currency": "RUB"}
         body: dict[str, Any] = {
@@ -225,7 +222,7 @@ class YooKassaClient:
             body["payment_method_data"] = {"type": self.payment_method}
         if self.receipt_mode == "self_employed":
             # Becomes the service name on the «Мой налог» receipt.
-            body["description"] = receipt_item_description(months, tier_title)
+            body["description"] = receipt_item_description(months)
             return body
         if not email:
             raise YooKassaError("fiscal receipt needs the buyer's email")
@@ -236,7 +233,7 @@ class YooKassaClient:
             "customer": {"email": email},
             "items": [
                 {
-                    "description": receipt_item_description(months, tier_title),
+                    "description": receipt_item_description(months),
                     "quantity": "1.00",
                     "amount": amount,
                     "vat_code": self.vat_code,
@@ -257,14 +254,12 @@ class YooKassaClient:
         amount_rub: int,
         months: int,
         email: str | None,
-        tier_title: str | None = None,
     ) -> CreatedYooKassaPayment:
         body = self.build_payment(
             payment_id=payment_id,
             amount_rub=amount_rub,
             months=months,
             email=email,
-            tier_title=tier_title,
         )
         # Our payment_id doubles as the idempotence key: a retried request
         # returns the same YooKassa payment instead of creating a second one.
