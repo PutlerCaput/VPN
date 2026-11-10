@@ -8,6 +8,7 @@ from services.connection_guide import AMNEZIA_GUIDE, GUIDES, ClientApp
 
 # The Bot API copies at most this many characters with a copy button.
 COPY_LIMIT = 256
+DIRECT_BUTTON = "🇷🇺 Российские сайты напрямую"
 
 
 def setup_kb(awg: bool = False) -> InlineKeyboardMarkup:
@@ -79,6 +80,14 @@ def client_guide_kb(
                 )
             ]
         )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=DIRECT_BUTTON,
+                callback_data=f"setup:direct:{device_key}:{app.key}",
+            )
+        ]
+    )
     if len(GUIDES[device_key].apps) > 1:
         rows.append(
             [
@@ -95,6 +104,21 @@ def client_guide_kb(
         [InlineKeyboardButton(text="Не получается", callback_data="setup:help")]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def direct_kb(device_key: str, app: ClientApp) -> InlineKeyboardMarkup:
+    """Under the routing steps: back to the app's guide, or ask for help."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"‹ Инструкция {app.name}",
+                    callback_data=f"setup:app:{device_key}:{app.key}",
+                )
+            ],
+            [InlineKeyboardButton(text="Не получается", callback_data="setup:help")],
+        ]
+    )
 
 
 def guide_kb(key: str) -> InlineKeyboardMarkup:

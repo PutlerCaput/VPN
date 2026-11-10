@@ -12,12 +12,15 @@ from keyboards.main_menu import BTN_SETUP
 from keyboards.onboarding import (
     client_apps_kb,
     client_guide_kb,
+    direct_kb,
     guide_kb,
     help_kb,
     setup_kb,
 )
 from services.connection_guide import (
     AMNEZIA_GUIDE,
+    DIRECT_CHECK,
+    DIRECT_INTRO,
     GUIDES,
     HELP_TEXT,
     KILL_SWITCH_TEXT,
@@ -36,7 +39,9 @@ SETUP_TEXT = (
     "(её можно скопировать одним нажатием) и короткую инструкцию. Для ссылки "
     "нужна активная подписка или пробный доступ после /start.\n\n"
     "Для другой системы подойдёт любое приложение, которое умеет добавлять "
-    "подписку по ссылке."
+    "подписку по ссылке.\n\n"
+    "Чтобы российские сайты открывались напрямую, без сервера, нажмите в "
+    "инструкции приложения «🇷🇺 Российские сайты напрямую»."
 )
 
 
@@ -65,6 +70,19 @@ def app_guide_text(device: DeviceGuide, app: ClientApp, link: str) -> str:
         "Ссылку и QR-код никому не передавайте: они привязаны к вашему аккаунту. "
         "Названия пунктов в приложении могут немного отличаться. Если страница "
         "установки не открывается, нажмите «Не получается» и напишите в поддержку."
+    )
+
+
+def direct_text(device: DeviceGuide, app: ClientApp) -> str:
+    """How to send Russian sites past the server in this very app."""
+    return (
+        f"🇷🇺 <b>Российские сайты напрямую · {app.name}</b>\n\n"
+        f"{DIRECT_INTRO}\n\n"
+        f"{app.direct}\n\n"
+        f"{DIRECT_CHECK}\n\n"
+        f"Это настройка приложения на устройстве ({device.title}), сервис её не "
+        "видит и не меняет. Названия пунктов могут немного отличаться между "
+        "версиями приложения."
     )
 
 
@@ -162,6 +180,18 @@ async def setup_action(
         await state.clear()
         await send_app_guide(
             message, callback.from_user.id, services, parts[2], found[0], found[1]
+        )
+    elif action.startswith("setup:direct:"):
+        parts = action.split(":")
+        found = find_app(parts[2], parts[3]) if len(parts) == 4 else None
+        if found is None:
+            await callback.answer("Выберите устройство заново: /connect.")
+            return
+        await callback.answer()
+        await state.clear()
+        await message.answer(
+            direct_text(found[0], found[1]),
+            reply_markup=direct_kb(parts[2], found[1]),
         )
     elif action == "setup:choose":
         await callback.answer()

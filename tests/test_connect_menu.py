@@ -18,20 +18,26 @@ from handlers.onboarding import (
     SETUP_TEXT,
     app_blocked_text,
     app_guide_text,
+    direct_text,
     setup_action,
     start_setup,
 )
 from keyboards.onboarding import (
     COPY_LIMIT,
+    DIRECT_BUTTON,
     client_apps_kb,
     client_guide_kb,
+    direct_kb,
     guide_kb,
     setup_kb,
 )
 from services.connection_guide import (
+    DIRECT_CHECK,
+    DIRECT_INTRO,
     GUIDES,
     NEKOBOX,
     SINGLE_LINK_STEPS,
+    V2RAYNG,
     find_app,
 )
 
@@ -399,3 +405,110 @@ async def test_the_connect_command_shows_the_five_devices(services: Any) -> None
         "macOS",
         "Linux",
     ]
+
+
+# ------------------------------------------------- Russian sites, directly
+# What each app's own feature is called, the one thing its steps cannot lack.
+DIRECT_KEY_SETTING = {
+    "v2rayng": "«Белый список России»",
+    "nekobox": "geosite:category-ru",
+    "karing": "«Страна и регион»",
+    "onexray": "«Direct region»",
+    "v2rayn": "«Всё, кроме РФ»",
+}
+
+
+def test_every_app_says_how_to_send_russian_sites_directly_and_back() -> None:
+    for guide in GUIDES.values():
+        for app in guide.apps:
+            lines = app.direct.split("\n")
+            assert 3 <= len(lines) <= 6, app.key
+            for number, line in enumerate(lines, 1):
+                assert line.startswith(f"{number}. "), (app.key, line)
+            assert DIRECT_KEY_SETTING[app.key] in app.direct
+            # Undoing it is part of the steps.
+            assert lines[-1].startswith(f"{len(lines)}. Вернуть всё через сервер")
+            # The same text is on the website, whose wording is checked in CI.
+            lowered = app.direct.casefold()
+            for word in ("обход", "vpn", "proxy", "анонимн"):
+                assert word not in lowered, (app.key, word)
+
+
+def test_the_routing_steps_say_what_goes_direct_and_how_to_check() -> None:
+    text = direct_text(GUIDES["android"], V2RAYNG)
+    assert text.startswith("🇷🇺 <b>Российские сайты напрямую · v2rayNG</b>")
+    assert DIRECT_INTRO in text
+    assert V2RAYNG.direct in text
+    assert DIRECT_CHECK in text
+    # Honest about the price: the service does not encrypt what goes direct.
+    assert "Шифрование сервиса на прямые соединения не действует" in text
+    assert "yandex.ru/internet" in text
+    assert "ifconfig.me" in text
+
+
+def test_the_guide_keyboard_offers_the_russian_sites_steps() -> None:
+    for link in (SUBSCRIPTION, None):
+        kb = buttons(client_guide_kb("android", NEKOBOX, link))
+        direct = [b for b in kb if b.text == DIRECT_BUTTON]
+        assert len(direct) == 1
+        assert direct[0].callback_data == "setup:direct:android:nekobox"
+    for device, guide in GUIDES.items():
+        for app in guide.apps:
+            data = f"setup:direct:{device}:{app.key}"
+            assert len(data.encode()) <= 64
+
+
+def test_the_routing_steps_lead_back_to_the_app_guide() -> None:
+    kb = buttons(direct_kb("android", NEKOBOX))
+    assert [b.callback_data for b in kb] == ["setup:app:android:nekobox", "setup:help"]
+    assert kb[0].text == "‹ Инструкция NekoBox"
+
+
+def test_the_device_menu_mentions_the_russian_sites_button() -> None:
+    assert DIRECT_BUTTON in SETUP_TEXT
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ("setup:direct:android:v2rayng", "«Белый список России»"),
+        ("setup:direct:android:nekobox", "geosite:category-ru"),
+        ("setup:direct:ios:karing", "«Правила разделения»"),
+        ("setup:direct:macos:onexray", "«Smart Routing»"),
+        ("setup:direct:linux:v2rayn", "«Настройка региональных пресетов»"),
+    ],
+)
+async def test_the_routing_steps_need_no_link_and_no_access(
+    services: Any, data: str, expected: str
+) -> None:
+    # Instructions only: nothing secret, so even a visitor without access gets them.
+    services.provisioning.fresh_config = AsyncMock(return_value=SUBSCRIPTION)
+    message = message_for(OWNER)
+    callback = callback_for(data, message)
+    state = AsyncMock()
+    await setup_action(callback, state, services)
+    text = message.answer.call_args.args[0]
+    assert expected in text
+    assert SUBSCRIPTION not in text
+    markup = message.answer.call_args.kwargs["reply_markup"]
+    device, app = data.split(":")[2:]
+    assert buttons(markup)[0].callback_data == f"setup:app:{device}:{app}"
+    services.provisioning.fresh_config.assert_not_awaited()
+    state.clear.assert_awaited()
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        "setup:direct:ios:foxray",
+        "setup:direct:android:karing",
+        "setup:direct:android",
+        "setup:direct:android:v2rayng:extra",
+    ],
+)
+async def test_a_stale_routing_button_changes_nothing(services: Any, data: str) -> None:
+    message = message_for(OWNER)
+    callback = callback_for(data, message)
+    await setup_action(callback, AsyncMock(), services)
+    message.answer.assert_not_awaited()
+    assert "/connect" in callback.answer.call_args.args[0]

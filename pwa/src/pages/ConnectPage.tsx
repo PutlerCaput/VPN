@@ -2,7 +2,15 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { ApiError, endpoints } from "../api/client";
-import { APPS, PLATFORMS, PLATFORM_LABEL, SINGLE_LINK_STEPS, detectPlatform } from "../device";
+import {
+  APPS,
+  DIRECT_CHECK,
+  DIRECT_INTRO,
+  PLATFORMS,
+  PLATFORM_LABEL,
+  SINGLE_LINK_STEPS,
+  detectPlatform,
+} from "../device";
 import type { ClientApp, Platform } from "../device";
 import { QRCode } from "../components/QRCode";
 import { useAppStore } from "../store";
@@ -145,6 +153,24 @@ export function ConnectPage() {
                     Установить {chosen.name}
                   </a>
                   <p className="small muted">Названия пунктов в приложении могут немного отличаться.</p>
+                </section>
+              )}
+
+              {chosen && (
+                <section className="card">
+                  <details className="direct">
+                    <summary>🇷🇺 Российские сайты напрямую</summary>
+                    <p className="small">{DIRECT_INTRO}</p>
+                    <ol className="steps">
+                      {chosen.direct.map((step) => (
+                        <li key={step}>{step}</li>
+                      ))}
+                    </ol>
+                    <p className="small muted">{DIRECT_CHECK}</p>
+                    <p className="small muted">
+                      Это настройка приложения на устройстве: сервис её не видит и не меняет.
+                    </p>
+                  </details>
                 </section>
               )}
 

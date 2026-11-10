@@ -1,6 +1,8 @@
 interface AppGuide {
   steps: readonly string[];
   note?: string;
+  /** Russian sites straight through the user's provider, in this app's own settings. */
+  direct: readonly string[];
 }
 
 const appleStoreNote =
@@ -18,6 +20,45 @@ const onexrayUse = [
   "На экране «Connect» выберите источник серверов (для начала подойдёт автоматический выбор) и нажмите «Connect»: дождитесь статуса «Connected».",
 ];
 
+// Russian sites past the server: only the app on the device can do this. The same
+// steps as the bot's (services/connection_guide.py), checked by
+// tests/test_connect_screen.py.
+const v2rayngDirect = [
+  "В v2rayNG откройте меню ☰ → «Маршрутизация» (Routing Settings).",
+  "Нажмите ⋮ вверху справа → «Импорт набора правил» (Import predefined rulesets) → «Белый список России» и подтвердите замену прежних правил.",
+  "Откройте ☰ → «Настройки» и в поле «DNS для прямых подключений» впишите 77.88.8.8 (DNS Яндекса): адреса российских сайтов будут определяться в России.",
+  "Выключите и снова включите подключение.",
+  "Вернуть всё через сервер: там же «Импорт набора правил» → «Общие» (Global).",
+];
+
+const nekoboxDirect = [
+  "В NekoBox откройте меню ☰ → «Маршруты» (Route) → «Создать маршрут» (значок «+»).",
+  "В поле «Название маршрута» введите «Россия», в поле domain — geosite:category-ru, в поле dst ip — geoip:ru.",
+  "В поле outbound выберите второй пункт списка: прямое соединение, мимо сервера.",
+  "Сохраните маршрут (✓ вверху), проверьте, что он включён в списке, и переподключитесь.",
+  "Вернуть всё через сервер: выключите этот маршрут в списке «Маршруты».",
+];
+
+const karingDirect = [
+  "В Karing откройте «Настройки» → «Разделение» (Diversion) → «Страна и регион» (Country and Region) и выберите Россию.",
+  "Вернитесь в «Разделение» → «Правила разделения» (Diversion rules): у правил geosite:ru и geoip:ru выберите действие «Прямое подключение» (Direct).",
+  "Отключитесь и подключитесь снова.",
+  "Вернуть всё через сервер: у тех же правил выберите действие «Текущий выбор» (Current Selected).",
+];
+
+const onexrayDirect = [
+  "В OneXray откройте «Routing» → «Smart Routing» → «Edit».",
+  "В пункте «Direct region» выберите Russia (по умолчанию там Китай). «Local networks» и «Direct DNS» оставьте включёнными; в «Local DNS address» можно заменить 8.8.8.8 на 77.88.8.8 (DNS Яндекса).",
+  "Нажмите «Save» и подтвердите переподключение. Если в «Routing» выбран другой режим, выберите «Smart Routing».",
+  "Вернуть всё через сервер: в «Routing» вместо «Smart Routing» выберите режим, в котором весь трафик идёт через сервер.",
+];
+
+const v2raynDirect = [
+  "В v2rayN откройте «Настройки» (Settings) → «Настройка региональных пресетов» (Regional presets setting) → «Россия» (Russia). Программа скачает российские правила через уже работающее подключение и включит DNS Яндекса для российских сайтов.",
+  "В нижней панели, в списке маршрутизации (Routing), выберите «Всё, кроме РФ».",
+  "Вернуть всё через сервер: в том же списке выберите «Всё».",
+];
+
 /** Steps per platform and app; step 2 is the copy button that sits above them. */
 const guides: Record<string, Record<string, AppGuide>> = {
   android: {
@@ -29,6 +70,7 @@ const guides: Record<string, Record<string, AppGuide>> = {
         "На главном экране нажмите ⋮ → «Обновить подписку» (Update subscription): появятся серверы.",
         "Выберите сервер, нажмите кнопку подключения и разрешите создание соединения в системном окне Android.",
       ],
+      direct: v2rayngDirect,
     },
     nekobox: {
       steps: [
@@ -39,6 +81,7 @@ const guides: Record<string, Record<string, AppGuide>> = {
         "Нажмите кнопку подключения и разрешите создание соединения в системном окне Android.",
       ],
       note: "⚠️ Не ставьте NekoBox из Google Play: по словам авторов, эту версию с мая 2024 года контролирует третья сторона.",
+      direct: nekoboxDirect,
     },
   },
   ios: {
@@ -51,6 +94,7 @@ const guides: Record<string, Record<string, AppGuide>> = {
         "Включите переключатель подключения и разрешите добавление конфигурации в системном окне iOS.",
       ],
       note: appleStoreNote,
+      direct: karingDirect,
     },
     onexray: {
       steps: [
@@ -60,6 +104,7 @@ const guides: Record<string, Record<string, AppGuide>> = {
         ...onexrayUse,
       ],
       note: appleStoreNote,
+      direct: onexrayDirect,
     },
   },
   windows: {
@@ -69,6 +114,7 @@ const guides: Record<string, Record<string, AppGuide>> = {
         "Скопируйте ссылку кнопкой выше.",
         ...v2raynUse,
       ],
+      direct: v2raynDirect,
     },
   },
   macos: {
@@ -80,6 +126,7 @@ const guides: Record<string, Record<string, AppGuide>> = {
         ...onexrayUse,
       ],
       note: appleStoreNote,
+      direct: onexrayDirect,
     },
     v2rayn: {
       steps: [
@@ -88,6 +135,7 @@ const guides: Record<string, Record<string, AppGuide>> = {
         ...v2raynUse,
       ],
       note: "ℹ️ Сборка для macOS не подписана, поэтому система предупреждает при запуске: скачивайте её только по кнопке ниже.",
+      direct: v2raynDirect,
     },
   },
   linux: {
@@ -97,6 +145,7 @@ const guides: Record<string, Record<string, AppGuide>> = {
         "Скопируйте ссылку кнопкой выше.",
         ...v2raynUse,
       ],
+      direct: v2raynDirect,
     },
   },
 };
@@ -165,6 +214,12 @@ export const ru = {
     copyFailed: "Не удалось скопировать. Нажмите «Показать ссылку вручную» ниже.",
     install: (name: string) => `Установить ${name}`,
     labelsDiffer: "Названия пунктов в приложении могут немного отличаться.",
+    directTitle: "🇷🇺 Российские сайты напрямую",
+    directIntro:
+      "Банки, Госуслуги, маркетплейсы и другие российские сайты будут открываться напрямую, через вашего обычного провайдера, а остальные — через сервер. Так российские сайты работают быстрее, а те, что не пускают зарубежные адреса, открываются как обычно. Шифрование сервиса на прямые соединения не действует.",
+    directCheck:
+      "Проверка: на странице yandex.ru/internet должен быть ваш обычный адрес, а на ifconfig.me — адрес сервера.",
+    directOwn: "Это настройка приложения на устройстве: сервис её не видит и не меняет.",
     singleLink:
       "Это ссылка на один сервер, а не подписка. Установите приложение, скопируйте ссылку и добавьте её из буфера обмена: в приложениях для телефона кнопка «+» → импорт из буфера обмена (Import from clipboard), в программах для компьютера — Ctrl+V. Затем выберите сервер и подключитесь.",
     guides,

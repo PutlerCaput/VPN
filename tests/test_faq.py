@@ -31,6 +31,10 @@ from services.faq import NOT_FOUND_TEXT, TOPICS, TOPICS_BY_SLUG, match_topic, no
         ("что за сервис", "about"),
         ("где оферта", "offer"),
         ("хочу поговорить с оператором", "support"),
+        ("не открываются Госуслуги", "direct"),
+        ("как сделать чтобы российские сайты открывались без впн", "direct"),
+        ("раздельное туннелирование есть?", "direct"),
+        ("оплата российской картой", "payment"),
     ],
 )
 def test_common_questions_reach_their_topic(question: str, slug: str) -> None:

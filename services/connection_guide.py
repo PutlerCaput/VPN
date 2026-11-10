@@ -41,6 +41,8 @@ class ClientApp:
     download_url: str
     steps: str
     note: str = ""
+    # Russian sites past the server, with the app's own routing feature.
+    direct: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +57,75 @@ APPLE_STORE_NOTE = (
     "ℹ️ Apple время от времени убирает такие приложения из российского App "
     "Store. Если приложения нет в вашем магазине, напишите в поддержку бота."
 )
+# Russian sites straight through the customer's own provider, the rest through
+# the server. Only the app on the device can do this: traffic that has reached
+# the server leaves it with the server's foreign address. Each app's own feature
+# and wording (docs/CONNECT_APPS.md, "Российские сайты напрямую"); no step needs
+# a file from us. The words "обход", "VPN" and "proxy" stay out: the same steps
+# are on the website, whose wording is checked in CI.
+DIRECT_INTRO = (
+    "Банки, Госуслуги, маркетплейсы и другие российские сайты будут открываться "
+    "напрямую, через вашего обычного провайдера, а остальные — через сервер. "
+    "Так российские сайты работают быстрее, а те, что не пускают зарубежные "
+    "адреса, открываются как обычно. Шифрование сервиса на прямые соединения "
+    "не действует."
+)
+DIRECT_CHECK = (
+    "Проверка: на странице yandex.ru/internet должен быть ваш обычный адрес, "
+    "а на ifconfig.me — адрес сервера."
+)
+V2RAYNG_DIRECT = (
+    "1. В v2rayNG откройте меню ☰ → «Маршрутизация» (Routing Settings).\n"
+    "2. Нажмите ⋮ вверху справа → «Импорт набора правил» (Import predefined "
+    "rulesets) → «Белый список России» и подтвердите замену прежних правил.\n"
+    "3. Откройте ☰ → «Настройки» и в поле «DNS для прямых подключений» впишите "
+    "77.88.8.8 (DNS Яндекса): адреса российских сайтов будут определяться в "
+    "России.\n"
+    "4. Выключите и снова включите подключение.\n"
+    "5. Вернуть всё через сервер: там же «Импорт набора правил» → «Общие» "
+    "(Global)."
+)
+NEKOBOX_DIRECT = (
+    "1. В NekoBox откройте меню ☰ → «Маршруты» (Route) → «Создать маршрут» "
+    "(значок «+»).\n"
+    "2. В поле «Название маршрута» введите «Россия», в поле domain — "
+    "geosite:category-ru, в поле dst ip — geoip:ru.\n"
+    "3. В поле outbound выберите второй пункт списка: прямое соединение, мимо "
+    "сервера.\n"
+    "4. Сохраните маршрут (✓ вверху), проверьте, что он включён в списке, и "
+    "переподключитесь.\n"
+    "5. Вернуть всё через сервер: выключите этот маршрут в списке «Маршруты»."
+)
+KARING_DIRECT = (
+    "1. В Karing откройте «Настройки» → «Разделение» (Diversion) → «Страна и "
+    "регион» (Country and Region) и выберите Россию.\n"
+    "2. Вернитесь в «Разделение» → «Правила разделения» (Diversion rules): у "
+    "правил geosite:ru и geoip:ru выберите действие «Прямое подключение» "
+    "(Direct).\n"
+    "3. Отключитесь и подключитесь снова.\n"
+    "4. Вернуть всё через сервер: у тех же правил выберите действие «Текущий "
+    "выбор» (Current Selected)."
+)
+ONEXRAY_DIRECT = (
+    "1. В OneXray откройте «Routing» → «Smart Routing» → «Edit».\n"
+    "2. В пункте «Direct region» выберите Russia (по умолчанию там Китай). "
+    "«Local networks» и «Direct DNS» оставьте включёнными; в «Local DNS "
+    "address» можно заменить 8.8.8.8 на 77.88.8.8 (DNS Яндекса).\n"
+    "3. Нажмите «Save» и подтвердите переподключение. Если в «Routing» выбран "
+    "другой режим, выберите «Smart Routing».\n"
+    "4. Вернуть всё через сервер: в «Routing» вместо «Smart Routing» выберите "
+    "режим, в котором весь трафик идёт через сервер."
+)
+V2RAYN_DIRECT = (
+    "1. В v2rayN откройте «Настройки» (Settings) → «Настройка региональных "
+    "пресетов» (Regional presets setting) → «Россия» (Russia). Программа "
+    "скачает российские правила через уже работающее подключение и включит DNS "
+    "Яндекса для российских сайтов.\n"
+    "2. В нижней панели, в списке маршрутизации (Routing), выберите «Всё, кроме "
+    "РФ».\n"
+    "3. Вернуть всё через сервер: в том же списке выберите «Всё»."
+)
+
 V2RAYNG = ClientApp(
     "v2rayng",
     "v2rayNG",
@@ -67,6 +138,7 @@ V2RAYNG = ClientApp(
     "появятся серверы.\n"
     "5. Выберите сервер, нажмите кнопку подключения и разрешите создание "
     "VPN-соединения в окне Android.",
+    direct=V2RAYNG_DIRECT,
 )
 NEKOBOX = ClientApp(
     "nekobox",
@@ -82,6 +154,7 @@ NEKOBOX = ClientApp(
     "Android.",
     "⚠️ Не ставьте NekoBox из Google Play: по словам авторов, эту версию с мая "
     "2024 года контролирует третья сторона.",
+    direct=NEKOBOX_DIRECT,
 )
 KARING = ClientApp(
     "karing",
@@ -97,6 +170,7 @@ KARING = ClientApp(
     "5. Включите переключатель подключения и разрешите добавление "
     "VPN-конфигурации в окне iOS.",
     APPLE_STORE_NOTE,
+    direct=KARING_DIRECT,
 )
 ONEXRAY_IOS = ClientApp(
     "onexray",
@@ -111,6 +185,7 @@ ONEXRAY_IOS = ClientApp(
     "5. На экране «Connect» выберите источник серверов (для начала подойдёт "
     "автоматический выбор) и нажмите «Connect»: дождитесь статуса «Connected».",
     APPLE_STORE_NOTE,
+    direct=ONEXRAY_DIRECT,
 )
 ONEXRAY_MAC = ClientApp(
     "onexray",
@@ -125,6 +200,7 @@ ONEXRAY_MAC = ClientApp(
     "5. На экране «Connect» выберите источник серверов (для начала подойдёт "
     "автоматический выбор) и нажмите «Connect»: дождитесь статуса «Connected».",
     APPLE_STORE_NOTE,
+    direct=ONEXRAY_DIRECT,
 )
 # v2rayN has the same menus on Windows, macOS and Linux; steps 3-5 are shared.
 V2RAYN_USE = (
@@ -144,6 +220,7 @@ V2RAYN_WINDOWS = ClientApp(
     "для обычного 64-разрядного компьютера — v2rayN-windows-64.zip. Распакуйте "
     "архив и запустите программу.\n"
     "2. Скопируйте ссылку выше.\n" + V2RAYN_USE,
+    direct=V2RAYN_DIRECT,
 )
 V2RAYN_MAC = ClientApp(
     "v2rayn",
@@ -157,6 +234,7 @@ V2RAYN_MAC = ClientApp(
     "2. Скопируйте ссылку выше.\n" + V2RAYN_USE,
     "ℹ️ Сборка для macOS не подписана, поэтому система предупреждает при "
     "запуске: скачивайте её только по кнопке ниже.",
+    direct=V2RAYN_DIRECT,
 )
 V2RAYN_LINUX = ClientApp(
     "v2rayn",
@@ -168,6 +246,7 @@ V2RAYN_LINUX = ClientApp(
     "-y ./v2rayN-linux-rhel-x64.rpm; либо распакуйте архив .zip и запустите "
     "./v2rayN. Имена файлов зависят от версии.\n"
     "2. Скопируйте ссылку выше.\n" + V2RAYN_USE,
+    direct=V2RAYN_DIRECT,
 )
 
 GUIDES: dict[str, DeviceGuide] = {
