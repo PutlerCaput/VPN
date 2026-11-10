@@ -160,6 +160,22 @@ export function ConnectPage() {
                 </section>
               )}
 
+              {chosen && guide && (
+                <section className={ui.card}>
+                  <details className={ui.direct}>
+                    <summary>{c.directTitle}</summary>
+                    <p className={ui.small}>{c.directIntro}</p>
+                    <ol className={ui.steps}>
+                      {guide.direct.map((step) => (
+                        <li key={step}>{step}</li>
+                      ))}
+                    </ol>
+                    <p className={`${ui.small} ${ui.muted}`}>{c.directCheck}</p>
+                    <p className={`${ui.small} ${ui.muted}`}>{c.directOwn}</p>
+                  </details>
+                </section>
+              )}
+
               <section className={ui.card}>
                 <h2>{c.otherDevice}</h2>
                 <p className={`${ui.small} ${ui.muted}`}>{c.otherHint}</p>

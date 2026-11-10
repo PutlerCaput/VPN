@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 
 from services.connection_guide import (
+    DIRECT_CHECK,
+    DIRECT_INTRO,
     GUIDES,
     KARING_URL,
     NEKOBOX_URL,
@@ -193,3 +195,51 @@ def test_the_one_tap_bouncer_is_gone() -> None:
                 # (docs/CONNECT_APPS.md is the list of offered apps, not the old table)
                 assert not re.search(r"\bCONNECT_APPS\b(?!\.md)", text), path
                 assert "connect_app_kb" not in text, path
+
+
+# ------------------------------------------------- Russian sites, directly
+def _ts_array(text: str, name: str) -> list[str]:
+    """The string items of `const NAME = [ ... ];` in a TypeScript module."""
+    body = text.split(f"const {name} = [", 1)[1].split("\n];", 1)[0]
+    return re.findall(r'^\s*"([^"]+)",$', body, flags=re.M)
+
+
+def _ts_string(text: str, name: str) -> str:
+    """A string constant or property split over lines: `NAME =\n  "..."`."""
+    match = re.search(rf'{name}[:=]?\s*=?\s*\n?\s*"([^"]+)"', text)
+    assert match, name
+    return match[1]
+
+
+def _bot_steps(direct: str) -> list[str]:
+    return [re.sub(r"^\d+\. ", "", line) for line in direct.split("\n")]
+
+
+def test_the_russian_sites_steps_are_the_same_in_all_three_places() -> None:
+    pwa = _device("pwa")
+    tma = (ROOT / "tma" / "src" / "i18n" / "ru.ts").read_text(encoding="utf-8")
+    seen: set[str] = set()
+    for guide in GUIDES.values():
+        for app in guide.apps:
+            if app.key in seen:
+                continue
+            seen.add(app.key)
+            steps = _bot_steps(app.direct)
+            assert _ts_array(pwa, f"{app.key.upper()}_DIRECT") == steps, app.key
+            assert _ts_array(tma, f"{app.key}Direct") == steps, app.key
+    assert _ts_string(pwa, "export const DIRECT_INTRO") == DIRECT_INTRO
+    assert _ts_string(pwa, "export const DIRECT_CHECK") == DIRECT_CHECK
+    assert _ts_string(tma, "directIntro:") == DIRECT_INTRO
+    assert _ts_string(tma, "directCheck:") == DIRECT_CHECK
+
+
+def test_every_app_on_the_screens_carries_its_russian_sites_steps() -> None:
+    apps = sum(len(g.apps) for g in GUIDES.values())
+    assert _device("pwa").count("      direct: ") == apps
+    tma = (ROOT / "tma" / "src" / "i18n" / "ru.ts").read_text(encoding="utf-8")
+    assert tma.count("      direct: ") == apps
+    assert "chosen.direct.map" in _page("pwa")
+    assert "guide.direct.map" in _page("tma")
+    for app in APPS:
+        # Folded away under its title: connecting comes first.
+        assert "<details" in _page(app)

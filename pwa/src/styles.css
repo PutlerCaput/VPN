@@ -144,6 +144,8 @@ button { font: inherit; }
 .steps { margin: 0.8rem 0; padding-left: 1.2rem; color: var(--text-2); }
 .steps li { margin-bottom: 0.45rem; }
 .steps li::marker { color: var(--accent); font-weight: 700; }
+.direct summary { cursor: pointer; font-weight: 700; }
+.direct[open] summary { margin-bottom: 0.6rem; }
 
 .tariff { display: flex; flex-direction: column; gap: 0.25rem; align-items: flex-start; cursor: pointer; color: var(--text); font: inherit; text-align: left; transition: border-color 0.15s ease; }
 .price { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; }

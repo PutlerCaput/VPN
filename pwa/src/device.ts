@@ -27,6 +27,8 @@ export interface ClientApp {
   /** Step 2 is "copy the link": it sits above the steps as a button. */
   steps: string[];
   note?: string;
+  /** Russian sites straight through the visitor's provider, in this app's own settings. */
+  direct: string[];
 }
 
 /** For a link that is one server, not a subscription. */
@@ -48,6 +50,52 @@ const ONEXRAY_USE = [
   "На экране «Connect» выберите источник серверов (для начала подойдёт автоматический выбор) и нажмите «Connect»: дождитесь статуса «Connected».",
 ];
 
+// Russian sites past the server. Only the app on the device can do this: traffic
+// that reached the server leaves it with the server's foreign address. The same
+// steps as the bot's (services/connection_guide.py), checked by
+// tests/test_connect_screen.py.
+export const DIRECT_INTRO =
+  "Банки, Госуслуги, маркетплейсы и другие российские сайты будут открываться напрямую, через вашего обычного провайдера, а остальные — через сервер. Так российские сайты работают быстрее, а те, что не пускают зарубежные адреса, открываются как обычно. Шифрование сервиса на прямые соединения не действует.";
+
+export const DIRECT_CHECK =
+  "Проверка: на странице yandex.ru/internet должен быть ваш обычный адрес, а на ifconfig.me — адрес сервера.";
+
+const V2RAYNG_DIRECT = [
+  "В v2rayNG откройте меню ☰ → «Маршрутизация» (Routing Settings).",
+  "Нажмите ⋮ вверху справа → «Импорт набора правил» (Import predefined rulesets) → «Белый список России» и подтвердите замену прежних правил.",
+  "Откройте ☰ → «Настройки» и в поле «DNS для прямых подключений» впишите 77.88.8.8 (DNS Яндекса): адреса российских сайтов будут определяться в России.",
+  "Выключите и снова включите подключение.",
+  "Вернуть всё через сервер: там же «Импорт набора правил» → «Общие» (Global).",
+];
+
+const NEKOBOX_DIRECT = [
+  "В NekoBox откройте меню ☰ → «Маршруты» (Route) → «Создать маршрут» (значок «+»).",
+  "В поле «Название маршрута» введите «Россия», в поле domain — geosite:category-ru, в поле dst ip — geoip:ru.",
+  "В поле outbound выберите второй пункт списка: прямое соединение, мимо сервера.",
+  "Сохраните маршрут (✓ вверху), проверьте, что он включён в списке, и переподключитесь.",
+  "Вернуть всё через сервер: выключите этот маршрут в списке «Маршруты».",
+];
+
+const KARING_DIRECT = [
+  "В Karing откройте «Настройки» → «Разделение» (Diversion) → «Страна и регион» (Country and Region) и выберите Россию.",
+  "Вернитесь в «Разделение» → «Правила разделения» (Diversion rules): у правил geosite:ru и geoip:ru выберите действие «Прямое подключение» (Direct).",
+  "Отключитесь и подключитесь снова.",
+  "Вернуть всё через сервер: у тех же правил выберите действие «Текущий выбор» (Current Selected).",
+];
+
+const ONEXRAY_DIRECT = [
+  "В OneXray откройте «Routing» → «Smart Routing» → «Edit».",
+  "В пункте «Direct region» выберите Russia (по умолчанию там Китай). «Local networks» и «Direct DNS» оставьте включёнными; в «Local DNS address» можно заменить 8.8.8.8 на 77.88.8.8 (DNS Яндекса).",
+  "Нажмите «Save» и подтвердите переподключение. Если в «Routing» выбран другой режим, выберите «Smart Routing».",
+  "Вернуть всё через сервер: в «Routing» вместо «Smart Routing» выберите режим, в котором весь трафик идёт через сервер.",
+];
+
+const V2RAYN_DIRECT = [
+  "В v2rayN откройте «Настройки» (Settings) → «Настройка региональных пресетов» (Regional presets setting) → «Россия» (Russia). Программа скачает российские правила через уже работающее подключение и включит DNS Яндекса для российских сайтов.",
+  "В нижней панели, в списке маршрутизации (Routing), выберите «Всё, кроме РФ».",
+  "Вернуть всё через сервер: в том же списке выберите «Всё».",
+];
+
 export const APPS: Record<Platform, ClientApp[]> = {
   android: [
     {
@@ -61,6 +109,7 @@ export const APPS: Record<Platform, ClientApp[]> = {
         "На главном экране нажмите ⋮ → «Обновить подписку» (Update subscription): появятся серверы.",
         "Выберите сервер, нажмите кнопку подключения и разрешите создание соединения в системном окне Android.",
       ],
+      direct: V2RAYNG_DIRECT,
     },
     {
       key: "nekobox",
@@ -74,6 +123,7 @@ export const APPS: Record<Platform, ClientApp[]> = {
         "Нажмите кнопку подключения и разрешите создание соединения в системном окне Android.",
       ],
       note: "⚠️ Не ставьте NekoBox из Google Play: по словам авторов, эту версию с мая 2024 года контролирует третья сторона.",
+      direct: NEKOBOX_DIRECT,
     },
   ],
   ios: [
@@ -89,6 +139,7 @@ export const APPS: Record<Platform, ClientApp[]> = {
         "Включите переключатель подключения и разрешите добавление конфигурации в системном окне iOS.",
       ],
       note: APPLE_STORE_NOTE,
+      direct: KARING_DIRECT,
     },
     {
       key: "onexray",
@@ -101,6 +152,7 @@ export const APPS: Record<Platform, ClientApp[]> = {
         ...ONEXRAY_USE,
       ],
       note: APPLE_STORE_NOTE,
+      direct: ONEXRAY_DIRECT,
     },
   ],
   windows: [
@@ -113,6 +165,7 @@ export const APPS: Record<Platform, ClientApp[]> = {
         "Скопируйте ссылку кнопкой выше.",
         ...V2RAYN_USE,
       ],
+      direct: V2RAYN_DIRECT,
     },
   ],
   macos: [
@@ -127,6 +180,7 @@ export const APPS: Record<Platform, ClientApp[]> = {
         ...ONEXRAY_USE,
       ],
       note: APPLE_STORE_NOTE,
+      direct: ONEXRAY_DIRECT,
     },
     {
       key: "v2rayn",
@@ -138,6 +192,7 @@ export const APPS: Record<Platform, ClientApp[]> = {
         ...V2RAYN_USE,
       ],
       note: "ℹ️ Сборка для macOS не подписана, поэтому система предупреждает при запуске: скачивайте её только по кнопке ниже.",
+      direct: V2RAYN_DIRECT,
     },
   ],
   linux: [
@@ -150,6 +205,7 @@ export const APPS: Record<Platform, ClientApp[]> = {
         "Скопируйте ссылку кнопкой выше.",
         ...V2RAYN_USE,
       ],
+      direct: V2RAYN_DIRECT,
     },
   ],
 };
