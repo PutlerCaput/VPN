@@ -19,9 +19,13 @@ from api.auth import (
     validate_login_widget,
 )
 from api.middleware import (
+    CLIENT_IP_KEY,
     LIMITS_KEY,
     SERVICES_KEY,
+    SESSION_ID_KEY,
+    TELEGRAM_ID_KEY,
     TOKENS_KEY,
+    USER_KEY,
     json_error,
     unauthorized,
 )
@@ -61,7 +65,7 @@ def _auth_failed(request: web.Request, reason: str) -> web.Response:
             "event": "tma_auth_failed",
             "reason": reason,
             "ip_hash": ip_fingerprint(
-                request.get("client_ip", "unknown"),
+                request.get(CLIENT_IP_KEY) or "unknown",
                 services.settings.jwt_secret.get_secret_value(),
             ),
         },
@@ -139,8 +143,9 @@ async def auth_refresh(request: web.Request) -> web.Response:
 @routes.post("/auth/logout")
 async def auth_logout(request: web.Request) -> web.Response:
     tokens = request.app[TOKENS_KEY]
-    if request.get("session_id"):
-        await tokens.revoke(request["session_id"])
+    session_id = request.get(SESSION_ID_KEY)
+    if session_id:
+        await tokens.revoke(session_id)
     if request.can_read_body:
         try:
             body = LogoutIn.model_validate(await request.json())
@@ -149,7 +154,7 @@ async def auth_logout(request: web.Request) -> web.Response:
         if body.refresh_token:
             try:
                 claims = tokens.decode(body.refresh_token, "refresh")
-                if claims["sub"] == request["telegram_id"]:
+                if claims["sub"] == request[TELEGRAM_ID_KEY]:
                     await tokens.revoke(claims["jti"])
             except AuthError:
                 pass
@@ -160,8 +165,8 @@ async def auth_logout(request: web.Request) -> web.Response:
 @routes.get("/me")
 async def me(request: web.Request) -> web.Response:
     services = request.app[SERVICES_KEY]
-    user = request["user"]
-    telegram_id = request["telegram_id"]
+    user = request[USER_KEY]
+    telegram_id = request[TELEGRAM_ID_KEY]
     return web.json_response(
         {
             "telegram_id": telegram_id,
@@ -189,7 +194,7 @@ async def me(request: web.Request) -> web.Response:
 @routes.get("/subscription")
 async def subscription(request: web.Request) -> web.Response:
     services = request.app[SERVICES_KEY]
-    user = request["user"]
+    user = request[USER_KEY]
     traffic = (
         await services.provisioning.traffic_status(user)
         if user["status"] == "active"
@@ -220,10 +225,10 @@ async def subscription(request: web.Request) -> web.Response:
 async def config(request: web.Request) -> web.Response:
     services = request.app[SERVICES_KEY]
     limiter = request.app[LIMITS_KEY]["config_user"]
-    telegram_id = request["telegram_id"]
+    telegram_id = request[TELEGRAM_ID_KEY]
     if not limiter.hit(str(telegram_id)):
         return json_error(429, "rate_limited", {"Retry-After": "60"})
-    user = request["user"]
+    user = request[USER_KEY]
     if user["status"] != "active":
         return json_error(403, "inactive")
     try:
@@ -304,10 +309,10 @@ async def payments_create(request: web.Request) -> web.Response:
     if body.email is not None:
         if not is_valid_email(body.email):
             return json_error(400, "invalid_email")
-        await services.db.set_receipt_email(request["telegram_id"], body.email)
+        await services.db.set_receipt_email(request[TELEGRAM_ID_KEY], body.email)
     try:
         payment = await services.billing.create(
-            request["telegram_id"], body.months, body.method, body.tier
+            request[TELEGRAM_ID_KEY], body.months, body.method, body.tier
         )
     except BillingError as exc:
         status = {
@@ -336,7 +341,7 @@ async def payments_in_bot(request: web.Request) -> web.Response:
     dead. The Mini App closes itself once this call succeeds.
     """
     services = request.app[SERVICES_KEY]
-    telegram_id = request["telegram_id"]
+    telegram_id = request[TELEGRAM_ID_KEY]
     try:
         body = PaymentInBotIn.model_validate(await request.json())
     except (ValueError, ValidationError):
@@ -376,7 +381,7 @@ async def payments_in_bot(request: web.Request) -> web.Response:
 @routes.get("/payments/history")
 async def payments_history(request: web.Request) -> web.Response:
     services = request.app[SERVICES_KEY]
-    rows = await services.db.payment_history(request["telegram_id"], 20)
+    rows = await services.db.payment_history(request[TELEGRAM_ID_KEY], 20)
     return web.json_response(
         [
             {
@@ -402,7 +407,7 @@ async def payments_history(request: web.Request) -> web.Response:
 @routes.get("/referral")
 async def referral(request: web.Request) -> web.Response:
     services = request.app[SERVICES_KEY]
-    telegram_id = request["telegram_id"]
+    telegram_id = request[TELEGRAM_ID_KEY]
     return web.json_response(
         {
             "enabled": services.settings.referral_acquisition_enabled,
@@ -438,7 +443,7 @@ async def legal_privacy(request: web.Request) -> web.Response:
 async def legal_accept(request: web.Request) -> web.Response:
     services = request.app[SERVICES_KEY]
     result = await services.provisioning.accept_offer_and_start_trial(
-        request["telegram_id"]
+        request[TELEGRAM_ID_KEY]
     )
     if result.reason == "banned":
         return json_error(403, "banned")

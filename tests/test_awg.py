@@ -22,6 +22,8 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from config import GIB
 from services.awg import (
     QUOTA_STEP_BYTES,
+    AwgAgent,
+    AwgError,
     AwgInactiveError,
     AwgLimitError,
     AwgService,
@@ -563,3 +565,15 @@ async def test_awg_traffic_counts_toward_the_server_total(
     await awg.reconcile()
     rows = await services.db.server_traffic_since("2000-01-01")
     assert sum(value for _, value in rows) == 6 * GIB
+
+
+async def test_agent_answer_that_is_not_json_is_an_agent_error() -> None:
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>upstream down</html>")
+
+    agent = AwgAgent("http://awg.test", "t", transport=httpx.MockTransport(handler))
+    with pytest.raises(AwgError, match="malformed"):
+        await agent.info()
+    await agent.close()

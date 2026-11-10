@@ -46,6 +46,16 @@ class MarzbanForbidden(MarzbanError):
     """The panel answered, but this admin account may not read the resource."""
 
 
+def _json_body(response: httpx.Response, operation: str) -> Any:
+    """The decoded body; a page that is not JSON is a panel error, not a crash."""
+    try:
+        return response.json()
+    except ValueError:
+        raise MarzbanError(
+            f"{operation}: HTTP {response.status_code}, body is not JSON"
+        ) from None
+
+
 class MarzbanClient:
     def __init__(
         self,
@@ -88,7 +98,8 @@ class MarzbanClient:
             )
             if response.status_code != 200:
                 raise MarzbanError(f"auth failed: HTTP {response.status_code}")
-            token = response.json().get("access_token")
+            body = _json_body(response, "auth")
+            token = body.get("access_token") if isinstance(body, dict) else None
             if not token:
                 raise MarzbanError("auth failed: no access_token")
             self._token = str(token)
@@ -149,7 +160,7 @@ class MarzbanClient:
             raise MarzbanError(
                 f"{operation}: HTTP {response.status_code} {response.text[:200]}"
             )
-        data = response.json()
+        data = _json_body(response, operation)
         if not isinstance(data, dict):
             raise MarzbanError(f"{operation}: unexpected payload")
         return data
@@ -318,7 +329,7 @@ class MarzbanClient:
             raise MarzbanForbidden("get_nodes")
         if response.status_code >= 400:
             raise MarzbanError(f"get_nodes: HTTP {response.status_code}")
-        data = response.json()
+        data = _json_body(response, "get_nodes")
         if not isinstance(data, list):
             raise MarzbanError("get_nodes: unexpected payload")
         return [node for node in data if isinstance(node, dict)]

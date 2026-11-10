@@ -383,6 +383,11 @@ class ProvisioningService:
             )
 
         async with self._lock(telegram_id):
+            # A refund is recorded under this same lock. One that came in while
+            # this call waited for the lock must win: the period is not given.
+            current = await self.db.get_payment(payment_id)
+            if current is None or current["status"] != "paid":
+                return False
             activation = await self.db.get_payment_activation(payment_id)
             if activation is not None and activation["status"] == "completed":
                 return False
