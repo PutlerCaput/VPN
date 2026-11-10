@@ -20,6 +20,10 @@ export interface ClientApp {
   install: string;
 }
 
+// Apps that receive "Russian sites directly" with the subscription once the
+// server sends it (ru_direct_auto from /config); texts in i18n/ru.ts.
+export const AUTO_DIRECT_APPS = ["v2rayng"];
+
 export const APPS: Record<Platform, ClientApp[]> = {
   android: [
     { key: "v2rayng", name: "v2rayNG", install: "https://github.com/2dust/v2rayNG/releases" },

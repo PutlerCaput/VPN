@@ -15,6 +15,9 @@ from pathlib import Path
 import pytest
 
 from services.connection_guide import (
+    AUTO_DIRECT_APPS,
+    AUTO_DIRECT_NOTE,
+    AUTO_DIRECT_STEPS,
     DIRECT_CHECK,
     DIRECT_INTRO,
     GUIDES,
@@ -238,8 +241,25 @@ def test_every_app_on_the_screens_carries_its_russian_sites_steps() -> None:
     assert _device("pwa").count("      direct: ") == apps
     tma = (ROOT / "tma" / "src" / "i18n" / "ru.ts").read_text(encoding="utf-8")
     assert tma.count("      direct: ") == apps
-    assert "chosen.direct.map" in _page("pwa")
-    assert "guide.direct.map" in _page("tma")
+    assert "(autoDirect ? AUTO_DIRECT_STEPS : chosen.direct).map" in _page("pwa")
+    assert "(autoDirect ? c.autoDirectSteps : guide.direct).map" in _page("tma")
     for app in APPS:
         # Folded away under its title: connecting comes first.
         assert "<details" in _page(app)
+
+
+def test_the_automatic_rule_reads_the_same_in_all_three_places() -> None:
+    pwa = _device("pwa")
+    tma_strings = (ROOT / "tma" / "src" / "i18n" / "ru.ts").read_text(encoding="utf-8")
+    steps = _bot_steps(AUTO_DIRECT_STEPS)
+    assert _ts_array(pwa, "AUTO_DIRECT_STEPS") == steps
+    assert _ts_string(pwa, "export const AUTO_DIRECT_NOTE") == AUTO_DIRECT_NOTE
+    assert _ts_string(tma_strings, "autoDirectNote:") == AUTO_DIRECT_NOTE
+    block = tma_strings.split("autoDirectSteps: [", 1)[1].split("],", 1)[0]
+    assert re.findall(r'^\s*"([^"]+)",$', block, flags=re.M) == steps
+    for app in APPS:
+        listed = re.search(r"AUTO_DIRECT_APPS = \[([^\]]*)\]", _device(app))
+        assert listed
+        assert set(re.findall(r'"(\w+)"', listed[1])) == set(AUTO_DIRECT_APPS)
+        # The screens follow the server's word, not a guess.
+        assert "ru_direct_auto === true" in _page(app)

@@ -57,9 +57,13 @@ def client_apps_kb(device_key: str) -> InlineKeyboardMarkup:
 
 
 def client_guide_kb(
-    device_key: str, app: ClientApp, link: str | None
+    device_key: str, app: ClientApp, link: str | None, auto_direct: bool = False
 ) -> InlineKeyboardMarkup:
-    """Under the steps: copy the link, install the app, another app or device."""
+    """Under the steps: copy the link, install the app, another app or device.
+
+    auto_direct: the app gets "Russian sites directly" with the subscription,
+    so there is nothing to show behind the routing button.
+    """
     rows: list[list[InlineKeyboardButton]] = []
     if link and len(link) <= COPY_LIMIT:
         rows.append(
@@ -80,14 +84,15 @@ def client_guide_kb(
                 )
             ]
         )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text=DIRECT_BUTTON,
-                callback_data=f"setup:direct:{device_key}:{app.key}",
-            )
-        ]
-    )
+    if not auto_direct:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=DIRECT_BUTTON,
+                    callback_data=f"setup:direct:{device_key}:{app.key}",
+                )
+            ]
+        )
     if len(GUIDES[device_key].apps) > 1:
         rows.append(
             [

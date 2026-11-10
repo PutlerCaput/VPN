@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { endpoints, isApiError } from "../api/client";
-import { APPS, PLATFORMS, detectPlatform } from "../device";
+import { APPS, AUTO_DIRECT_APPS, PLATFORMS, detectPlatform } from "../device";
 import type { ClientApp, Platform } from "../device";
 import { QRCode } from "../components/QRCode";
 import { ru } from "../i18n/ru";
@@ -38,6 +38,9 @@ export function ConnectPage() {
     : null;
   const guide = chosen ? c.guides[platform]?.[chosen.key] : undefined;
   const steps = guide ? (isSub ? guide.steps : [c.singleLink]) : [];
+  // This app gets "Russian sites directly" with the subscription itself.
+  const autoDirect =
+    isSub && config.data?.ru_direct_auto === true && chosen !== null && AUTO_DIRECT_APPS.includes(chosen.key);
 
   async function copy() {
     setCopyFailed(false);
@@ -149,6 +152,7 @@ export function ConnectPage() {
                     ))}
                   </ol>
                   {guide.note && <p className={`${ui.small} ${ui.muted}`}>{guide.note}</p>}
+                  {autoDirect && <p className={ui.small}>{c.autoDirectNote}</p>}
                   <button
                     type="button"
                     className={`${ui.btn} ${ui.primary}`}
@@ -166,7 +170,7 @@ export function ConnectPage() {
                     <summary>{c.directTitle}</summary>
                     <p className={ui.small}>{c.directIntro}</p>
                     <ol className={ui.steps}>
-                      {guide.direct.map((step) => (
+                      {(autoDirect ? c.autoDirectSteps : guide.direct).map((step) => (
                         <li key={step}>{step}</li>
                       ))}
                     </ol>

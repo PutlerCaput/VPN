@@ -74,6 +74,21 @@ DIRECT_CHECK = (
     "Проверка: на странице yandex.ru/internet должен быть ваш обычный адрес, "
     "а на ifconfig.me — адрес сервера."
 )
+# Apps that receive the rule with the subscription once scripts/ru_direct.sh
+# has turned it on (RU_DIRECT_SUBSCRIPTION): Marzban sends v2rayNG full Xray
+# configs with it. The others receive server links only and keep their steps.
+AUTO_DIRECT_APPS = frozenset({"v2rayng"})
+AUTO_DIRECT_NOTE = (
+    "🇷🇺 Российские сайты v2rayNG открывает напрямую сам: правила приходят "
+    "вместе с подпиской, настраивать ничего не нужно."
+)
+AUTO_DIRECT_STEPS = (
+    "1. Ничего настраивать не нужно: правила приходят вместе с подпиской.\n"
+    "2. Если подписку добавили раньше, обновите её: на главном экране ⋮ → "
+    "«Обновить подписку» (Update subscription), затем выберите сервер заново.\n"
+    "3. Чтобы и российские сайты шли через сервер, используйте NekoBox: в нём "
+    "по умолчанию весь трафик идёт через сервер."
+)
 V2RAYNG_DIRECT = (
     "1. В v2rayNG откройте меню ☰ → «Маршрутизация» (Routing Settings).\n"
     "2. Нажмите ⋮ вверху справа → «Импорт набора правил» (Import predefined "
@@ -264,6 +279,11 @@ SINGLE_LINK_STEPS = (
     "телефона кнопка «+» → импорт из буфера обмена (Import from clipboard), в "
     "программах для компьютера — Ctrl+V. Затем выберите сервер и подключитесь."
 )
+
+
+def direct_is_automatic(app: ClientApp, enabled: bool) -> bool:
+    """True when this app gets the "Russian sites directly" rule by itself."""
+    return enabled and app.key in AUTO_DIRECT_APPS
 
 
 def find_app(device_key: str, app_key: str) -> tuple[DeviceGuide, ClientApp] | None:

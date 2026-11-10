@@ -238,7 +238,13 @@ async def config(request: web.Request) -> web.Response:
     if not link:
         return json_error(503, "node_unavailable")
     return web.json_response(
-        {"config_link": link, "qr_payload": link, "expires_at": user["expires_at"]},
+        {
+            "config_link": link,
+            "qr_payload": link,
+            "expires_at": user["expires_at"],
+            # v2rayNG gets "Russian sites directly" with the subscription.
+            "ru_direct_auto": services.settings.ru_direct_subscription,
+        },
     )
 
 

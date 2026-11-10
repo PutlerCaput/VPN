@@ -59,6 +59,8 @@ export interface NodeConfig {
   config_link: string;
   qr_payload: string;
   expires_at: number | null;
+  /** v2rayNG receives "Russian sites directly" with the subscription. */
+  ru_direct_auto?: boolean;
 }
 
 export interface TierPrice {
