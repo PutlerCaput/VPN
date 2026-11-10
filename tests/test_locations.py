@@ -246,3 +246,32 @@ async def test_marzban_403_raises_forbidden() -> None:
     with pytest.raises(MarzbanForbidden):
         await client.get_core()
     await client.close()
+
+
+async def test_marzban_page_that_is_not_json_is_a_panel_error() -> None:
+    """A proxy error page must not escape as a crash past the payment retry."""
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/admin/token":
+            return httpx.Response(200, json={"access_token": "t"})
+        return httpx.Response(200, text="<html>Bad gateway</html>")
+
+    client = MarzbanClient(
+        "http://marzban.test", "a", "b", "t", transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(MarzbanError, match="not JSON"):
+        await client.get_core()
+    with pytest.raises(MarzbanError, match="not JSON"):
+        await client.get_nodes()
+    await client.close()
+
+    def bad_token(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="maintenance")
+
+    client = MarzbanClient(
+        "http://marzban.test", "a", "b", "t", transport=httpx.MockTransport(bad_token)
+    )
+    with pytest.raises(MarzbanError, match="auth"):
+        await client.get_core()
+    await client.close()

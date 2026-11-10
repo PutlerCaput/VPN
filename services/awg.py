@@ -186,7 +186,10 @@ class AwgAgent:
             raise AwgError(f"agent unreachable: {type(exc).__name__}") from None
         if response.status_code != 200:
             raise AwgError(f"agent HTTP {response.status_code}")
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError:
+            raise AwgError("agent payload malformed") from None
         if not isinstance(data, dict):
             raise AwgError("agent payload malformed")
         return data

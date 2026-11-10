@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -353,3 +354,47 @@ async def test_banned_user_is_not_reactivated_by_payment(
     )
     await provisioning.process_paid_payment("d" * 32)
     assert (await db.get_user(700007))["status"] == "banned"
+
+
+class _ContendedLock(asyncio.Lock):
+    """Signals when a second caller starts waiting for the lock."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.contended = asyncio.Event()
+
+    async def acquire(self) -> bool:
+        if self.locked():
+            self.contended.set()
+        return await super().acquire()
+
+
+async def test_refund_recorded_while_activation_waits_wins(
+    db: Database, provisioning: Any
+) -> None:
+    await _register(db, 710007)
+    await provisioning.accept_offer_and_start_trial(710007)
+    before = int((await db.get_user(710007))["expires_at"])
+    payment_id = "f" * 32
+    await db.create_payment(
+        payment_id=payment_id,
+        telegram_id=710007,
+        amount=30000,
+        currency="RUB",
+        months=1,
+        method="sbp",
+    )
+    lock = _ContendedLock()
+    provisioning._locks[710007] = lock
+    await lock.acquire()
+    task = asyncio.create_task(provisioning.process_paid_payment(payment_id))
+    await asyncio.wait_for(lock.contended.wait(), timeout=2)
+    # The refund lands while the activation still waits for the lock.
+    assert (await db.get_payment(payment_id))["status"] == "paid"
+    assert await db.mark_payment_refunded(payment_id)
+    lock.release()
+    assert await task is False
+    assert int((await db.get_user(710007))["expires_at"]) == before
+    activation = await db.get_payment_activation(payment_id)
+    assert activation is None or activation["status"] != "completed"
+    assert await db.payments_pending_activation() == []

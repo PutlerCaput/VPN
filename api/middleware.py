@@ -6,6 +6,7 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from aiohttp import web
 from aiohttp.typedefs import Middleware
@@ -24,6 +25,11 @@ API_PREFIX = "/api/v1"
 SERVICES_KEY = web.AppKey("services", Services)
 TOKENS_KEY = web.AppKey("tokens", TokenService)
 LIMITS_KEY = web.AppKey("limits", dict)
+# Set by the middleware for each request; typed so a wrong key is a mypy error.
+CLIENT_IP_KEY = web.RequestKey("client_ip", str)
+TELEGRAM_ID_KEY = web.RequestKey("telegram_id", int)
+SESSION_ID_KEY = web.RequestKey[str | None]("session_id")
+USER_KEY = web.RequestKey[dict[str, Any]]("user")
 
 PUBLIC_PATHS = frozenset(
     {
@@ -131,7 +137,7 @@ async def auth_middleware(request: web.Request, handler: Handler) -> web.StreamR
     limits: dict[str, SlidingWindowLimiter] = request.app[LIMITS_KEY]
     path = relative_path(request)
     ip = client_ip(request, services.settings.trust_forwarded_for)
-    request["client_ip"] = ip
+    request[CLIENT_IP_KEY] = ip
 
     if path in PUBLIC_PATHS:
         limiter = limits["auth_ip"] if path == "/auth/telegram" else limits["public_ip"]
@@ -161,9 +167,9 @@ async def auth_middleware(request: web.Request, handler: Handler) -> web.StreamR
         return unauthorized()
     if user["status"] == "banned" and path not in BANNED_ALLOWED:
         return json_error(403, "banned")
-    request["telegram_id"] = telegram_id
-    request["session_id"] = claims.get("sid")
-    request["user"] = user
+    request[TELEGRAM_ID_KEY] = telegram_id
+    request[SESSION_ID_KEY] = claims.get("sid")
+    request[USER_KEY] = user
     return await handler(request)
 
 

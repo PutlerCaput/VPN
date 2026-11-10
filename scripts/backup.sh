@@ -6,8 +6,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 if [[ -f .env ]]; then
-  # shellcheck disable=SC1091
-  set -a; source <(grep -E '^(DATABASE_PATH|BACKUP_GPG_RECIPIENT|BACKUP_RETENTION_DAYS)=' .env); set +a
+  set -a
+  # Only three settings are read from .env.
+  # shellcheck disable=SC1090
+  source <(grep -E '^(DATABASE_PATH|BACKUP_GPG_RECIPIENT|BACKUP_RETENTION_DAYS)=' .env)
+  set +a
 fi
 
 DB_PATH="${DATABASE_PATH:-data/bot.db}"

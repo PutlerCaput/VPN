@@ -215,6 +215,11 @@ def gpg_process(
         watchdog.cancel()
         if process.poll() is None:
             process.kill()
+        # Our ends of the pipes, also when the caller stopped early on an error.
+        for stream in (process.stdout, process.stdin):
+            if stream is not None:
+                with contextlib.suppress(OSError):
+                    stream.close()
         process.wait()
 
 

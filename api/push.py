@@ -5,7 +5,7 @@ from __future__ import annotations
 from aiohttp import web
 from pydantic import ValidationError
 
-from api.middleware import SERVICES_KEY, json_error
+from api.middleware import SERVICES_KEY, TELEGRAM_ID_KEY, json_error
 from api.schemas import PushSubscribeIn, PushUnsubscribeIn
 
 routes = web.RouteTableDef()
@@ -32,7 +32,7 @@ async def subscribe(request: web.Request) -> web.Response:
     if not endpoint.startswith("https://"):
         return json_error(400, "invalid_endpoint")
     await services.db.upsert_push_subscription(
-        request["telegram_id"],
+        request[TELEGRAM_ID_KEY],
         endpoint,
         body.keys.p256dh,
         body.keys.auth,
@@ -51,6 +51,6 @@ async def unsubscribe(request: web.Request) -> web.Response:
         except (ValueError, ValidationError):
             return json_error(400, "invalid_body")
     removed = await services.db.delete_push_subscription(
-        request["telegram_id"], endpoint
+        request[TELEGRAM_ID_KEY], endpoint
     )
     return web.json_response({"removed": removed})
