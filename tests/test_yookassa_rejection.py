@@ -104,7 +104,6 @@ async def test_refusal_names_yookassa_code_and_hides_the_secret() -> None:
                 amount_rub=299,
                 months=1,
                 email=None,
-                tier_title="Стандарт",
             )
     finally:
         await provider.close()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -12,6 +13,8 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from services.billing import BillingError
 from services.yookassa import (
+    PAYMENT_DESCRIPTION,
+    SERVICE_NAME,
     YooKassaClient,
     is_valid_email,
     notification_payment_id,
@@ -336,3 +339,36 @@ def test_unknown_receipt_mode_is_rejected() -> None:
         YooKassaClient(
             SHOP_ID, SECRET_KEY, return_url="https://t.me/x", receipt_mode="npd"
         )
+
+
+# ------------------------------------------------ the name on the receipt
+OFFER = Path(__file__).resolve().parents[1] / "legal" / "oferta.md"
+
+
+def test_the_service_is_named_as_the_offer_names_it() -> None:
+    # The receipt must say what the offer says (п. 1.1); if the offer's name
+    # changes, this fails and the receipt text is decided again, on purpose.
+    offer = OFFER.read_text(encoding="utf-8").casefold()
+    assert SERVICE_NAME.casefold() in offer
+
+
+async def test_fiscal_receipt_and_banks_purpose_carry_the_same_name(
+    yookassa: YooKassaClient, api: FakeYooKassaApi
+) -> None:
+    await yookassa.create_payment(
+        payment_id="d" * 32, amount_rub=300, months=2, email="buyer@example.com"
+    )
+    await yookassa.close()
+    body = api.created[0]
+    item = body["receipt"]["items"][0]
+    assert item["description"] == f"{SERVICE_NAME}, 2 мес."
+    # What the customer's bank shows as the purpose: the same name and the
+    # order number, so the payment can be found.
+    assert body["description"] == f"{SERVICE_NAME}, 2 мес. Платёж {'d' * 32}"
+
+
+def test_the_tariff_is_not_in_the_name_and_the_purpose_fits_yookassa() -> None:
+    for months in range(1, 13):
+        text = PAYMENT_DESCRIPTION.format(months=months, payment_id="f" * 32)
+        assert len(text) <= 128, months
+        assert "тариф" not in text.casefold()

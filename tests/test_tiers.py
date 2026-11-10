@@ -195,12 +195,8 @@ async def test_bonus_days_keep_the_current_tier(services: Any) -> None:
     assert (await services.db.get_user(770004))["tier"] == "prime"
 
 
-def test_receipt_description_names_the_tier() -> None:
-    assert receipt_item_description(3, "Complete") == (
-        "Информационно-техническая услуга «Сервис защищённого доступа», "
-        "тариф Complete, 3 мес."
-    )
-    assert receipt_item_description(3, None) == (
+def test_receipt_description_is_the_service_name_without_the_tier() -> None:
+    assert receipt_item_description(3) == (
         "Информационно-техническая услуга «Сервис защищённого доступа», 3 мес."
     )
 

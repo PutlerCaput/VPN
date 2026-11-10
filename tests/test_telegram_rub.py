@@ -52,7 +52,6 @@ def test_receipt_fields_only_for_fiscal_mode() -> None:
     kwargs = {
         "amount_kopecks": 29900,
         "months": 1,
-        "tier_title": "Стандарт",
         "vat_code": 1,
         "tax_system_code": 2,
     }

@@ -17,7 +17,7 @@ def client(**extra: object) -> YooKassaClient:
 
 def test_sbp_payment_method_is_sent_for_self_employed() -> None:
     body = client(payment_method="sbp").build_payment(
-        payment_id="a" * 32, amount_rub=300, months=1, email=None, tier_title="Стандарт"
+        payment_id="a" * 32, amount_rub=300, months=1, email=None
     )
     assert body["payment_method_data"] == {"type": "sbp"}
     assert body["confirmation"]["type"] == "redirect"
@@ -29,7 +29,6 @@ def test_sbp_payment_method_is_sent_for_fiscal_too() -> None:
         amount_rub=300,
         months=1,
         email="buyer@example.com",
-        tier_title="Стандарт",
     )
     assert body["payment_method_data"] == {"type": "sbp"}
     assert "receipt" in body

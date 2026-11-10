@@ -57,7 +57,6 @@ def invoice_options(
     receipt_mode: str,
     amount_kopecks: int,
     months: int,
-    tier_title: str,
     vat_code: int,
     tax_system_code: int | None,
 ) -> dict[str, Any]:
@@ -72,7 +71,7 @@ def invoice_options(
     receipt: dict[str, Any] = {
         "items": [
             {
-                "description": receipt_item_description(months, tier_title),
+                "description": receipt_item_description(months),
                 "quantity": "1.00",
                 "amount": {
                     "value": rub_value(amount_kopecks // 100),
