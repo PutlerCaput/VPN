@@ -76,7 +76,8 @@ apply() {
   need "$IPTABLES"; need "$SAVE"; need "$RESTORE"; need systemd-run
   [[ ! -f "$PENDING" ]] || stop "a change is already waiting: run --confirm or --revert"
   mkdir -p "$STATE_DIR"
-  local snap="$STATE_DIR/firewall.before-$(date +%Y%m%dT%H%M%S)"
+  local snap
+  snap="$STATE_DIR/firewall.before-$(date +%Y%m%dT%H%M%S)"
   "$SAVE" >"$snap" || stop "could not snapshot the current ruleset"
   if ! set_input_chain; then
     "$RESTORE" <"$snap" 2>/dev/null || true
