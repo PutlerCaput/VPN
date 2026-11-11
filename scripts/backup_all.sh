@@ -4,7 +4,8 @@
 #   bash scripts/backup_all.sh        # one backup now (a daily timer runs it)
 #
 # Packs into ONE archive:
-#   bot/bot.db          the bot's database (online copy, still SQLCipher-encrypted)
+#   bot/bot.db          the bot's database (online copy, still SQLCipher-encrypted;
+#                       fetched from the other server when the bot keeps it there)
 #   bot/.env, secrets/  the bot's settings and keys (the database key among them)
 #   marzban/            Marzban's database, .env, compose file, Caddyfile, Xray config
 # encrypts it to the owner's PUBLIC key with age, keeps the newest copies in
@@ -58,8 +59,15 @@ trap 'rm -rf "$TMP"; rm -f "$WORKDIR/data/.nightly-backup.db" "$WORKDIR/data/.ou
 mkdir -p "$TMP/bot" "$TMP/marzban"
 
 # ----- the bot: database, settings, keys
-docker exec "$CONTAINER" python scripts/db_tool.py backup /app/data/bot.db /app/data/.nightly-backup.db >/dev/null \
-  || fail "the bot database could not be copied"
+if grep -q '^DATABASE_URL=.' "$WORKDIR/.env" 2>/dev/null; then
+  # The database is on the other server: the file here is an old copy. Take the
+  # live one through the gateway (docs/RU_DATABASE_PLAN.md, section 11).
+  docker exec "$CONTAINER" python scripts/db_tool.py fetch /app/data/.nightly-backup.db >/dev/null \
+    || fail "the bot database could not be fetched from the other server"
+else
+  docker exec "$CONTAINER" python scripts/db_tool.py backup /app/data/bot.db /app/data/.nightly-backup.db >/dev/null \
+    || fail "the bot database could not be copied"
+fi
 [[ -s "$WORKDIR/data/.nightly-backup.db" ]] || fail "the bot database copy is empty"
 mv "$WORKDIR/data/.nightly-backup.db" "$TMP/bot/bot.db"
 [[ -f "$WORKDIR/.env" ]] && cp -p "$WORKDIR/.env" "$TMP/bot/.env"

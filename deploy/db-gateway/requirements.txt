@@ -1,0 +1,7 @@
+# What the database gateway needs on the RU server: a subset of ../../requirements.txt
+# with the same versions (tests/test_db_gateway_install.py compares them).
+aiohttp==3.14.5
+aiosqlite==0.20.0
+pydantic==2.13.5
+pydantic-settings==2.5.2
+sqlcipher3-binary==0.6.0

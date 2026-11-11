@@ -4,9 +4,14 @@ Runs inside the bot container, where the key is mounted as a Docker secret:
   python scripts/db_tool.py encrypt /app/data/bot.db
   python scripts/db_tool.py backup /app/data/bot.db /app/data/backup.db
   python scripts/db_tool.py check /app/data/bot.db
+  python scripts/db_tool.py fetch /app/data/backup.db
   python scripts/db_tool.py migrate-check /app/data/bot.db
 (prefix each with `docker compose exec -T bot`, or run the new image with
 `docker run` before switching to it).
+
+fetch is for a bot whose database is on the other server (DATABASE_URL): it
+downloads a consistent copy through db.gateway and checks that the local key
+opens it.
 
 migrate-check copies the database, applies this release's schema changes to
 the copy only, compares row counts and integrity, and deletes the copy. The
@@ -110,6 +115,35 @@ def check(path: str, key: str) -> None:
     print("ok")
 
 
+def fetch(dst: str, key: str) -> None:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from config import get_settings
+    from db.remote import RemoteDatabase
+
+    settings = get_settings()
+    url, token = settings.database_url, settings.db_gateway_token
+    if not url or token is None:
+        sys.exit("DATABASE_URL is not set: the database is the local file, use backup")
+
+    async def download() -> int:
+        client = RemoteDatabase(url, token.get_secret_value())
+        await client.connect()
+        try:
+            return await client.fetch_backup(dst)
+        finally:
+            await client.close()
+
+    size = asyncio.run(download())
+    # A copy the local key cannot open would be useless on the day it is needed.
+    conn = open_encrypted(dst, key)
+    result = integrity(conn)
+    conn.close()
+    if result != "ok":
+        Path(dst).unlink(missing_ok=True)
+        sys.exit(f"integrity_check failed on the fetched copy: {result}")
+    print(f"backup fetched: {dst} ({size} bytes)")
+
+
 def _table_counts(conn: Any) -> dict[str, int]:
     names = [
         row[0]
@@ -169,7 +203,7 @@ def migrate_check(path: str, key: str) -> None:
 def main(argv: list[str]) -> None:
     usage = (
         "usage: db_tool.py encrypt <db> | backup <src> <dst> | check <db> | "
-        "migrate-check <db>"
+        "fetch <dst> | migrate-check <db>"
     )
     if len(argv) < 2:
         sys.exit(usage)
@@ -180,6 +214,8 @@ def main(argv: list[str]) -> None:
         backup(args[0], args[1], load_key())
     elif command == "check" and len(args) == 1:
         check(args[0], load_key())
+    elif command == "fetch" and len(args) == 1:
+        fetch(args[0], load_key())
     elif command == "migrate-check" and len(args) == 1:
         migrate_check(args[0], load_key())
     else:

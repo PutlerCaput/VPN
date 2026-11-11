@@ -531,6 +531,41 @@ class Database:
         row = await self._fetchone("SELECT 1 AS ok")
         return bool(row and row["ok"] == 1)
 
+    async def _backup_into(self, path: str) -> None:
+        """A consistent copy of the whole database in one file, with the same key.
+
+        Safe while the database is in use (SQLite's online backup). Private on
+        purpose: public coroutine methods are served by db.gateway, and a caller
+        must never be able to name a path on that server.
+        """
+
+        def open_target() -> Any:
+            if self._key is None:
+                import sqlite3
+
+                return sqlite3.connect(path, check_same_thread=False)
+            from sqlcipher3 import dbapi2 as sqlcipher
+
+            target = sqlcipher.connect(path, check_same_thread=False)
+            target.execute(f"PRAGMA key = \"x'{self._key}'\"")
+            return target
+
+        def finish(target: Any) -> str:
+            try:
+                return str(target.execute("PRAGMA integrity_check").fetchone()[0])
+            finally:
+                target.close()
+
+        target = await asyncio.to_thread(open_target)
+        try:
+            await self.conn.backup(target)
+        except BaseException:
+            await asyncio.to_thread(target.close)
+            raise
+        result = await asyncio.to_thread(finish, target)
+        if result != "ok":
+            raise RuntimeError(f"integrity_check failed on the backup: {result}")
+
     # ---------------------------------------------------------- receipts
     async def set_receipt_email(self, telegram_id: int, email: str) -> None:
         await self._execute(
