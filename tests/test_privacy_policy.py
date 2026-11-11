@@ -124,10 +124,18 @@ def test_operational_logs_omit_identifiers_payloads_and_exception_messages() -> 
 async def test_signal_memory_expires_without_persisting(
     services: Any, monkeypatch: Any
 ) -> None:
+    import time
+
     import services.scheduler as scheduler
 
     clock = [100000.0]
-    monkeypatch.setattr(scheduler.time, "monotonic", lambda: clock[0])
+    # The scheduler's view of the clock only: the event loop runs on
+    # time.monotonic too, and freezing that stalls every timer and timeout.
+    monkeypatch.setattr(
+        scheduler,
+        "time",
+        SimpleNamespace(monotonic=lambda: clock[0], time=time.time),
+    )
     await services.db.create_user(987657, "ordinary", None)
     await services.provisioning.accept_offer_and_start_trial(987657)
     await services.monitor.handle_report("u987657", {"PORT_SCANNING"}, {})

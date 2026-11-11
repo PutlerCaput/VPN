@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
@@ -18,9 +19,78 @@ os.environ.setdefault("JWT_SECRET", "a" * 64)
 os.environ.setdefault("CRYPTO_PAY_TOKEN", "12345:TESTCRYPTOPAYTOKEN")
 os.environ.setdefault("SECRETS_DIR", "/nonexistent")
 
+from aiohttp.test_utils import TestServer
+
 from config import Settings, device_note
 from db.database import Database
+from db.gateway import create_gateway_app
+from db.remote import RemoteDatabase
 from services.marzban import MarzbanNotFound
+
+GATEWAY_TOKEN = "test-gateway-token-" + "0" * 24
+REMOTE_BACKEND = os.environ.get("TEST_DB_BACKEND") == "remote"
+
+
+class LoopbackRemoteDatabase(RemoteDatabase):
+    """What ``TEST_DB_BACKEND=remote`` hands to the suite.
+
+    Public methods cross the gateway, as in production. The private helpers
+    tests use to arrange and inspect rows go straight to the database behind it.
+    """
+
+    def __init__(self, base_url: str, token: str, local: Database) -> None:
+        super().__init__(base_url, token)
+        self._local = local
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "_local":
+            raise AttributeError(name)
+        return getattr(self._local, name)
+
+    @property
+    def conn(self) -> Any:
+        return self._local.conn
+
+    def transaction(self) -> Any:
+        return self._local.transaction()
+
+    async def _execute(self, sql: str, params: tuple[Any, ...] = ()) -> int:
+        return await self._local._execute(sql, params)
+
+    async def _fetchone(
+        self, sql: str, params: tuple[Any, ...] = ()
+    ) -> dict[str, Any] | None:
+        return await self._local._fetchone(sql, params)
+
+    async def _fetchall(
+        self, sql: str, params: tuple[Any, ...] = ()
+    ) -> list[dict[str, Any]]:
+        return await self._local._fetchall(sql, params)
+
+    @property
+    def activity_logging_enabled(self) -> bool:
+        return self._local.activity_logging_enabled
+
+    @activity_logging_enabled.setter
+    def activity_logging_enabled(self, value: bool) -> None:
+        # The switch lives next to the data; the constructor's default is ignored.
+        local = self.__dict__.get("_local")
+        if local is not None:
+            local.activity_logging_enabled = value
+
+
+@asynccontextmanager
+async def through_gateway(database: Database) -> AsyncIterator[LoopbackRemoteDatabase]:
+    """A connected client of a gateway serving ``database`` on loopback."""
+    server = TestServer(create_gateway_app(database, GATEWAY_TOKEN))
+    await server.start_server()
+    remote = LoopbackRemoteDatabase(str(server.make_url("/")), GATEWAY_TOKEN, database)
+    try:
+        await remote.connect()
+        yield remote
+    finally:
+        await remote.close()
+        await server.close()
 
 
 class FakeMarzban:
@@ -176,11 +246,18 @@ def settings() -> Settings:
 
 @pytest.fixture
 async def db() -> AsyncIterator[Database]:
-    # TEST_DB_KEY=<64 hex> runs the whole suite against SQLCipher.
+    # TEST_DB_KEY=<64 hex> runs the whole suite against SQLCipher;
+    # TEST_DB_BACKEND=remote runs it through the database gateway.
     database = Database(":memory:", os.environ.get("TEST_DB_KEY") or None)
     await database.connect()
-    yield database
-    await database.close()
+    try:
+        if REMOTE_BACKEND:
+            async with through_gateway(database) as remote:
+                yield remote
+        else:
+            yield database
+    finally:
+        await database.close()
 
 
 @pytest.fixture
