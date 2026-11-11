@@ -16,6 +16,7 @@ import signal
 import stat
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -92,14 +93,19 @@ class Box:
         shutil.copytree(
             ROOT / "deploy" / "db-gateway", self.src / "deploy" / "db-gateway"
         )
-        for name in ("db_gateway_install.sh", "db_tool.py"):
+        for name in ("db_gateway_install.sh", "db_tool.py", "retention_archiver.py"):
             shutil.copy(ROOT / "scripts" / name, self.src / "scripts")
         self.calls = tmp / "calls.log"
         self.pidfile = tmp / "gateway.pid"
         self.port = unused_port()
         bin_dir = tmp / "bin"
         bin_dir.mkdir()
-        stubs = {"python3": FAKE_PYTHON, "systemctl": FAKE_SYSTEMCTL, "ip": FAKE_IP}
+        stubs = {
+            "python3": FAKE_PYTHON,
+            "systemctl": FAKE_SYSTEMCTL,
+            "ip": FAKE_IP,
+            "apt-get": '#!/bin/bash\necho "apt-get $*" >> "$CALLS"\n',
+        }
         for name, body in stubs.items():
             path = bin_dir / name
             path.write_text(body)
@@ -317,7 +323,99 @@ def test_the_moved_database_is_served_to_the_bots_client(box: Box) -> None:
     assert box.key_file.exists()
 
 
+OWNER_KEY = "age1" + "q" * 58
+
+
+@pytest.mark.skipif(shutil.which("age") is None, reason="age is not installed")
+def test_the_monthly_archive_is_switched_on_with_the_owners_public_key(
+    box: Box,
+) -> None:
+    assert "run --apply first" in box.run("--archive-key", OWNER_KEY).stderr
+    box.run("--apply")
+    app = box.prefix / "opt" / "vpn-db" / "app"
+    assert (app / "scripts" / "retention_archiver.py").is_file()
+    units = box.prefix / "etc" / "systemd" / "system"
+    assert (units / "node-retention-archive.service").is_file()
+    assert (units / "node-retention-archive.timer").is_file()
+    # Installed, but off until there is a key to seal the archives to.
+    assert not any("node-retention-archive.timer" in line for line in box.log())
+    assert "public key is not set" in box.run("--status").stdout
+
+    for bad in ("age1short", "AGE-SECRET-KEY-1" + "Q" * 58, "age1" + "q" * 57 + ";"):
+        refused = box.run("--archive-key", bad)
+        assert refused.returncode == 1
+        assert "not an age PUBLIC key" in refused.stderr
+    result = box.run("--archive-key", OWNER_KEY)
+    assert result.returncode == 0, result.stderr
+    assert "DB_GATEWAY_ARCHIVE_ON" in result.stdout
+    settings = box.etc / "retention.env"
+    assert f"AGE_RECIPIENT={OWNER_KEY}" in settings.read_text()
+    assert mode(settings) == 0o640
+    assert "systemctl enable --now node-retention-archive.timer" in box.log()
+    assert "retention archive: has never run" in box.run("--status").stdout
+
+
+def test_the_archive_unit_runs_what_the_installer_installs() -> None:
+    unit = (ROOT / "deploy/db-gateway/node-retention-archive.service").read_text()
+    assert "scripts/retention_archiver.py" in unit
+    assert "--database /var/lib/vpn-db/bot.db" in unit
+    assert "--db-key-file /etc/vpn-db/secrets/db_key" in unit
+    assert "--archive-dir /var/lib/vpn-db/archive" in unit
+    assert "EnvironmentFile=/etc/vpn-db/retention.env" in unit
+    assert "User=vpn-db" in unit
+    # It needs no network at all, and less memory than the server has.
+    assert "PrivateNetwork=yes" in unit
+    assert "MemoryMax=300M" in unit
+    timer = (ROOT / "deploy/db-gateway/node-retention-archive.timer").read_text()
+    assert "Persistent=true" in timer
+
+
+def test_the_connection_records_switch_lives_next_to_the_data(box: Box) -> None:
+    assert "run --apply first" in box.run("--connection-log", "on").stderr
+    box.run("--apply")
+    settings = box.etc / "gateway.env"
+    assert "ACTIVITY_LOGGING_ENABLED=false" in settings.read_text()
+    assert "connection records: off" in box.run("--status").stdout
+    assert box.run("--connection-log", "maybe").returncode == 1
+
+    on = box.run("--connection-log", "on")
+    assert on.returncode == 0, on.stderr
+    assert "DB_GATEWAY_CONNECTION_LOG on" in on.stdout
+    text = settings.read_text()
+    assert text.count("ACTIVITY_LOGGING_ENABLED=") == 1
+    assert "ACTIVITY_LOGGING_ENABLED=true" in text
+    assert "DATABASE_PATH=" in text
+    assert mode(settings) == 0o640
+    assert "connection records: on" in box.run("--status").stdout
+    assert "(already)" in box.run("--connection-log", "on").stdout
+
+    # With the service running, the gateway is restarted and reports the switch.
+    box.put_database()
+    assert box.run("--start").returncode == 0
+
+    async def switch_seen_by_the_bot() -> bool:
+        client = RemoteDatabase(
+            f"http://127.0.0.1:{box.port}", box.token_file.read_text()
+        )
+        await client.connect()
+        try:
+            return client.activity_logging_enabled
+        finally:
+            await client.close()
+
+    assert asyncio.run(switch_seen_by_the_bot()) is True
+    off = box.run("--connection-log", "off")
+    assert off.returncode == 0, off.stderr
+    assert "ACTIVITY_LOGGING_ENABLED=false" in settings.read_text()
+    for _ in range(40):
+        if box.run("--status").stdout.startswith("OK gateway"):
+            break
+        time.sleep(0.1)
+    assert asyncio.run(switch_seen_by_the_bot()) is False
+
+
 def test_unknown_arguments_are_refused(box: Box) -> None:
-    result = box.run("--nope")
-    assert result.returncode == 1
-    assert "usage" in result.stderr
+    for arguments in (["--nope"], ["--archive-key"], ["--connection-log"]):
+        result = box.run(*arguments)
+        assert result.returncode == 1
+        assert "usage" in result.stderr

@@ -17,11 +17,14 @@ DAY = 86400
 # A finished order does not need its bookkeeping rows after this long: the
 # late-payment window is 24 hours and checkout links expire long before.
 FINISHED_ORDER_SECONDS = 30 * DAY
-# The same periods as the housekeeping job and legal/privacy.md, section 7.
-CONN_LOG_DAYS = 180
+# The same periods as the housekeeping job and legal/privacy.md, section 7:
+# five years for the records of activity. Closed months leave the live database
+# much earlier, as archives (scripts/retention_archiver.py).
+RETENTION_YEARS = 5
+CONN_LOG_DAYS = RETENTION_YEARS * 365 + 1
 TRAFFIC_DAY_DAYS = 7
-SUPPORT_DAYS = 365
-INCIDENT_DAYS = 3 * 365
+SUPPORT_DAYS = RETENTION_YEARS * 365
+INCIDENT_DAYS = RETENTION_YEARS * 365
 
 TABLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 
@@ -94,11 +97,11 @@ def _backlog(conn: Any, now: int) -> dict[str, int]:
             "SELECT COUNT(*) FROM support_messages WHERE created_at < ?",
             (now - SUPPORT_DAYS * DAY,),
         ),
-        "incidents over 3 years, not AUTOBAN": (
+        f"incidents over {RETENTION_YEARS} years, not AUTOBAN": (
             "SELECT COUNT(*) FROM anomalies WHERE created_at < ? AND kind != 'AUTOBAN'",
             (now - INCIDENT_DAYS * DAY,),
         ),
-        "admin trail over 3 years, not autoban": (
+        f"admin trail over {RETENTION_YEARS} years, not autoban": (
             "SELECT COUNT(*) FROM audit_log WHERE created_at < ? "
             "AND action != 'autoban'",
             (now - INCIDENT_DAYS * DAY,),

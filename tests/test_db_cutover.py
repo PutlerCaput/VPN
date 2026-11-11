@@ -28,6 +28,8 @@ from db.database import Database
 ROOT = Path(__file__).resolve().parents[1]
 KEY = "ab" * 32
 DE_PUBLIC_KEY = "dPublicPublicPublicPublicPublicPublicPublic="
+OWNER_KEY = "age1" + "q" * 58
+HAS_AGE = shutil.which("age") is not None
 RU_PUBLIC_KEY = "rPublicPublicPublicPublicPublicPublicPublic="
 
 pytestmark = pytest.mark.skipif(
@@ -156,8 +158,14 @@ case "$*" in
       echo starting
     fi ;;
   stop*) echo stopped > "$STATE" ;;
-  start*|compose*) echo running > "$STATE" ;;
+  start*|restart*|compose*) echo running > "$STATE" ;;
   exec*"import db.remote"*) [[ "$FAKE_OLD_BOT" != 1 ]] || exit 1 ;;
+  exec*"--policy-keeps-connection-records"*)
+    # The check arrives on standard input, as in production. The policy it reads
+    # is the one inside the bot's image: an old release still has the old text.
+    policy="$T/de/src/legal/privacy.md"
+    [[ "$FAKE_OLD_POLICY" != 1 ]] || policy="$T/de/old-privacy.md"
+    DOCTOR_PRIVACY_PATH="$policy" "{sys.executable}" - --policy-keeps-connection-records ;;
   run*"db_tool.py backup"*)
     mkdir -p "$T/de/keydir" && cp "$W/secrets/db_key.txt" "$T/de/keydir/db_key"
     cd "$T/de/src" && SECRETS_DIR="$T/de/keydir" "{sys.executable}" scripts/db_tool.py \\
@@ -227,9 +235,13 @@ class Rehearsal:
         self._write(tmp / "common", COMMON)
         self._write(tmp / "de" / "bin", {"docker": DOCKER, "ufw": UFW})
         self._write(tmp / "ru" / "bin", RU_STUBS)
+        # DE's backup settings hold the owner's PUBLIC key; the archive on RU uses it.
+        (tmp / "de" / "node-backup.env").write_text(
+            f'BACKUP_DIR=/root/server-backups\nAGE_RECIPIENT="{OWNER_KEY}"\n'
+        )
         self._write(tmp / "phone", {"ssh": SSH})
         # DE: the checkout the scripts are taken from, and the bot's folder.
-        for part in ("db", "deploy/db-gateway", "scripts"):
+        for part in ("db", "deploy/db-gateway", "scripts", "legal"):
             shutil.copytree(
                 ROOT / part,
                 self.de_src / part,
@@ -239,6 +251,10 @@ class Rehearsal:
         (self.work / ".env").write_text("BOT_USERNAME=test_bot\n")
         (self.work / "secrets" / "db_key.txt").write_text(KEY + "\n")
         (tmp / "de" / "bot-state").write_text("running\n")
+        (tmp / "de" / "old-privacy.md").write_text(
+            "3.2. Оператор **не обрабатывает**: адреса посещённых ресурсов; "
+            "журнал подключений; данные банковских карт.\n"
+        )
         asyncio.run(self._make_database())
         self.env = {
             "PATH": f"{tmp / 'phone'}:{os.environ['PATH']}",
@@ -256,6 +272,7 @@ class Rehearsal:
             "DB_GATEWAY_PORT": str(self.port),
             "POLL_SECONDS": "0",
             "HEALTH_TIMEOUT": "1",
+            "BACKUP_ENV_DE": str(tmp / "de" / "node-backup.env"),
         }
 
     @staticmethod
@@ -272,9 +289,9 @@ class Rehearsal:
         await database.create_user(777, "moved", None)
         await database.close()
 
-    def run(self, step: str, **env: str) -> subprocess.CompletedProcess[str]:
+    def run(self, *step: str, **env: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(  # noqa: S603
-            ["/bin/bash", str(ROOT / "scripts" / "db_cutover.sh"), step],
+            ["/bin/bash", str(ROOT / "scripts" / "db_cutover.sh"), *step],
             env={**self.env, **env},
             capture_output=True,
             text=True,
@@ -336,6 +353,13 @@ def test_the_whole_move_and_the_way_back(lab: Rehearsal) -> None:
     assert (lab.tmp / "ru" / "input.policy").read_text().strip() == "DROP"
     assert (lab.ru_root / "etc" / "iptables" / "rules.v4").exists()
     assert "port 51820 proto udp" in (lab.tmp / "de" / "calls.log").read_text()
+    # The five-year archive is sealed to the owner's key from DE's backup settings.
+    if HAS_AGE:
+        archive_settings = lab.ru_root / "etc" / "vpn-db" / "retention.env"
+        assert f"AGE_RECIPIENT={OWNER_KEY}" in archive_settings.read_text()
+        assert (
+            "node-retention-archive.timer" in (lab.tmp / "ru" / "calls.log").read_text()
+        )
     # Installed, not started; the bot has not noticed anything.
     assert (lab.ru_secrets / "db_gateway_token").exists()
     assert not lab.gateway_running()
@@ -382,6 +406,21 @@ def test_the_whole_move_and_the_way_back(lab: Rehearsal) -> None:
     assert twice.returncode == 1
     assert "already uses the gateway" in twice.stderr
 
+    # The connection records switch is on RU now, behind the policy check.
+    gateway_settings = lab.ru_root / "etc" / "vpn-db" / "gateway.env"
+    refused = lab.run("connection-log", "on", FAKE_OLD_POLICY="1")
+    assert refused.returncode == 1
+    assert "does not describe connection records yet" in refused.stderr
+    assert "ACTIVITY_LOGGING_ENABLED=false" in gateway_settings.read_text()
+    switched_on = lab.run("connection-log", "on")
+    assert switched_on.returncode == 0, switched_on.stdout + switched_on.stderr
+    assert "CUTOVER_CONNECTION_LOG on" in switched_on.stdout
+    assert "ACTIVITY_LOGGING_ENABLED=true" in gateway_settings.read_text()
+    assert "ACTIVITY_LOGGING_ENABLED" not in (lab.work / ".env").read_text()
+    assert lab.run("connection-log", "off").returncode == 0
+    assert "ACTIVITY_LOGGING_ENABLED=false" in gateway_settings.read_text()
+    assert lab.run("connection-log", "sometimes").returncode == 1
+
     back = lab.run("rollback")
     assert back.returncode == 0, back.stdout + back.stderr
     assert "CUTOVER_ROLLED_BACK" in back.stdout
@@ -389,6 +428,27 @@ def test_the_whole_move_and_the_way_back(lab: Rehearsal) -> None:
     assert lab.settings() == {"BOT_USERNAME": "test_bot"}
     assert not lab.gateway_running()
     assert lab.bot() == "running"
+
+
+def test_before_the_move_the_switch_is_the_bots_own_setting(lab: Rehearsal) -> None:
+    refused = lab.run("connection-log", "on", FAKE_OLD_POLICY="1")
+    assert refused.returncode == 1
+    assert "ACTIVITY_LOGGING_ENABLED" not in (lab.work / ".env").read_text()
+    result = lab.run("connection-log", "on")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert lab.settings()["ACTIVITY_LOGGING_ENABLED"] == "true"
+    assert lab.run("connection-log", "off").returncode == 0
+    assert lab.settings()["ACTIVITY_LOGGING_ENABLED"] == "false"
+
+
+def test_without_a_backup_key_the_archive_stays_off_and_prepare_still_works(
+    lab: Rehearsal,
+) -> None:
+    (lab.tmp / "de" / "node-backup.env").unlink()
+    result = lab.run("prepare")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "DE has no backup key yet" in result.stdout
+    assert not (lab.ru_root / "etc" / "vpn-db" / "retention.env").exists()
 
 
 def test_an_old_bot_is_updated_first(lab: Rehearsal) -> None:

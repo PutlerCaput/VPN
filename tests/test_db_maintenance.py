@@ -103,7 +103,8 @@ def test_autoban_evidence_survives_the_retention_purge(tmp_path: Path) -> None:
     async def run() -> None:
         db = Database(str(tmp_path / "evidence.db"), KEY)
         await db.connect()
-        old = int(time.time()) - 4 * 365 * DAY
+        # Past the five-year term (legal/privacy.md, section 7).
+        old = int(time.time()) - 6 * 365 * DAY
         for kind in ("AUTOBAN", "scan"):
             await db._execute(
                 "INSERT INTO anomalies (telegram_id, node_username, kind, detail, "

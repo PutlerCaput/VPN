@@ -1,0 +1,35 @@
+# Moves closed months of activity records out of the live database into sealed
+# archives and deletes archives older than five years (scripts/retention_archiver.py).
+# Installed by scripts/db_gateway_install.sh; the timer is switched on only when the
+# owner's public key is set in /etc/vpn-db/retention.env.
+[Unit]
+Description=Seal closed months of activity records into archives (kept 5 years)
+After=node-db-gateway.service
+
+[Service]
+Type=oneshot
+User=vpn-db
+Group=vpn-db
+WorkingDirectory=/opt/vpn-db/app
+EnvironmentFile=/etc/vpn-db/retention.env
+ExecStart=/opt/vpn-db/venv/bin/python scripts/retention_archiver.py --database /var/lib/vpn-db/bot.db --db-key-file /etc/vpn-db/secrets/db_key --archive-dir /var/lib/vpn-db/archive
+TimeoutStartSec=2h
+Nice=10
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077
+ReadWritePaths=/var/lib/vpn-db
+MemoryMax=300M

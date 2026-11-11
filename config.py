@@ -235,7 +235,9 @@ class Settings(BaseSettings):
     db_gateway_token: SecretStr | None = None
     log_level: str = "INFO"
     log_dir: str = "logs"
-    conn_log_retention_days: int = 180
+    # Five years, the term in legal/privacy.md, section 7. A backstop: closed
+    # months are archived and removed much earlier (scripts/retention_archiver.py).
+    conn_log_retention_days: int = 1826
     activity_logging_enabled: bool = False
 
     # --- Marzban ------------------------------------------------------------

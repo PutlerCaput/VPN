@@ -9,10 +9,31 @@ are read with getattr defaults.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
+from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, "/app")
+# Five years, the term in the policy's section 7.
+RETENTION_DAYS = 5 * 365
+
+
+def privacy_path() -> Path:
+    """The policy the running bot publishes: /app/legal in its image.
+
+    update_bot.sh pipes this file into the container, so there is no __file__
+    there to start from. Run from a checkout, the repository's copy is read;
+    DOCTOR_PRIVACY_PATH points the tests at a file of their own.
+    """
+    override = os.environ.get("DOCTOR_PRIVACY_PATH")
+    if override:
+        return Path(override)
+    image = Path("/app/legal/privacy.md")
+    here = globals().get("__file__")
+    if image.is_file() or not here:
+        return image
+    return Path(here).resolve().parent.parent / "legal" / "privacy.md"
 
 
 def line(level: str, text: str) -> None:
@@ -28,15 +49,6 @@ def check_settings(s: Any) -> bool:
         f"tariffs on sale: {', '.join(tiers) or 'none'}"
         + ("" if tiers == ["standard"] else ". Fix: --set-tiers standard"),
     )
-    if getattr(s, "activity_logging_enabled", False):
-        line(
-            "FAIL",
-            "ACTIVITY_LOGGING_ENABLED=true: a connection log is kept, but the offer "
-            "and the privacy policy say it is not. Fix: "
-            "--set ACTIVITY_LOGGING_ENABLED=false",
-        )
-    else:
-        line("OK", "connection log is off, as the offer says")
     mode = getattr(s, "autoban_mode", "review")
     if mode == "review":
         line("OK", "AUTOBAN_MODE=review: an admin confirms every ban")
@@ -179,6 +191,107 @@ async def check_telegram(s: Any) -> None:
         line("FAIL", f"Telegram API: {type(exc).__name__}")
 
 
+def policy_keeps_connection_records(text: str | None = None) -> bool | None:
+    """What the published policy says about connection records; None if unreadable."""
+    if text is None:
+        try:
+            text = privacy_path().read_text(encoding="utf-8")
+        except OSError:
+            return None
+    listed_as_not_processed = "журнал подключений;" in text
+    return "Учёт подключений" in text and not listed_as_not_processed
+
+
+async def check_database(s: Any) -> bool | None:
+    """Where the data is and whether it answers.
+
+    Returns the connection-records switch that is actually in force: the one
+    next to the data. None when it could not be read.
+    """
+    url = getattr(s, "database_url", None)
+    token = getattr(s, "db_gateway_token", None)
+    if not url or token is None:
+        key = "encrypted" if getattr(s, "db_key", None) else "NOT encrypted"
+        line("OK" if key == "encrypted" else "WARN", f"database: local file, {key}")
+        return bool(getattr(s, "activity_logging_enabled", False))
+    try:
+        from db.remote import (
+            MAX_CLOCK_SKEW_SECONDS,
+            DatabaseUnavailableError,
+            RemoteDatabase,
+            RemoteDatabaseError,
+        )
+    except ImportError:
+        line("FAIL", "DATABASE_URL is set, but this release cannot use a gateway")
+        return None
+    client = RemoteDatabase(url, token.get_secret_value(), retries=0)
+    try:
+        await client.connect()
+    except DatabaseUnavailableError:
+        line(
+            "FAIL",
+            "database gateway does not answer: check the tunnel between the "
+            "servers (db_cutover.sh status)",
+        )
+        return None
+    except RemoteDatabaseError as exc:
+        line("FAIL", f"database gateway refused the bot: {exc}")
+        return None
+    else:
+        key = "encrypted" if client.encrypted else "NOT encrypted"
+        line(
+            "OK" if client.encrypted else "FAIL",
+            f"database: on the other server through the gateway, {key}",
+        )
+        skew = abs(client.clock_skew_seconds)
+        if skew > MAX_CLOCK_SKEW_SECONDS:
+            line("WARN", f"the two servers' clocks differ by {skew} s: fix their time")
+        return bool(client.activity_logging_enabled)
+    finally:
+        await client.close()
+
+
+def check_connection_records(s: Any, switch: bool | None) -> None:
+    """The switch and the published policy must say the same thing."""
+    remote = bool(getattr(s, "database_url", None))
+    turn_on = (
+        "db_cutover.sh connection-log on"
+        if remote
+        else "--set ACTIVITY_LOGGING_ENABLED=true"
+    )
+    turn_off = (
+        "db_cutover.sh connection-log off"
+        if remote
+        else "--set ACTIVITY_LOGGING_ENABLED=false"
+    )
+    policy = policy_keeps_connection_records()
+    if switch is None or policy is None:
+        line("WARN", "connection records: the switch or the policy could not be read")
+    elif switch and policy:
+        line("OK", "connection records are kept, as the policy says")
+    elif switch:
+        line(
+            "FAIL",
+            "connection records are kept, but the published policy says they are "
+            f"not. Publish the current policy (update the bot) or turn off: {turn_off}",
+        )
+    elif policy:
+        line(
+            "WARN",
+            "the policy says connection records are kept, but the switch is off: "
+            f"nothing is recorded. Turn on: {turn_on}",
+        )
+    else:
+        line("OK", "connection records are off, as the policy says")
+    days = int(getattr(s, "conn_log_retention_days", RETENTION_DAYS))
+    if days < RETENTION_DAYS:
+        line(
+            "WARN",
+            f"CONN_LOG_RETENTION_DAYS={days}: records would be deleted before the "
+            "5 years the policy names. Fix: --set CONN_LOG_RETENTION_DAYS=1826",
+        )
+
+
 async def main() -> None:
     try:
         from config import get_settings
@@ -188,6 +301,7 @@ async def main() -> None:
         line("FAIL", f"bot settings cannot be read: {type(exc).__name__}")
         return
     rest = check_settings(settings)
+    check_connection_records(settings, await check_database(settings))
     if rest:
         await check_yookassa(settings)
     await check_marzban(settings)
@@ -195,4 +309,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--policy-keeps-connection-records"]:
+        # For db_cutover.sh: may the connection records switch be turned on?
+        raise SystemExit(0 if policy_keeps_connection_records() else 1)
     asyncio.run(main())

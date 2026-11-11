@@ -91,7 +91,7 @@ STARS_ENABLED STARS_AUTORENEW_ENABLED STARS_RUB_PER_STAR YOOKASSA_IN_BOT TRIAL_T
 AWG_ENABLED AWG_AGENT_URL AWG_AGENT_TOKEN TELEGRAM_PAYMENT_TOKEN \
 YOOKASSA_RECEIPT_MODE ACTIVITY_LOGGING_ENABLED AUTOBAN_MODE TELEGRAM_PROXY_URL \
 SERVER_TRAFFIC_LIMIT_GB SERVER_TRAFFIC_COUNTS SERVER_TRAFFIC_RESET_DAY SERVER_TRAFFIC_PAUSE_TRIALS \
-RU_DIRECT_SUBSCRIPTION"
+RU_DIRECT_SUBSCRIPTION CONN_LOG_RETENTION_DAYS"
 
 if [[ "${1:-}" == "--payment-status" ]]; then
   # Safe summary only: which payment paths are configured, never any value.
@@ -329,6 +329,9 @@ if [[ "${1:-}" == "--set" ]]; then
     fi
     if [[ "$key" == AUTOBAN_MODE && ! "$value" =~ ^(review|automatic)$ ]]; then
       fail "usage: --set AUTOBAN_MODE=review"
+    fi
+    if [[ "$key" == CONN_LOG_RETENTION_DAYS && ! "$value" =~ ^[1-9][0-9]{1,4}$ ]]; then
+      fail "usage: --set CONN_LOG_RETENTION_DAYS=1826  (days; 1826 is five years)"
     fi
     if [[ "$key" == SERVER_TRAFFIC_LIMIT_GB && ! "$value" =~ ^([0-9]{1,6}|1000000)$ ]]; then
       fail "usage: --set SERVER_TRAFFIC_LIMIT_GB=5000  (decimal GB, 0 = off)"

@@ -1,0 +1,11 @@
+[Unit]
+Description=Monthly archive of closed months of activity records
+
+[Timer]
+OnCalendar=*-*-02 00:40:00 UTC
+RandomizedDelaySec=20min
+Persistent=true
+Unit=node-retention-archive.service
+
+[Install]
+WantedBy=timers.target
