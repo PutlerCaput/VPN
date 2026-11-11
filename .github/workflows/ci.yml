@@ -44,6 +44,8 @@ jobs:
         run: pytest -q
       - name: Tests on SQLCipher
         run: TEST_DB_KEY="$(python -c 'print("ab" * 32)')" pytest -q
+      - name: Tests through the database gateway (SQLCipher behind it)
+        run: TEST_DB_BACKEND=remote TEST_DB_KEY="$(python -c 'print("ab" * 32)')" pytest -q
 
   frontends:
     runs-on: ubuntu-24.04

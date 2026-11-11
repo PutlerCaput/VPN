@@ -1561,6 +1561,29 @@ class Database:
             (telegram_id,),
         )
 
+    async def confirm_autoban(
+        self,
+        telegram_id: int,
+        node_username: str | None,
+        detail: str,
+        at: int,
+    ) -> None:
+        """The ban and its AUTOBAN evidence, in one transaction.
+
+        Called only after the panel confirmed the node is disabled, so a
+        completed ban is never recorded ahead of the fact.
+        """
+        async with self.transaction() as conn:
+            await conn.execute(
+                "UPDATE users SET status = 'banned' WHERE telegram_id = ?",
+                (telegram_id,),
+            )
+            await conn.execute(
+                "INSERT INTO anomalies (telegram_id, node_username, kind, detail, "
+                "created_at) VALUES (?, ?, 'AUTOBAN', ?, ?)",
+                (telegram_id, node_username, detail, at),
+            )
+
     # ------------------------------------------------- anomalies / audit / logs
     async def add_anomaly(
         self,

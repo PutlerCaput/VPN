@@ -21,6 +21,12 @@ from pydantic_settings import SettingsError
 
 from config import Settings, get_settings
 from db.database import Database, DatabaseKeyError
+from db.remote import (
+    MAX_CLOCK_SKEW_SECONDS,
+    DatabaseUnavailableError,
+    RemoteDatabase,
+    RemoteDatabaseError,
+)
 from handlers import build_root_router
 from handlers.payments import PAYCHECK_LIMIT
 from handlers.profile import REVOKE_LIMITER
@@ -216,6 +222,56 @@ def load_settings() -> Settings:
 
 STARTUP_RETRY_INITIAL_DELAY = 2.0
 STARTUP_RETRY_MAX_DELAY = 60.0
+# A remote database gets about a minute: the tunnel to the other server may
+# come up a little later than this container.
+DATABASE_CONNECT_ATTEMPTS = 12
+DATABASE_CONNECT_DELAY = 5.0
+
+
+def build_database(settings: Settings) -> Database:
+    """The local file, or the gateway on the other server when database_url is set."""
+    if settings.database_url and settings.db_gateway_token:
+        return RemoteDatabase(
+            settings.database_url, settings.db_gateway_token.get_secret_value()
+        )
+    return Database(
+        settings.database_path,
+        settings.db_key.get_secret_value() if settings.db_key else None,
+        activity_logging_enabled=settings.activity_logging_enabled,
+    )
+
+
+async def open_database(settings: Settings) -> Database:
+    """Connects or exits with a one-line reason (no values, no traceback)."""
+    db = build_database(settings)
+    for attempt in range(1, DATABASE_CONNECT_ATTEMPTS + 1):
+        try:
+            await db.connect()
+        except DatabaseKeyError as exc:
+            sys.stderr.write(f"Database error, refusing to start: {exc}\n")
+            raise SystemExit(2) from None
+        except RemoteDatabaseError as exc:
+            await db.close()
+            sys.stderr.write(f"Database gateway error, refusing to start: {exc}\n")
+            raise SystemExit(2) from None
+        except DatabaseUnavailableError:
+            logger.warning("database_unreachable", extra={"attempt": attempt})
+            if attempt < DATABASE_CONNECT_ATTEMPTS:
+                await asyncio.sleep(DATABASE_CONNECT_DELAY)
+            continue
+        if isinstance(db, RemoteDatabase):
+            if db.activity_logging_enabled != settings.activity_logging_enabled:
+                # The switch that matters is the one next to the data.
+                logger.warning("activity_logging_differs_from_gateway")
+            if abs(db.clock_skew_seconds) > MAX_CLOCK_SKEW_SECONDS:
+                logger.warning("database_clock_skew")
+        return db
+    await db.close()
+    sys.stderr.write(
+        "Database gateway is unreachable, refusing to start: check the tunnel "
+        "between the servers and the gateway service\n"
+    )
+    raise SystemExit(2)
 
 
 async def call_with_retry(
@@ -249,16 +305,7 @@ async def run() -> None:
     setup_logging(settings.log_level, settings.log_dir)
     for feature in settings.disabled_features():
         logger.warning("feature_disabled", extra={"feature": feature})
-    db = Database(
-        settings.database_path,
-        settings.db_key.get_secret_value() if settings.db_key else None,
-        activity_logging_enabled=settings.activity_logging_enabled,
-    )
-    try:
-        await db.connect()
-    except DatabaseKeyError as exc:
-        sys.stderr.write(f"Database error, refusing to start: {exc}\n")
-        raise SystemExit(2) from None
+    db = await open_database(settings)
     bot = Bot(
         token=settings.bot_token.get_secret_value(),
         session=bot_session(settings.telegram_proxy_url),

@@ -24,6 +24,8 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
+from db.endpoint import MIN_TOKEN_LENGTH, validate_gateway_url
+
 SECRETS_DIR = Path(os.environ.get("SECRETS_DIR", "/run/secrets"))
 
 # Tariffs: tier -> months -> price. RUB for SBP (integer roubles), USDT as Decimal.
@@ -226,6 +228,11 @@ class Settings(BaseSettings):
     database_path: str = "data/bot.db"
     # SQLCipher key: 64 hex chars (Docker secret db_key). Unset = plain SQLite.
     db_key: SecretStr | None = None
+    # The database on another server, behind db.gateway: for example
+    # http://10.204.0.1:8444 inside the tunnel between the servers. Unset = the
+    # local file above. database_path and db_key then belong to the gateway.
+    database_url: str | None = None
+    db_gateway_token: SecretStr | None = None
     log_level: str = "INFO"
     log_dir: str = "logs"
     conn_log_retention_days: int = 180
@@ -443,6 +450,8 @@ class Settings(BaseSettings):
         "abuse_report_token",
         "support_username",
         "db_key",
+        "database_url",
+        "db_gateway_token",
         "yookassa_shop_id",
         "yookassa_secret_key",
         "yookassa_return_url",
@@ -460,6 +469,11 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("database_url")
+    @classmethod
+    def _private_database_gateway(cls, value: str | None) -> str | None:
+        return None if value is None else validate_gateway_url(value)
 
     @field_validator("yookassa_proxy_url")
     @classmethod
@@ -554,6 +568,14 @@ class Settings(BaseSettings):
             problems.append("yookassa_proxy_url requires yookassa_egress=ru_gateway")
         if self.db_key and not DB_KEY_RE.fullmatch(self.db_key.get_secret_value()):
             problems.append("db_key must be 64 hex characters")
+        if self.database_url and (
+            self.db_gateway_token is None
+            or len(self.db_gateway_token.get_secret_value()) < MIN_TOKEN_LENGTH
+        ):
+            problems.append(
+                f"db_gateway_token ({MIN_TOKEN_LENGTH}+ characters) is required "
+                "with database_url"
+            )
         if self.vapid_private and not self.vapid_public:
             problems.append("vapid_public is required when vapid_private is set")
         keys = [
@@ -587,7 +609,8 @@ class Settings(BaseSettings):
             "usdt_payments (crypto_pay_token)": self.crypto_pay_token,
             "web_push (vapid_private)": self.vapid_private,
             "abuse_reports (abuse_report_token)": self.abuse_report_token,
-            "database_encryption (db_key)": self.db_key,
+            # With database_url the key belongs to the gateway, not to the bot.
+            "database_encryption (db_key)": self.db_key or self.database_url,
         }
         return [name for name, value in features.items() if value is None]
 

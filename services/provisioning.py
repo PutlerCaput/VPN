@@ -701,25 +701,14 @@ class ProvisioningService:
                             "Задача сохранена, бот будет повторять попытки.",
                         )
                     return False
-            async with self.db.transaction() as conn:
-                await conn.execute(
-                    "UPDATE users SET status = 'banned' WHERE telegram_id = ?",
-                    (telegram_id,),
-                )
-                await conn.execute(
-                    "INSERT INTO anomalies (telegram_id, node_username, kind, detail, "
-                    "created_at) VALUES (?, ?, 'AUTOBAN', ?, ?)",
-                    (
-                        telegram_id,
-                        node,
-                        json.dumps(
-                            {"reason": reason, **detail},
-                            ensure_ascii=False,
-                            default=str,
-                        ),
-                        _ts(),
-                    ),
-                )
+            await self.db.confirm_autoban(
+                telegram_id,
+                node,
+                json.dumps(
+                    {"reason": reason, **detail}, ensure_ascii=False, default=str
+                ),
+                _ts(),
+            )
             await self.db.revoke_all_refresh_tokens(telegram_id)
             await self.db.delete_pending_ban(telegram_id)
         AUTOBANS.labels(reason=reason).inc()
