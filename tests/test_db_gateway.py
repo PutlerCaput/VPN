@@ -7,9 +7,12 @@ import inspect
 import json
 import os
 import sqlite3
+import sys
 import time
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import aiohttp
@@ -25,6 +28,7 @@ from db.endpoint import PROTOCOL_VERSION, is_private_host, validate_gateway_url
 from db.gateway import (
     REPLAY_ENTRIES,
     GatewaySettings,
+    api_shapes,
     create_gateway_app,
     remote_methods,
 )
@@ -36,6 +40,7 @@ from db.remote import (
 from tests.conftest import GATEWAY_TOKEN
 
 AUTH = {"Authorization": f"Bearer {GATEWAY_TOKEN}"}
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
@@ -251,6 +256,7 @@ async def test_backend_facts(remote: RemoteDatabase, local: Database) -> None:
     assert facts["ok"] is True
     assert facts["protocol"] == PROTOCOL_VERSION
     assert facts["methods"] == len(remote_methods())
+    assert facts["api"] == api_shapes()
     assert facts["encrypted"] is local.encrypted
     assert remote.encrypted is local.encrypted
     assert remote.activity_logging_enabled is False
@@ -466,12 +472,152 @@ async def test_a_result_that_cannot_be_sent_is_an_error_not_a_second_run(
     assert runs == 1
 
 
+# ------------------------------------------------------------------ backups
+async def test_the_whole_database_can_be_fetched_as_one_file(
+    remote: RemoteDatabase, local: Database, tmp_path: Any
+) -> None:
+    await remote.create_user(31, "kept", None)
+    destination = tmp_path / "copy.db"
+    size = await remote.fetch_backup(str(destination))
+    assert size == destination.stat().st_size > 0
+    assert not destination.with_name("copy.db.part").exists()
+    # The copy opens with the same key (or none) and holds the same rows.
+    copy = Database(str(destination), os.environ.get("TEST_DB_KEY") or None)
+    await copy.connect()
+    try:
+        user = await copy.get_user(31)
+        assert user is not None
+        assert user["username"] == "kept"
+    finally:
+        await copy.close()
+    if local.encrypted:
+        assert not destination.read_bytes().startswith(b"SQLite format 3")
+
+
+async def test_a_backup_needs_the_token_and_leaves_nothing_behind(
+    gateway: TestServer, http: aiohttp.ClientSession, tmp_path: Any
+) -> None:
+    import tempfile
+
+    async with http.get(gateway.make_url("/v1/backup")) as response:
+        assert response.status == 401
+    before = set(Path(tempfile.gettempdir()).glob(".backup-*.db"))
+    async with http.get(gateway.make_url("/v1/backup"), headers=AUTH) as response:
+        assert response.status == 200
+        body = await response.read()
+        assert len(body) == int(response.headers["Content-Length"])
+        assert len(response.headers["X-Content-SHA256"]) == 64
+    # The gateway removes its copy right after sending it; give it a moment.
+    for _ in range(40):
+        left = set(Path(tempfile.gettempdir()).glob(".backup-*.db")) - before
+        if not left:
+            break
+        await asyncio.sleep(0.05)
+    assert not left
+
+
+async def test_a_damaged_download_is_not_kept(
+    gateway: TestServer, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import db.remote as remote_module
+
+    class WrongDigest:
+        def update(self, _chunk: bytes) -> None:
+            return None
+
+        def hexdigest(self) -> str:
+            return "0" * 64
+
+    client = RemoteDatabase(str(gateway.make_url("/")), GATEWAY_TOKEN)
+    await client.connect()
+    # The client's view of hashlib only: the gateway in this process keeps the real one.
+    monkeypatch.setattr(remote_module, "hashlib", SimpleNamespace(sha256=WrongDigest))
+    destination = tmp_path / "copy.db"
+    try:
+        with pytest.raises(RemoteDatabaseError, match="damaged"):
+            await client.fetch_backup(str(destination))
+    finally:
+        await client.close()
+    assert list(tmp_path.iterdir()) == []
+
+
+async def test_the_database_tool_fetches_a_copy_the_local_key_opens(
+    tmp_path: Any,
+) -> None:
+    """What the nightly backup runs on the bot's server after the move."""
+    key = "cd" * 32
+    database = Database(str(tmp_path / "live.db"), key)
+    await database.connect()
+    await database.create_user(55, "nightly", None)
+    server = TestServer(create_gateway_app(database, GATEWAY_TOKEN))
+    await server.start_server()
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    (secrets / "db_key").write_text(key)
+    environment = {
+        **os.environ,
+        "SECRETS_DIR": str(secrets),
+        "DATABASE_URL": str(server.make_url("/")),
+        "DB_GATEWAY_TOKEN": GATEWAY_TOKEN,
+    }
+
+    async def tool(*args: str, **env: str) -> tuple[int, str]:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(ROOT / "scripts" / "db_tool.py"),
+            *args,
+            env={**environment, **env},
+            cwd=str(tmp_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        output, _ = await process.communicate()
+        return process.returncode or 0, output.decode()
+
+    destination = tmp_path / "nightly.db"
+    try:
+        code, output = await tool("fetch", str(destination))
+        assert code == 0, output
+        assert "backup fetched" in output
+        assert GATEWAY_TOKEN not in output
+        copy = Database(str(destination), key)
+        await copy.connect()
+        user = await copy.get_user(55)
+        await copy.close()
+        assert user is not None
+        assert user["username"] == "nightly"
+        # A key that cannot open the copy is caught on the day of the backup.
+        (secrets / "db_key").write_text("ef" * 32)
+        code, output = await tool("fetch", str(tmp_path / "other.db"))
+        assert code != 0
+        assert "wrong key" in output
+        # Without DATABASE_URL there is nothing to fetch from.
+        code, output = await tool("fetch", str(tmp_path / "none.db"), DATABASE_URL="")
+        assert code != 0
+        assert "DATABASE_URL is not set" in output
+    finally:
+        await server.close()
+        await database.close()
+
+
+def test_the_backup_helper_is_not_callable_remotely() -> None:
+    # It takes a path on the server: it must stay out of the remote API.
+    assert "_backup_into" not in remote_methods()
+    assert not any("backup" in name for name in remote_methods())
+
+
 class FlakyGateway:
     """Stands in for the gateway: fails the first calls, records every body."""
 
-    def __init__(self, failures: list[int], protocol: int = PROTOCOL_VERSION) -> None:
+    def __init__(
+        self,
+        failures: list[int],
+        protocol: int = PROTOCOL_VERSION,
+        api: dict[str, str] | None = None,
+    ) -> None:
         self.failures = failures
         self.protocol = protocol
+        self.api = api_shapes() if api is None else api
         self.bodies: list[dict[str, Any]] = []
         self.app = web.Application()
         self.app.router.add_get("/v1/info", self.info)
@@ -486,6 +632,7 @@ class FlakyGateway:
                 "activity_logging_enabled": False,
                 "server_time": int(time.time()) + 120,
                 "methods": 0,
+                "api": self.api,
             }
         )
 
@@ -568,6 +715,45 @@ async def test_another_protocol_version_is_refused() -> None:
         with pytest.raises(RemoteDatabaseError, match="protocol version"):
             await client.connect()
         assert client._session is None
+    finally:
+        await client.close()
+        await server.close()
+
+
+def test_api_shapes_name_parameters_without_annotations() -> None:
+    shapes = api_shapes()
+    assert set(shapes) == set(remote_methods())
+    assert shapes["get_user"] == "telegram_id"
+    assert shapes["create_user"] == "telegram_id,username,referred_by"
+    assert shapes["ping"] == ""
+    assert not any("int" in shape.split(",") for shape in shapes.values())
+
+
+@pytest.mark.parametrize(
+    ("change", "accepted"),
+    [
+        (lambda api: api, True),
+        # A newer gateway knows more methods: the bot does not mind.
+        (lambda api: {**api, "added_in_a_later_release": "x,y"}, True),
+        # An older gateway lacks one, or takes other parameters: refuse.
+        (lambda api: {k: v for k, v in api.items() if k != "get_user"}, False),
+        (lambda api: {**api, "get_user": "telegram_id,extra"}, False),
+        (lambda api: {}, False),
+    ],
+)
+async def test_the_bot_refuses_a_gateway_older_than_itself(
+    change: Any, accepted: bool
+) -> None:
+    server = TestServer(FlakyGateway([], api=change(api_shapes())).app)
+    await server.start_server()
+    client = RemoteDatabase(str(server.make_url("/")), GATEWAY_TOKEN)
+    try:
+        if accepted:
+            await client.connect()
+        else:
+            with pytest.raises(RemoteDatabaseError, match="update the gateway first"):
+                await client.connect()
+            assert client._session is None
     finally:
         await client.close()
         await server.close()
@@ -749,7 +935,13 @@ async def test_bot_startup_refuses_a_wrong_token(
 
 
 def gateway_env(monkeypatch: pytest.MonkeyPatch, **values: str) -> None:
-    for name in ("DB_GATEWAY_TOKEN", "DB_GATEWAY_HOST", "DB_GATEWAY_PORT", "DB_KEY"):
+    for name in (
+        "DB_GATEWAY_TOKEN",
+        "DB_GATEWAY_HOST",
+        "DB_GATEWAY_PORT",
+        "DB_GATEWAY_CREATE",
+        "DB_KEY",
+    ):
         monkeypatch.delenv(name, raising=False)
     for name, value in values.items():
         monkeypatch.setenv(name, value)
@@ -811,6 +1003,106 @@ def test_gateway_main_names_the_field_not_the_value(
     assert "db_gateway_token" in err
     assert "short-secret" not in err
     assert "8.8.8.8" not in err
+
+
+def test_gateway_main_reports_a_busy_address_in_one_line(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Any,
+) -> None:
+    import socket
+
+    import db.gateway as gateway_module
+
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen(1)
+        gateway_env(
+            monkeypatch,
+            **{
+                "DB_GATEWAY_TOKEN": GATEWAY_TOKEN,
+                "DB_GATEWAY_HOST": "127.0.0.1",
+                "DB_GATEWAY_PORT": str(taken.getsockname()[1]),
+            },
+        )
+        monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "bot.db"))
+        monkeypatch.setenv("DB_GATEWAY_CREATE", "true")
+        monkeypatch.setattr("logging_setup.setup_logging", lambda *_: None)
+        with pytest.raises(SystemExit) as caught:
+            gateway_module.main()
+    assert caught.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith("Gateway cannot start (OSError)")
+    assert "Traceback" not in err
+    assert GATEWAY_TOKEN not in err
+
+
+def test_gateway_does_not_create_a_database_by_accident(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Any,
+) -> None:
+    import db.gateway as gateway_module
+
+    missing = tmp_path / "wrong" / "bot.db"
+    gateway_env(
+        monkeypatch,
+        **{"DB_GATEWAY_TOKEN": GATEWAY_TOKEN, "DB_GATEWAY_HOST": "127.0.0.1"},
+    )
+    monkeypatch.setenv("DB_GATEWAY_PORT", str(unused_port()))
+    monkeypatch.setenv("DATABASE_PATH", str(missing))
+    monkeypatch.delenv("DB_GATEWAY_CREATE", raising=False)
+    monkeypatch.setattr("logging_setup.setup_logging", lambda *_: None)
+    with pytest.raises(SystemExit) as caught:
+        gateway_module.main()
+    assert caught.value.code == 2
+    assert "does not exist or is empty" in capsys.readouterr().err
+    assert not missing.parent.exists()
+    # An empty file is the same mistake (a failed copy), not a database.
+    empty = tmp_path / "bot.db"
+    empty.touch()
+    monkeypatch.setenv("DATABASE_PATH", str(empty))
+    with pytest.raises(SystemExit) as caught:
+        gateway_module.main()
+    assert caught.value.code == 2
+    assert empty.stat().st_size == 0
+
+
+async def test_gateway_creates_a_database_only_when_told_to(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    import db.gateway as gateway_module
+
+    path = tmp_path / "bot.db"
+    port = unused_port()
+    gateway_env(
+        monkeypatch,
+        **{"DB_GATEWAY_TOKEN": GATEWAY_TOKEN, "DB_GATEWAY_HOST": "127.0.0.1"},
+    )
+    monkeypatch.setenv("DB_GATEWAY_PORT", str(port))
+    monkeypatch.setenv("DATABASE_PATH", str(path))
+    monkeypatch.setenv("DB_GATEWAY_CREATE", "true")
+    # Signal handlers belong to the real process; here the task is cancelled.
+    monkeypatch.setattr(
+        asyncio.get_running_loop(), "add_signal_handler", lambda *_: None
+    )
+    serving = asyncio.create_task(gateway_module.serve(GatewaySettings()))
+    client = RemoteDatabase(f"http://127.0.0.1:{port}", GATEWAY_TOKEN)
+    try:
+        for _ in range(50):
+            try:
+                await client.connect()
+                break
+            except DatabaseUnavailableError:
+                client._down_until = 0.0
+                await asyncio.sleep(0.05)
+        assert await client.create_user(9, None, None) is True
+    finally:
+        await client.close()
+        serving.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await serving
+    assert path.stat().st_size > 0
 
 
 def test_short_tokens_are_refused_everywhere(local: Database) -> None:

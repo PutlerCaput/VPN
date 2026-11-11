@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Host firewall for the RU VPN-entry server, with a way back if it goes wrong.
 #   bash ru_firewall.sh            report: what is open now and what --apply would set
-#   bash ru_firewall.sh --apply    INPUT policy DROP + allow 22/80; undoes itself in 10 min
+#   bash ru_firewall.sh --apply    INPUT policy DROP + allow 22/80 and the database
+#                                  tunnel from DE; undoes itself in 10 min
 #   bash ru_firewall.sh --confirm  from a NEW ssh login: keep it and save to rules.v4
 #   bash ru_firewall.sh --revert   restore the snapshot taken at --apply, at once
 #   bash ru_firewall.sh --status   one line: OK or WARN
@@ -16,6 +17,14 @@
 set -euo pipefail
 
 ALLOW_TCP="22 80"                        # inbound TCP ports open to everyone
+# The database gateway (docs/RU_DATABASE_PLAN.md, section 11). Only the DE server may
+# open the WireGuard tunnel, and the gateway port is reachable only inside the tunnel.
+# DB_TUNNEL_PEER= (empty) leaves both rules out.
+DB_TUNNEL_PEER="${DB_TUNNEL_PEER-89.125.210.172}"
+DB_TUNNEL_PORT="${DB_TUNNEL_PORT:-51820}"
+DB_TUNNEL_IF="${DB_TUNNEL_IF:-wg-db}"
+DB_GATEWAY_PEER="${DB_GATEWAY_PEER:-10.204.0.2}"
+DB_GATEWAY_PORT="${DB_GATEWAY_PORT:-8444}"
 ETC_DIR="${ETC_DIR:-/etc}"
 RULES="${RULES:-$ETC_DIR/iptables/rules.v4}"
 STATE_DIR="${STATE_DIR:-$ETC_DIR/iptables}"
@@ -40,33 +49,51 @@ case "${1:-}" in
 esac
 
 open_ports_now() { $IPTABLES -S INPUT 2>/dev/null | grep -oE 'dport [0-9]+' | awk '{print $2}' | sort -un | paste -sd' ' -; }
+valid_settings() {
+  # These go into iptables arguments: digits, dots and interface characters only.
+  [[ -z "$DB_TUNNEL_PEER" || "$DB_TUNNEL_PEER" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || stop "DB_TUNNEL_PEER is not an IPv4 address"
+  [[ "$DB_GATEWAY_PEER" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || stop "DB_GATEWAY_PEER is not an IPv4 address"
+  [[ "$DB_TUNNEL_PORT" =~ ^[0-9]{1,5}$ && "$DB_GATEWAY_PORT" =~ ^[0-9]{1,5}$ ]] || stop "ports must be numbers"
+  [[ "$DB_TUNNEL_IF" =~ ^[a-zA-Z0-9_-]{1,15}$ ]] || stop "DB_TUNNEL_IF is not an interface name"
+}
 policy_now() { $IPTABLES -S INPUT 2>/dev/null | awk '$1 == "-P" { print $3; exit }'; }
 
 set_input_chain() {
   # Rebuild only INPUT. Allow rules go in while the policy is still ACCEPT and the
   # policy flips to DROP last, so an in-flight ssh session is never dropped.
-  $IPTABLES -F INPUT
-  $IPTABLES -A INPUT -i lo -j ACCEPT
-  $IPTABLES -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-  $IPTABLES -A INPUT -m conntrack --ctstate INVALID -j DROP
-  $IPTABLES -A INPUT -p icmp --icmp-type echo-request -m limit --limit 5/second -j ACCEPT
+  # Every step is checked by hand: `set -e` does not act inside a function called
+  # from an `if`, and a failed allow rule followed by DROP would shut ssh out.
   local p
+  $IPTABLES -F INPUT || return 1
+  $IPTABLES -A INPUT -i lo -j ACCEPT || return 1
+  $IPTABLES -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || return 1
+  $IPTABLES -A INPUT -m conntrack --ctstate INVALID -j DROP || return 1
+  $IPTABLES -A INPUT -p icmp --icmp-type echo-request -m limit --limit 5/second -j ACCEPT || return 1
   for p in $ALLOW_TCP; do
-    $IPTABLES -A INPUT -p tcp --dport "$p" -m conntrack --ctstate NEW -j ACCEPT
+    $IPTABLES -A INPUT -p tcp --dport "$p" -m conntrack --ctstate NEW -j ACCEPT || return 1
   done
+  if [[ -n "$DB_TUNNEL_PEER" ]]; then
+    $IPTABLES -A INPUT -p udp -s "$DB_TUNNEL_PEER" --dport "$DB_TUNNEL_PORT" -j ACCEPT || return 1
+    $IPTABLES -A INPUT -i "$DB_TUNNEL_IF" -p tcp -s "$DB_GATEWAY_PEER" --dport "$DB_GATEWAY_PORT" \
+      -m conntrack --ctstate NEW -j ACCEPT || return 1
+  fi
   $IPTABLES -P INPUT DROP
 }
 
 report() {
   say "== RU host firewall"
   say "  INPUT policy now: $(policy_now || echo unknown)"
-  say "  inbound TCP rules now: $(open_ports_now || echo none)"
+  say "  inbound ports with a rule now: $(open_ports_now || echo none)"
   if [[ -f "$PENDING" ]]; then
     say "  STATE: a change is waiting: run --confirm from a NEW ssh login, or --revert."
   fi
   say "  --apply would set: INPUT policy DROP; allow lo, established, ssh 22, http 80,"
   say "                     rate-limited ping; drop the rest. FORWARD/nat/OUTPUT untouched,"
   say "                     so the VPN entry (DNAT 443/2087/8443) keeps working."
+  if [[ -n "$DB_TUNNEL_PEER" ]]; then
+    say "                     Database tunnel: udp $DB_TUNNEL_PORT only from $DB_TUNNEL_PEER;"
+    say "                     tcp $DB_GATEWAY_PORT only on $DB_TUNNEL_IF from $DB_GATEWAY_PEER."
+  fi
   say "  then a timer restores the snapshot after $((REVERT_AFTER / 60)) min unless you --confirm."
   say "RU_FIREWALL_REPORT_DONE"
 }
@@ -145,6 +172,7 @@ status() {
   fi
 }
 
+valid_settings
 case "$MODE" in
   report) report ;;
   apply) apply ;;

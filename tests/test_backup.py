@@ -235,6 +235,24 @@ def test_only_the_newest_copies_are_kept(env: dict[str, str]) -> None:
 
 
 @needs_age
+def test_a_database_on_the_other_server_is_fetched_not_copied_from_the_old_file(
+    env: dict[str, str],
+) -> None:
+    assert run("backup_all.sh", env).returncode == 0
+    assert any("db_tool.py backup /app/data/bot.db" in call for call in calls(env))
+    Path(env["FAKE_LOG"]).unlink()
+    settings = Path(env["FAKE_WORKDIR"]) / ".env"
+    settings.write_text(
+        settings.read_text(encoding="utf-8") + "DATABASE_URL=http://10.204.0.1:8444\n",
+        encoding="utf-8",
+    )
+    assert run("backup_all.sh", env).returncode == 0
+    tool = [call for call in calls(env) if "db_tool.py" in call]
+    assert len(tool) == 1
+    assert tool[0].endswith("db_tool.py fetch /app/data/.nightly-backup.db")
+
+
+@needs_age
 def test_a_missing_marzban_database_is_flagged_not_hidden(env: dict[str, str]) -> None:
     result = run("backup_all.sh", {**env, "MARZBAN_DB": "/nonexistent/db.sqlite3"})
     assert result.returncode == 0, result.stderr

@@ -17,11 +17,14 @@ What differs from a local database:
   belongs in a ``Database`` method, which then runs remotely as one call.
 * Timestamps written by ``Database`` come from the gateway's clock;
   ``clock_skew_seconds`` is measured at ``connect()`` for the doctor.
+* The two servers are updated one after the other, the gateway first:
+  ``connect()`` refuses a gateway that lacks a method this bot can call.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 import sqlite3
@@ -29,6 +32,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, NoReturn
 
 import aiohttp
@@ -36,7 +40,7 @@ import aiosqlite
 
 from db.database import Database, PendingPaymentLimitError
 from db.endpoint import MIN_TOKEN_LENGTH, PROTOCOL_VERSION, validate_gateway_url
-from db.gateway import remote_methods
+from db.gateway import api_shapes, remote_methods
 
 # Pauses before the second and third attempt of one call.
 RETRY_DELAYS = (0.2, 0.6)
@@ -121,6 +125,19 @@ class RemoteDatabase(Database):
                 "the database gateway speaks another protocol version: "
                 "update both servers to the same release"
             )
+        # Every method this bot can call must exist on the gateway with the
+        # same parameters. The gateway may know more: it is updated first.
+        theirs = facts.get("api")
+        theirs = theirs if isinstance(theirs, dict) else {}
+        behind = sorted(
+            name for name, shape in api_shapes().items() if theirs.get(name) != shape
+        )
+        if behind:
+            await self.close()
+            raise RemoteDatabaseError(
+                f"the database gateway is older than this bot ({len(behind)} "
+                f"methods differ, first: {behind[0]}): update the gateway first"
+            )
         self._remote_encrypted = bool(facts.get("encrypted"))
         self.activity_logging_enabled = bool(facts.get("activity_logging_enabled"))
         self.clock_skew_seconds = int(facts.get("server_time") or 0) - int(time.time())
@@ -137,6 +154,42 @@ class RemoteDatabase(Database):
         if status != 200 or not isinstance(facts, dict):
             raise RemoteDatabaseError(f"info: HTTP {status}")
         return facts
+
+    async def fetch_backup(self, destination: str, *, limit: float = 600.0) -> int:
+        """Downloads a consistent copy of the whole database; returns its size.
+
+        The file is the gateway's database as it is stored (SQLCipher with the
+        same key). It appears under ``destination`` only after its checksum
+        matched what the gateway sent. ``limit`` is the whole transfer, in seconds.
+        """
+        session = self._session
+        if session is None:
+            raise RuntimeError("Database is not connected")
+        target = Path(destination)
+        partial = target.with_name(target.name + ".part")
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            async with session.get(
+                self.base_url + "/v1/backup",
+                timeout=aiohttp.ClientTimeout(total=limit, connect=10),
+            ) as response:
+                if response.status != 200:
+                    raise RemoteDatabaseError(f"backup: HTTP {response.status}")
+                expected = response.headers.get("X-Content-SHA256", "")
+                with partial.open("wb") as out:
+                    async for chunk in response.content.iter_chunked(256 * 1024):
+                        digest.update(chunk)
+                        size += len(chunk)
+                        await asyncio.to_thread(out.write, chunk)
+            if size == 0 or digest.hexdigest() != expected:
+                raise RemoteDatabaseError("backup: the copy arrived damaged")
+            partial.replace(target)
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise DatabaseUnavailableError("database gateway is unavailable") from exc
+        finally:
+            partial.unlink(missing_ok=True)
+        return size
 
     async def _exchange(
         self, verb: str, path: str, body: bytes | None

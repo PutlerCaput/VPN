@@ -11,6 +11,10 @@
 #   bash update_bot.sh --doctor                               # read-only check of everything
 #   bash update_bot.sh --disable-usdt                         # turn the /usdt payments off
 #   bash update_bot.sh --set-public-url https://app.example.com  # site address for links
+#   ... | bash update_bot.sh --database-gateway http://10.204.0.1:8444
+#                                   # the database on the other server; the access
+#                                   # token arrives on standard input, never typed
+#   bash update_bot.sh --database-local                       # back to the local file
 #
 # Optional with --apply: --env-add appends the new settings that are missing
 # from .env (STARS_ENABLED, STARS_RUB_PER_STAR, YOOKASSA_IN_BOT,
@@ -261,6 +265,51 @@ if [[ "${1:-}" == "--set-secret" ]]; then
   unset secret_value
 fi
 
+# Settings only the two modes below may write.
+EXTRA_SETTABLE=""
+if [[ "${1:-}" == "--database-gateway" ]]; then
+  # The bot's database moves behind db.gateway on the other server
+  # (docs/RU_DATABASE_PLAN.md, section 11). If the bot does not become healthy
+  # on it, the previous .env comes back by itself: the bot is on the local file again.
+  url="${2:-}"
+  # The same rule as the bot's settings: plain http only to a private or loopback address.
+  [[ "$url" =~ ^http://(127|10|192\.168|172\.(1[6-9]|2[0-9]|3[01]))(\.[0-9]{1,3}){2,3}:[0-9]{4,5}$ ]] \
+    || fail "usage: ... | --database-gateway http://10.204.0.1:8444  (an address inside the tunnel)"
+  [[ ! -t 0 ]] || fail "the token must arrive on standard input, relayed from the other server"
+  IFS= read -r secret_value || true
+  secret_value="${secret_value%$'\r'}"
+  [[ "$secret_value" =~ ^[A-Za-z0-9_-]{32,128}$ ]] \
+    || fail "no token on standard input (expected 32+ letters and digits)"
+  chmod 600 "$WORKDIR/.env" 2>/dev/null || true
+  EXTRA_SETTABLE="DATABASE_URL DB_GATEWAY_TOKEN"
+  set -- --set "DATABASE_URL=$url" "DB_GATEWAY_TOKEN=$secret_value"
+  unset secret_value
+fi
+
+if [[ "${1:-}" == "--database-local" ]]; then
+  ENV_FILE="$WORKDIR/.env"
+  [[ -f "$ENV_FILE" ]] || fail "$ENV_FILE not found"
+  grep -q '^DATABASE_URL=.' "$ENV_FILE" \
+    || fail "DATABASE_URL is not set: the bot already uses the local file"
+  [[ -s "$WORKDIR/data/bot.db" ]] || fail "$WORKDIR/data/bot.db is missing: there is no local file to go back to"
+  ENV_BACKUP="$ENV_FILE.before-set-$STAMP"
+  cp -p "$ENV_FILE" "$ENV_BACKUP"
+  grep -vE '^(DATABASE_URL|DB_GATEWAY_TOKEN)=' "$ENV_FILE" >"$ENV_FILE.tmp-$STAMP" || true
+  cat "$ENV_FILE.tmp-$STAMP" >"$ENV_FILE"  # keeps owner and permissions
+  rm -f "$ENV_FILE.tmp-$STAMP"
+  say "ENV_BACKUP $ENV_BACKUP"
+  recreate
+  if wait_healthy; then
+    say "DATABASE_LOCAL_OK: the bot uses the local file again."
+    say "Records made while it used the gateway are NOT in this file: they stay on the other server."
+    exit 0
+  fi
+  cp -p "$ENV_BACKUP" "$ENV_FILE"
+  recreate
+  wait_healthy && fail "the bot is not healthy on the local file; the gateway settings are back (healthy)" \
+    || fail "the gateway settings are back, but the bot is not healthy"
+fi
+
 if [[ "${1:-}" == "--set-tiers" ]]; then
   set -- --set "ENABLED_TIERS=${2:-}"
 fi
@@ -270,7 +319,7 @@ if [[ "${1:-}" == "--set" ]]; then
   for pair in "$@"; do
     key="${pair%%=*}"
     value="${pair#*=}"
-    [[ "$pair" == *=* && ( " $SETTABLE_KEYS " == *" $key "* \
+    [[ "$pair" == *=* && ( " $SETTABLE_KEYS $EXTRA_SETTABLE " == *" $key "* \
       || ( "$key" == PUBLIC_BASE_URL && "${ALLOW_PUBLIC_URL:-0}" == 1 ) ) ]] \
       || fail "not allowed: $key (allowed: $SETTABLE_KEYS)"
     [[ -n "$value" && "$value" != *$'\n'* && "$value" != *[\"\'\\\$\`]* ]] \
@@ -343,9 +392,17 @@ done
 DATA_DIR="$WORKDIR/data"
 KEY_FILE="$WORKDIR/secrets/db_key.txt"
 ENV_FILE="$WORKDIR/.env"
-[[ -s "$DATA_DIR/bot.db" ]] || fail "$DATA_DIR/bot.db not found or empty"
-[[ -f "$KEY_FILE" ]] || fail "$KEY_FILE not found (the database key is required)"
 [[ -f "$ENV_FILE" ]] || fail "$ENV_FILE not found"
+# With DATABASE_URL the live database is on the other server, behind db.gateway.
+# The local file is then an old copy: backing it up or testing the new schema on
+# it would say nothing about the real data.
+REMOTE_DB=0
+if grep -q '^DATABASE_URL=.' "$ENV_FILE"; then
+  REMOTE_DB=1
+else
+  [[ -s "$DATA_DIR/bot.db" ]] || fail "$DATA_DIR/bot.db not found or empty"
+  [[ -f "$KEY_FILE" ]] || fail "$KEY_FILE not found (the database key is required)"
+fi
 
 say "container=$CONTAINER service=$SERVICE project=$PROJECT"
 say "workdir=$WORKDIR image=$IMAGE_REF"
@@ -369,13 +426,19 @@ run_tool() {
     -v "$DATA_DIR:/app/data" -v "$KEY_FILE:/run/secrets/db_key:ro" \
     "$NEW" python scripts/db_tool.py "$@"
 }
-BACKUP="before-update-$STAMP.db"
-run_tool backup /app/data/bot.db "/app/data/$BACKUP" \
-  || fail "database backup failed; nothing was changed"
-say "DB_BACKUP_OK $DATA_DIR/$BACKUP"
+if ((REMOTE_DB)); then
+  say "DB_REMOTE: the database is on the other server. Update the gateway there FIRST"
+  say "  (db_gateway_install.sh --apply): it applies schema changes, and this bot"
+  say "  refuses a gateway older than itself. No local backup or schema check was made."
+else
+  BACKUP="before-update-$STAMP.db"
+  run_tool backup /app/data/bot.db "/app/data/$BACKUP" \
+    || fail "database backup failed; nothing was changed"
+  say "DB_BACKUP_OK $DATA_DIR/$BACKUP"
 
-run_tool migrate-check /app/data/bot.db \
-  || fail "migration check failed on the copy; nothing was changed"
+  run_tool migrate-check /app/data/bot.db \
+    || fail "migration check failed on the copy; nothing was changed"
+fi
 
 if ((APPLY == 0)); then
   say "CHECK_OK: live bot unchanged. To switch, run again with --apply."

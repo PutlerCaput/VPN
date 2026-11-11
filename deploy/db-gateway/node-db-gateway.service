@@ -1,0 +1,42 @@
+# Database gateway: serves the bot's SQLCipher database to the bot on the other
+# server, inside the wg-db tunnel only. Installed by scripts/db_gateway_install.sh.
+[Unit]
+Description=Database gateway for the bot (db.gateway)
+After=network-online.target wg-quick@wg-db.service
+Wants=network-online.target
+# The gateway listens on the tunnel's address: no tunnel, no gateway.
+Requires=wg-quick@wg-db.service
+
+[Service]
+Type=simple
+User=vpn-db
+Group=vpn-db
+WorkingDirectory=/opt/vpn-db/app
+EnvironmentFile=/etc/vpn-db/gateway.env
+ExecStart=/opt/vpn-db/venv/bin/python -m db.gateway
+Restart=always
+RestartSec=5
+# A call in progress is finished before the process exits.
+TimeoutStopSec=30
+
+# The service needs its code (read), its settings (read) and its data (write).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077
+ReadWritePaths=/var/lib/vpn-db
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target

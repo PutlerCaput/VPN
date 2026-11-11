@@ -8,6 +8,7 @@ methods with ``int``/``str``/``None`` arguments.
 
     POST /v1/call   {"id": "<request id>", "method": "get_user", "args": {...}}
     GET  /v1/info   backend facts for the client and the doctor
+    GET  /v1/backup the whole database as one file (same encryption), for backups
     GET  /healthz   liveness, no authentication, no details
 
 Every other request carries ``Authorization: Bearer <token>``. Traffic is plain
@@ -36,7 +37,9 @@ import re
 import signal
 import sqlite3
 import sys
+import tempfile
 import time
+import uuid
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -52,6 +55,7 @@ from db.endpoint import MIN_TOKEN_LENGTH, PROTOCOL_VERSION, is_private_host
 logger = logging.getLogger("db.gateway")
 
 MAX_BODY_BYTES = 256 * 1024
+BACKUP_CHUNK_BYTES = 256 * 1024
 # Answers kept for replay: enough for every in-flight retry, small enough for 1 GB.
 REPLAY_ENTRIES = 4096
 REPLAY_TTL_SECONDS = 600
@@ -94,6 +98,24 @@ def remote_methods() -> dict[str, inspect.Signature]:
     return methods
 
 
+def api_shapes() -> dict[str, str]:
+    """Each remote method's parameters, in a form both sides can compare.
+
+    ``telegram_id,username,referred_by``; ``?`` marks a parameter with a
+    default, ``*`` a keyword-only one. Annotations are left out: their text
+    differs between Python versions and they do not change what a call needs.
+    """
+    shapes: dict[str, str] = {}
+    for name, signature in remote_methods().items():
+        parts = []
+        for parameter in list(signature.parameters.values())[1:]:
+            mark = "*" if parameter.kind is inspect.Parameter.KEYWORD_ONLY else ""
+            optional = "" if parameter.default is inspect.Parameter.empty else "?"
+            parts.append(f"{mark}{parameter.name}{optional}")
+        shapes[name] = ",".join(parts)
+    return shapes
+
+
 def _secrets_dir() -> str | None:
     value = os.environ.get("SECRETS_DIR", "/run/secrets")
     return value if Path(value).is_dir() else None
@@ -114,6 +136,9 @@ class GatewaySettings(BaseSettings):
     db_gateway_token: SecretStr
     db_gateway_host: str
     db_gateway_port: int = Field(8444, ge=1024, le=65535)
+    # A missing file is a wrong path far more often than a first installation,
+    # and an empty database would look like every user had vanished.
+    db_gateway_create: bool = False
     activity_logging_enabled: bool = False
     log_level: str = "INFO"
 
@@ -209,6 +234,7 @@ def create_gateway_app(database: Database, token: str) -> web.Application:
     if len(token) < MIN_TOKEN_LENGTH:
         raise ValueError(f"token must be at least {MIN_TOKEN_LENGTH} characters")
     methods = remote_methods()
+    shapes = api_shapes()
     replay = _Replay()
     running: set[asyncio.Task[None]] = set()
     expected = f"Bearer {token}".encode()
@@ -243,6 +269,7 @@ def create_gateway_app(database: Database, token: str) -> web.Application:
                     "activity_logging_enabled": database.activity_logging_enabled,
                     "server_time": int(time.time()),
                     "methods": len(methods),
+                    "api": shapes,
                 }
             ),
         )
@@ -337,6 +364,56 @@ def create_gateway_app(database: Database, token: str) -> web.Application:
         status, body = await asyncio.shield(future)
         return _reply(status, body)
 
+    backup_lock = asyncio.Lock()
+
+    async def backup(request: web.Request) -> web.StreamResponse:
+        """The whole database as one file, for the nightly backup on the bot's server.
+
+        The same token already reads every record call by call; this only saves
+        the round trips. The copy is made next to the database and removed after
+        it is sent.
+        """
+        folder = (
+            Path(tempfile.gettempdir())
+            if database.path == ":memory:"
+            else Path(database.path).parent
+        )
+        copy = folder / f".backup-{uuid.uuid4().hex}.db"
+
+        def digest_and_size() -> tuple[str, int]:
+            digest = hashlib.sha256()
+            with copy.open("rb") as source:
+                while chunk := source.read(BACKUP_CHUNK_BYTES):
+                    digest.update(chunk)
+            return digest.hexdigest(), copy.stat().st_size
+
+        async with backup_lock:
+            try:
+                await database._backup_into(str(copy))
+                checksum, size = await asyncio.to_thread(digest_and_size)
+                response = web.StreamResponse(
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "Content-Length": str(size),
+                        "X-Content-SHA256": checksum,
+                    }
+                )
+                await response.prepare(request)
+                with copy.open("rb") as source:
+                    while chunk := await asyncio.to_thread(
+                        source.read, BACKUP_CHUNK_BYTES
+                    ):
+                        await response.write(chunk)
+                await response.write_eof()
+                return response
+            except (OSError, RuntimeError, sqlite3.Error) as exc:
+                logger.exception(
+                    "gateway_backup_failed", extra={"failure": type(exc).__name__}
+                )
+                return _error(500, "backup_failed")
+            finally:
+                copy.unlink(missing_ok=True)
+
     async def finish_running(_app: web.Application) -> None:
         if running:
             await asyncio.gather(*running, return_exceptions=True)
@@ -344,12 +421,27 @@ def create_gateway_app(database: Database, token: str) -> web.Application:
     app = web.Application(middlewares=[authenticate], client_max_size=MAX_BODY_BYTES)
     app.router.add_get("/healthz", healthz)
     app.router.add_get("/v1/info", info)
+    app.router.add_get("/v1/backup", backup)
     app.router.add_post("/v1/call", call)
     app.on_shutdown.append(finish_running)
     return app
 
 
+class DatabaseFileMissingError(RuntimeError):
+    pass
+
+
 async def serve(settings: GatewaySettings) -> None:
+    path = settings.database_path
+    if (
+        path != ":memory:"
+        and not settings.db_gateway_create
+        and not (Path(path).is_file() and Path(path).stat().st_size > 0)
+    ):
+        raise DatabaseFileMissingError(
+            f"{path} does not exist or is empty. Put the database file there, "
+            "or set DB_GATEWAY_CREATE=true to start with a new empty database"
+        )
     database = Database(
         settings.database_path,
         settings.db_key.get_secret_value() if settings.db_key else None,
@@ -389,9 +481,17 @@ def main() -> None:
     setup_logging(settings.log_level, None)
     try:
         asyncio.run(serve(settings))
-    except DatabaseKeyError as exc:
+    except (DatabaseKeyError, DatabaseFileMissingError) as exc:
         sys.stderr.write(f"Database error, refusing to start: {exc}\n")
         raise SystemExit(2) from None
+    except OSError as exc:
+        # Typically the listening address: the tunnel is not up yet, or the
+        # port is taken. One line for the journal; systemd starts us again.
+        sys.stderr.write(
+            f"Gateway cannot start ({type(exc).__name__}): "
+            f"{exc.strerror or 'I/O error'}\n"
+        )
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
