@@ -27,7 +27,18 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       - name: age (the backup tests encrypt and decrypt for real)
-        run: sudo apt-get install -y -q age
+        run: |
+          # The Ubuntu mirror is sometimes unreachable from the runner. The same
+          # version from the project's own release, pinned by checksum, stands in.
+          if ! sudo apt-get install -y -q age; then
+            curl -fsSL --retry 3 -o /tmp/age.tar.gz \
+              https://github.com/FiloSottile/age/releases/download/v1.1.1/age-v1.1.1-linux-amd64.tar.gz
+            echo "cf16cbb108fc56e2064b00ba2b65d9fb1b8d7002ca5e38260ee1cc34f6aaa8f9  /tmp/age.tar.gz" \
+              | sha256sum -c -
+            tar -xzf /tmp/age.tar.gz -C /tmp
+            sudo install -m 0755 /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
+          fi
+          age --version
       - name: Secret scan
         run: ./scripts/secret_scan.sh
       - name: Ruff
