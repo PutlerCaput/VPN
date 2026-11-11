@@ -33,35 +33,35 @@
 1. **Ядро против флуда — `deploy/hardening/sysctl-ru.conf`.** SYN-cookies, увеличенный
    backlog, защита от redirect/source-route/smurf. Не трогает firewall и форвардинг
    (`ip_forward=1` остаётся, `rp_filter=2` «свободный», чтобы не сломать обратный путь
-   DNAT). Применение:
-   ```bash
-   # Termux -> RU по ключу:
-   ssh -o PreferredAuthentications=publickey -o PasswordAuthentication=no root@45.138.157.65 \
-     'cat > /etc/sysctl.d/99-ru-hardening.conf' < /dev/stdin   # вставьте файл, или scp
-   ssh ... root@45.138.157.65 'sysctl --system | tail -3'
-   ```
-   Откат: `rm /etc/sysctl.d/99-ru-hardening.conf && sysctl --system`.
+   DNAT). Файл доставляется вставкой в Termux (`cat > … <<'EOF'`, текст — в
+   `deploy/hardening/sysctl-ru.conf`); после слияния ветки и `git pull` на DE его можно
+   брать так же, как скрипты ниже. Откат: `rm /etc/sysctl.d/99-ru-hardening.conf &&
+   sysctl --system`.
 
 2. **Хостовый firewall — `scripts/ru_firewall.sh`.** Это **главный пробел**: на RU нет
    файрвола (политики ACCEPT). Скрипт ставит INPUT policy DROP и открывает наружу только
    SSH 22 и HTTP 80. **FORWARD и nat не трогает**, поэтому VPN-вход (DNAT 443/2087/8443 →
    DE:2096) работает как прежде. Защита от блокировки такая же, как у `ssh_hardening.sh`:
-   снимок правил до изменения, таймер откатывает через 10 минут, подтверждение только из
-   нового SSH-сеанса.
+   снимок правил до изменения, таймер откатывает через 10 минут, а `--confirm` принимает
+   только вход по SSH, сделанный **после** `--apply` (из того же окна он отказывает;
+   проверено на заглушках iptables). `--revert` после подтверждения открывает INPUT и
+   сохраняет это в `rules.v4`, чтобы перезагрузка не вернула файрвол.
    ```bash
-   # копируем скрипт на RU через DE (телефон-реле):
    R="ssh -o PreferredAuthentications=publickey -o PasswordAuthentication=no root@45.138.157.65"
+   # Доставка: пока ветка не слита, на DE нет файла. Тогда текст `scripts/ru_firewall.sh`
+   # вставляют в Termux: $R 'cat > /root/ru_firewall.sh && chmod 700 /root/ru_firewall.sh' <<'EOF' ... EOF
+   # После слияния и `git pull` на DE: через телефон-реле
    ssh de 'cat /root/vpn-src/scripts/ru_firewall.sh' | $R 'cat > /root/ru_firewall.sh && chmod 700 /root/ru_firewall.sh'
    $R 'bash /root/ru_firewall.sh'            # отчёт, ничего не меняет
-   $R 'bash /root/ru_firewall.sh --apply'    # INPUT DROP; само откатится через 10 мин
-   # из НОВОГО окна Termux, проверив, что VPN-вход жив и SSH пускает:
-   $R 'bash /root/ru_firewall.sh --confirm'
+   $R 'bash /root/ru_firewall.sh --apply' && $R 'bash /root/ru_firewall.sh --confirm'
+   # Проверка, телефон, VPN выключен: 443, 2087 и 8443 должны отвечать rc=0.
    ```
    Порог: сперва выключите пароли SSH (`ssh_hardening.sh`), иначе firewall оставит 22
    открытым для того же перебора. Если добавите сервис — впишите порт в `ALLOW_TCP`.
 
-3. **Автообновления безопасности** уже включены (`unattended-upgrades active`), ядро
-   обновляется перезагрузкой 11 ноября.
+3. **Автообновления безопасности** уже включены (`unattended-upgrades active`). RU
+   перезагружен 11 ноября в 00:14 UTC: работает ядро 7.0.0-1017-azure, DNAT (3 правила) и
+   forwarding на месте, порты 443, 2087 и 8443 отвечают.
 
 ## Что входит в «прочий хакинг» и чем закрыто
 
