@@ -199,6 +199,25 @@ def test_each_kind_of_change_is_named(box: Box) -> None:
     assert ".java" not in (box.logs / "rkhunter.txt").read_text()
 
 
+def test_files_the_image_leaves_out_are_not_counted_as_changes(box: Box) -> None:
+    box.run("--apply")
+    # Ubuntu's image leaves man pages, docs and translations out on purpose:
+    # dpkg -V calls each of them "missing". Thousands of those are normal.
+    box.dpkg.write_text(
+        "".join(f"missing   /usr/share/man/man1/tool{n}.1.gz\n" for n in range(500))
+    )
+    assert box.run("--check").stdout.startswith("OK integrity")
+    summary = (box.logs / "last-check.txt").read_text()
+    assert "dpkg_missing=500" in summary
+    assert "dpkg_modified=0" in summary
+    # One real change among them is still a warning, and the only one named.
+    box.dpkg.write_text("missing   /usr/share/man/x.1.gz\n??5??????   /usr/bin/ssh\n")
+    changed = box.run("--check").stdout
+    assert "1 system files differ from their packages" in changed
+    assert "/usr/bin/ssh" in (box.logs / "dpkg.txt").read_text()
+    assert "missing" not in (box.logs / "dpkg.txt").read_text()
+
+
 def test_an_update_is_recognised_and_accept_makes_it_the_baseline(box: Box) -> None:
     box.run("--apply")
     (box.watched / "bin" / "sshd").write_text("new binary from an update\n")
