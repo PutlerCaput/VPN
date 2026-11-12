@@ -15,6 +15,7 @@ import contextlib
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -152,7 +153,7 @@ case "$*" in
     elif [[ -z "$(setting DATABASE_URL)" ]]; then
       echo healthy
     elif [[ "$FAKE_BOT_CANNOT_REACH" != 1 ]] && (cd "$T/de/src" && "{sys.executable}" \\
-        -c "$PROBE" "$(setting DATABASE_URL)" "$(setting DB_GATEWAY_TOKEN)") 2>>"$T/probe.log"; then
+        -c "$PROBE" "$(setting DATABASE_URL)" "$(cat "$W/secrets/db_gateway_token.txt" 2>/dev/null)") 2>>"$T/probe.log"; then
       echo healthy
     else
       echo starting
@@ -248,6 +249,10 @@ class Rehearsal:
                 ignore=shutil.ignore_patterns("__pycache__"),
             )
         shutil.copy(ROOT / "logging_setup.py", self.de_src)
+        # The bot's folder as the compose change leaves it: the secret is declared and its
+        # file exists (empty means the local file, as init_secrets.sh makes it).
+        shutil.copy(ROOT / "docker-compose.yml", self.work / "docker-compose.yml")
+        (self.work / "secrets" / "db_gateway_token.txt").write_text("")
         (self.work / ".env").write_text("BOT_USERNAME=test_bot\n")
         (self.work / "secrets" / "db_key.txt").write_text(KEY + "\n")
         (tmp / "de" / "bot-state").write_text("running\n")
@@ -302,6 +307,15 @@ class Rehearsal:
     def settings(self) -> dict[str, str]:
         lines = (self.work / ".env").read_text().splitlines()
         return dict(line.split("=", 1) for line in lines)
+
+    def files_holding(self, text: str) -> list[str]:
+        """The files of the bot's folder that contain text, by relative name."""
+        needle = text.encode()
+        return sorted(
+            str(path.relative_to(self.work))
+            for path in self.work.rglob("*")
+            if path.is_file() and needle in path.read_bytes()
+        )
 
     def bot(self) -> str:
         return (self.tmp / "de" / "bot-state").read_text().strip()
@@ -376,11 +390,15 @@ def test_the_whole_move_and_the_way_back(lab: Rehearsal) -> None:
     assert "database: arrived intact" in switched.stdout
     assert "CUTOVER_DONE" in switched.stdout
     token = (lab.ru_secrets / "db_gateway_token").read_text()
+    # The token is a Docker secret: its own owner-only file, and no other copy.
     assert lab.settings() == {
         "BOT_USERNAME": "test_bot",
         "DATABASE_URL": f"http://127.0.0.1:{lab.port}",
-        "DB_GATEWAY_TOKEN": token,
     }
+    secret = lab.work / "secrets" / "db_gateway_token.txt"
+    assert secret.read_text() == token
+    assert stat.S_IMODE(secret.stat().st_mode) == 0o600
+    assert lab.files_holding(token) == ["secrets/db_gateway_token.txt"]
     # Nothing secret reached the phone's screen or the ssh command lines.
     shown = switched.stdout + switched.stderr + (lab.tmp / "ssh.log").read_text()
     assert token not in shown
@@ -426,6 +444,8 @@ def test_the_whole_move_and_the_way_back(lab: Rehearsal) -> None:
     assert "CUTOVER_ROLLED_BACK" in back.stdout
     assert "NOT in the file on DE" in back.stdout
     assert lab.settings() == {"BOT_USERNAME": "test_bot"}
+    assert secret.read_text() == ""
+    assert lab.files_holding(token) == []
     assert not lab.gateway_running()
     assert lab.bot() == "running"
 
@@ -487,6 +507,9 @@ def test_a_bot_that_cannot_reach_the_gateway_goes_back_by_itself(
     assert result.returncode == 1
     assert "back on the file on DE" in result.stderr
     assert lab.settings() == {"BOT_USERNAME": "test_bot"}
+    # Nothing of the token was left behind in the bot's folder.
+    token = (lab.ru_secrets / "db_gateway_token").read_text()
+    assert lab.files_holding(token) == []
     assert lab.bot() == "running"
     assert not lab.gateway_running()
     # The same command works once the cause is gone.

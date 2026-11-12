@@ -120,3 +120,71 @@ bash ~/db_cutover.sh rollback
 | `pip could not install the packages` | С RU недоступен pypi.org: прислать вывод |
 | `the file changed on the way` | Повторить `switch` |
 | `the bot did not come up on the gateway` | Бот уже работает на файле DE. Прислать вывод |
+
+## Перенос токена в файл секрета (для уже работающего переноса)
+
+Раньше токен шлюза лежал в `.env` на DE открытым текстом. Теперь он лежит в файле
+`secrets/db_gateway_token.txt`, который Docker передаёт боту как секрет, а в `.env` его нет.
+
+Порядок важен. Сначала токен попадает в файл, потом копируется compose, который его
+объявляет, и только потом бот перезапускается с новыми настройками. Если поменять порядок,
+бот при перезапуске получит пустой секрет при заданном адресе шлюза и не поднимется.
+Бот перезапускается дважды, каждый раз на несколько секунд. Токен и ключи на экран не
+выводятся: команды печатают только размер и количество строк.
+
+**Termux.** Обновить код и бота на DE. Пока бот старый, токен он берёт из `.env`:
+
+```
+ssh de 'git -C /root/vpn-src pull --ff-only && git -C /root/vpn-src log -1 --format=%h'
+ssh de 'bash /root/vpn-src/scripts/update_bot.sh /root/vpn-src --apply'
+```
+
+Должно закончиться строкой `UPDATE_OK`.
+
+**Termux.** Положить токен в файл секрета на DE. Бот не перезапускается:
+
+```
+ssh root@45.138.157.65 'cat /etc/vpn-db/secrets/db_gateway_token' | ssh de 'D=/root/secure-node-bot/node-rental/node-rental; (umask 077 && cat > "$D/secrets/db_gateway_token.txt.new") && chown 1000:1000 "$D/secrets/db_gateway_token.txt.new" && mv "$D/secrets/db_gateway_token.txt.new" "$D/secrets/db_gateway_token.txt" && wc -c < "$D/secrets/db_gateway_token.txt"'
+```
+
+Должно вывести `64`.
+
+**Termux.** Сверить compose на DE. Копировать только если различия — две вставки про
+`db_gateway_token`. Иначе прислать вывод и ничего не копировать:
+
+```
+ssh de 'diff /root/secure-node-bot/node-rental/node-rental/docker-compose.yml /root/vpn-src/docker-compose.yml'
+```
+
+Если различия в порядке, на DE:
+
+```
+ssh de 'cd /root/secure-node-bot/node-rental/node-rental && cp docker-compose.yml /root/docker-compose.before-secret.yml && cp /root/vpn-src/docker-compose.yml docker-compose.yml && docker compose -p node-rental config --quiet && echo COMPOSE_OK'
+```
+
+Должно закончиться строкой `COMPOSE_OK`. Откат файла: скопировать `/root/docker-compose.before-secret.yml`
+обратно в `/root/secure-node-bot/node-rental/node-rental/docker-compose.yml`.
+
+**Termux.** Переключить бота на секрет. Токен убирается из `.env`, бот перезапускается:
+
+```
+ssh root@45.138.157.65 'cat /etc/vpn-db/secrets/db_gateway_token' | ssh de 'bash /root/vpn-src/scripts/update_bot.sh --database-gateway http://10.204.0.1:8444'
+```
+
+Должно закончиться строкой `DATABASE_GATEWAY_OK`. Если бот не поднялся, скрипт сам вернёт
+прежние `.env` и файл секрета; тогда прислать вывод.
+
+**Termux.** Проверить на DE. Ожидается: в файле секрета `64`, в `.env` строк с токеном `0`,
+в контейнере переменной `DB_GATEWAY_TOKEN` нет (`0`), а `/run/secrets` содержит `db_gateway_token`:
+
+```
+ssh de 'cd /root/secure-node-bot/node-rental/node-rental && wc -c < secrets/db_gateway_token.txt && grep -c "^DB_GATEWAY_TOKEN=" .env; cid=$(docker compose -p node-rental ps -q bot) && docker exec "$cid" sh -c "env | grep -c DB_GATEWAY_TOKEN; ls /run/secrets"'
+```
+
+**Termux.** Диагностика бота:
+
+```
+ssh de 'bash /root/vpn-src/scripts/update_bot.sh --doctor'
+```
+
+Итог без проблем, как было до переноса.

@@ -12,8 +12,9 @@
 #   bash update_bot.sh --disable-usdt                         # turn the /usdt payments off
 #   bash update_bot.sh --set-public-url https://app.example.com  # site address for links
 #   ... | bash update_bot.sh --database-gateway http://10.204.0.1:8444
-#                                   # the database on the other server; the access
-#                                   # token arrives on standard input, never typed
+#                                   # the database on the other server; the token
+#                                   # arrives on standard input and goes to
+#                                   # secrets/db_gateway_token.txt, never to .env
 #   bash update_bot.sh --database-local                       # back to the local file
 #
 # Optional with --apply: --env-add appends the new settings that are missing
@@ -265,12 +266,23 @@ if [[ "${1:-}" == "--set-secret" ]]; then
   unset secret_value
 fi
 
-# Settings only the two modes below may write.
-EXTRA_SETTABLE=""
+# Writes the token file: the value whole, without a trailing newline, owner-only and
+# owned by the bot's user (the container runs as uid 1000). An empty value is the
+# local file, as init_secrets.sh leaves it. Expects SECRET_FILE to be set.
+write_secret_file() {
+  (umask 077 && printf '%s' "$1" >"$SECRET_FILE.new")
+  chown 1000:1000 "$SECRET_FILE.new" 2>/dev/null || true
+  chmod 600 "$SECRET_FILE.new"
+  mv "$SECRET_FILE.new" "$SECRET_FILE"
+}
+
+# The gateway's token is a Docker secret, like the other keys: it lives in
+# secrets/db_gateway_token.txt and never in .env. The live compose file must
+# declare that secret; the check below says how to add it if it does not.
 if [[ "${1:-}" == "--database-gateway" ]]; then
   # The bot's database moves behind db.gateway on the other server
-  # (docs/RU_DATABASE_PLAN.md, section 11). If the bot does not become healthy
-  # on it, the previous .env comes back by itself: the bot is on the local file again.
+  # (docs/RU_DATABASE_PLAN.md, section 11). If the bot does not become healthy on
+  # it, the previous .env and secret come back: the bot is on the local file again.
   url="${2:-}"
   # The same rule as the bot's settings: plain http only to a private or loopback address.
   [[ "$url" =~ ^http://(127|10|192\.168|172\.(1[6-9]|2[0-9]|3[01]))(\.[0-9]{1,3}){2,3}:[0-9]{4,5}$ ]] \
@@ -280,31 +292,67 @@ if [[ "${1:-}" == "--database-gateway" ]]; then
   secret_value="${secret_value%$'\r'}"
   [[ "$secret_value" =~ ^[A-Za-z0-9_-]{32,128}$ ]] \
     || fail "no token on standard input (expected 32+ letters and digits)"
-  chmod 600 "$WORKDIR/.env" 2>/dev/null || true
-  EXTRA_SETTABLE="DATABASE_URL DB_GATEWAY_TOKEN"
-  set -- --set "DATABASE_URL=$url" "DB_GATEWAY_TOKEN=$secret_value"
-  unset secret_value
-fi
-
-if [[ "${1:-}" == "--database-local" ]]; then
   ENV_FILE="$WORKDIR/.env"
+  SECRET_FILE="$WORKDIR/secrets/db_gateway_token.txt"
   [[ -f "$ENV_FILE" ]] || fail "$ENV_FILE not found"
-  grep -q '^DATABASE_URL=.' "$ENV_FILE" \
-    || fail "DATABASE_URL is not set: the bot already uses the local file"
-  [[ -s "$WORKDIR/data/bot.db" ]] || fail "$WORKDIR/data/bot.db is missing: there is no local file to go back to"
+  [[ -d "$WORKDIR/secrets" ]] || fail "$WORKDIR/secrets not found"
+  grep -q 'db_gateway_token' "$WORKDIR/docker-compose.yml" 2>/dev/null \
+    || fail "the bot's docker-compose.yml does not declare the db_gateway_token secret yet: compare it with $(dirname "$SELF")/../docker-compose.yml, copy the new file in, then run this again (docs/RU_DATABASE_CUTOVER.md)"
+  chmod 600 "$ENV_FILE" 2>/dev/null || true
   ENV_BACKUP="$ENV_FILE.before-set-$STAMP"
+  SECRET_BACKUP="$SECRET_FILE.before-set-$STAMP"
   cp -p "$ENV_FILE" "$ENV_BACKUP"
+  if [[ -f "$SECRET_FILE" ]]; then cp -p "$SECRET_FILE" "$SECRET_BACKUP"; fi
+  # Written before the bot is recreated; the copies of the old settings go below.
+  write_secret_file "$secret_value"
+  unset secret_value
   grep -vE '^(DATABASE_URL|DB_GATEWAY_TOKEN)=' "$ENV_FILE" >"$ENV_FILE.tmp-$STAMP" || true
+  printf 'DATABASE_URL=%s\n' "$url" >>"$ENV_FILE.tmp-$STAMP"
   cat "$ENV_FILE.tmp-$STAMP" >"$ENV_FILE"  # keeps owner and permissions
   rm -f "$ENV_FILE.tmp-$STAMP"
   say "ENV_BACKUP $ENV_BACKUP"
   recreate
   if wait_healthy; then
+    # The copies still hold the old .env, and with it the old token: they go.
+    rm -f "$ENV_BACKUP" "$SECRET_BACKUP"
+    say "DATABASE_GATEWAY_OK: the bot reads its database through the gateway; the token is in secrets/db_gateway_token.txt."
+    exit 0
+  fi
+  cp -p "$ENV_BACKUP" "$ENV_FILE"
+  if [[ -f "$SECRET_BACKUP" ]]; then mv "$SECRET_BACKUP" "$SECRET_FILE"; else write_secret_file ""; fi
+  rm -f "$ENV_BACKUP"
+  recreate
+  wait_healthy && fail "the bot is not healthy on the gateway; previous settings are back (healthy)" \
+    || fail "previous settings are back, but the bot is not healthy"
+fi
+
+if [[ "${1:-}" == "--database-local" ]]; then
+  ENV_FILE="$WORKDIR/.env"
+  SECRET_FILE="$WORKDIR/secrets/db_gateway_token.txt"
+  [[ -f "$ENV_FILE" ]] || fail "$ENV_FILE not found"
+  grep -q '^DATABASE_URL=.' "$ENV_FILE" \
+    || fail "DATABASE_URL is not set: the bot already uses the local file"
+  [[ -s "$WORKDIR/data/bot.db" ]] || fail "$WORKDIR/data/bot.db is missing: there is no local file to go back to"
+  ENV_BACKUP="$ENV_FILE.before-set-$STAMP"
+  SECRET_BACKUP="$SECRET_FILE.before-set-$STAMP"
+  cp -p "$ENV_FILE" "$ENV_BACKUP"
+  if [[ -f "$SECRET_FILE" ]]; then cp -p "$SECRET_FILE" "$SECRET_BACKUP"; fi
+  grep -vE '^(DATABASE_URL|DB_GATEWAY_TOKEN)=' "$ENV_FILE" >"$ENV_FILE.tmp-$STAMP" || true
+  cat "$ENV_FILE.tmp-$STAMP" >"$ENV_FILE"  # keeps owner and permissions
+  rm -f "$ENV_FILE.tmp-$STAMP"
+  # The token leaves the disk with the gateway: an empty secret means the local file.
+  write_secret_file ""
+  say "ENV_BACKUP $ENV_BACKUP"
+  recreate
+  if wait_healthy; then
+    rm -f "$ENV_BACKUP" "$SECRET_BACKUP"
     say "DATABASE_LOCAL_OK: the bot uses the local file again."
     say "Records made while it used the gateway are NOT in this file: they stay on the other server."
     exit 0
   fi
   cp -p "$ENV_BACKUP" "$ENV_FILE"
+  if [[ -f "$SECRET_BACKUP" ]]; then mv "$SECRET_BACKUP" "$SECRET_FILE"; else write_secret_file ""; fi
+  rm -f "$ENV_BACKUP"
   recreate
   wait_healthy && fail "the bot is not healthy on the local file; the gateway settings are back (healthy)" \
     || fail "the gateway settings are back, but the bot is not healthy"
@@ -319,7 +367,7 @@ if [[ "${1:-}" == "--set" ]]; then
   for pair in "$@"; do
     key="${pair%%=*}"
     value="${pair#*=}"
-    [[ "$pair" == *=* && ( " $SETTABLE_KEYS $EXTRA_SETTABLE " == *" $key "* \
+    [[ "$pair" == *=* && ( " $SETTABLE_KEYS " == *" $key "* \
       || ( "$key" == PUBLIC_BASE_URL && "${ALLOW_PUBLIC_URL:-0}" == 1 ) ) ]] \
       || fail "not allowed: $key (allowed: $SETTABLE_KEYS)"
     [[ -n "$value" && "$value" != *$'\n'* && "$value" != *[\"\'\\\$\`]* ]] \

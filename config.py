@@ -232,6 +232,7 @@ class Settings(BaseSettings):
     # http://10.204.0.1:8444 inside the tunnel between the servers. Unset = the
     # local file above. database_path and db_key then belong to the gateway.
     database_url: str | None = None
+    # Docker secret: secrets/db_gateway_token.txt (update_bot.sh --database-gateway).
     db_gateway_token: SecretStr | None = None
     log_level: str = "INFO"
     log_dir: str = "logs"

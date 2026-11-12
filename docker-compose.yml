@@ -39,6 +39,7 @@ services:
       - yookassa_secret_key
       - db_key
       - abuse_report_token
+      - db_gateway_token
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -100,6 +101,9 @@ secrets:
     file: ./secrets/db_key.txt
   abuse_report_token:
     file: ./secrets/abuse_report_token.txt
+  # The database gateway's token; empty means the local database (docs/RU_DATABASE_CUTOVER.md).
+  db_gateway_token:
+    file: ./secrets/db_gateway_token.txt
 
 volumes:
   caddy_data:
