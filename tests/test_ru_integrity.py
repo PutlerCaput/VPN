@@ -36,7 +36,7 @@ listing() {
 }
 case "$2" in
   --config-check) [[ "$FAKE_AIDE_REJECTS" != 1 ]] ;;
-  --init) listing > "$out" ;;
+  --init) echo "aide --init" >> "$CALLS"; listing > "$out" ;;
   --check)
     [[ "$FAKE_AIDE_BROKEN" == 1 ]] && exit 17
     now="$(listing)"
@@ -165,12 +165,31 @@ def test_apply_takes_a_baseline_and_schedules_the_weekly_check(box: Box) -> None
     assert f"ExecStart=/bin/bash {installed} --check" in service
     assert installed.read_text() == SCRIPT.read_text()
     log = box.log()
-    assert "systemctl enable --now vpn-integrity-check.timer" in log
+    assert "systemctl enable vpn-integrity-check.timer" in log
+    assert "systemctl start vpn-integrity-check.timer" in log
     # One check with one list: the distribution's own daily run is switched off.
     assert "systemctl disable --now dailyaidecheck.timer" in log
     # Nothing was missing, so nothing was installed; and never a mail server.
     assert not any(line.startswith("apt-get") for line in log)
     assert "--no-install-recommends" in SCRIPT.read_text()
+
+
+def test_a_fresh_install_is_quiet_and_the_timer_starts_after_the_baseline(
+    box: Box,
+) -> None:
+    # The check's own units are among the watched files, as /etc/systemd/system is
+    # on the server: they must be in the baseline, not the first thing it reports.
+    units = box.prefix / "etc" / "systemd" / "system"
+    result = box.run("--apply", WATCH=f"{box.watched / 'etc'} {units}")
+    assert result.returncode == 0, result.stderr
+    assert box.run("--check").stdout.startswith("OK integrity")
+    log = box.log()
+    order = [
+        log.index("systemctl enable vpn-integrity-check.timer"),
+        log.index("aide --init"),
+        log.index("systemctl start vpn-integrity-check.timer"),
+    ]
+    assert order == sorted(order)
 
 
 def test_each_kind_of_change_is_named(box: Box) -> None:
