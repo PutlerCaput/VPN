@@ -16,7 +16,7 @@
 | 4 | Перенести базу (тихий час) | `bash ~/db_cutover.sh switch` | `CUTOVER_DONE` |
 | 5 | Включить запись сведений о подключениях | `bash ~/db_cutover.sh connection-log on` | `CUTOVER_CONNECTION_LOG on` |
 | 6 | Контроль целостности RU | `RU_HARDENING.md`, раздел про антивирус | `RU_INTEGRITY_ON` |
-| 7 | Этап 2 вывода платёжной цепочки (не раньше 12 ноября) | `ssh de 'bash /root/vpn-src/scripts/retire_payment_edge.sh --apply'`, затем `ssh root@45.138.157.65 'bash /root/vpn-db-src/scripts/retire_payment_edge.sh --apply'` (файл попадает на RU шагом 3) | `RETIRE_DONE (de)`, `RETIRE_DONE (ru)` |
+| 7 | Этап 2 вывода платёжной цепочки (не раньше 12 ноября, только когда `ssh de true` отвечает) | `ssh de 'bash /root/vpn-src/scripts/retire_payment_edge.sh --apply'`, затем `ssh root@45.138.157.65 'bash /root/retire_payment_edge.sh --apply'`. Файл на RU кладётся отчётным блоком из чата и не зависит от шага 3 | `RETIRE_DONE (de)`, `RETIRE_DONE (ru)` |
 | 8 | Проверка | `ssh de 'bash /root/vpn-src/scripts/update_bot.sh --doctor'`, `bash ~/db_cutover.sh status` | `DOCTOR: … 0 problems` |
 
 Порядок важен для шагов 1–5: запись сведений о подключениях (шаг 5) включается только
