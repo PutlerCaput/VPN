@@ -130,6 +130,24 @@ ssh root@45.138.157.65 'bash /usr/local/sbin/ru_integrity.sh --status'          
 packages` без недавнего обновления означает, что системный файл изменён в обход пакетов:
 смотреть сразу. Та же строка видна в `bash ~/db_cutover.sh status`.
 
+Свежая установка тихая: `--apply` записывает и включает юниты проверки до снимка, а таймер
+запускает после него. Первая проверка ничего не находит, `--accept` не нужен.
+
+Обновление самого скрипта на RU. `/usr/local` под наблюдением, поэтому замена файла
+показывается как изменение двух записей: `/usr/local/sbin/ru_integrity.sh` и каталога
+`/usr/local/sbin`. Порядок: скопировать, сверить хеши, проверить, принять.
+
+Termux → DE → RU:
+
+```bash
+ssh de 'git -C /root/vpn-src pull --ff-only >/dev/null && cat /root/vpn-src/scripts/ru_integrity.sh' | ssh root@45.138.157.65 'cat > /usr/local/sbin/ru_integrity.sh.new && grep -q RU_INTEGRITY_ON /usr/local/sbin/ru_integrity.sh.new && chmod 700 /usr/local/sbin/ru_integrity.sh.new && mv /usr/local/sbin/ru_integrity.sh.new /usr/local/sbin/ru_integrity.sh'
+ssh de 'sha256sum /root/vpn-src/scripts/ru_integrity.sh'
+ssh root@45.138.157.65 'sha256sum /usr/local/sbin/ru_integrity.sh'
+```
+
+Хеши должны совпасть. Затем `bash /usr/local/sbin/ru_integrity.sh --check` должен показать
+ровно эти две записи, и только после этого `--accept`.
+
 Ограничение: уведомлений нет. С RU не доступен Telegram, результат нужно смотреть
 командой выше.
 

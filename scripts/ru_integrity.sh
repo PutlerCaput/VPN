@@ -133,8 +133,9 @@ apply() {
     augenrules --load >/dev/null 2>&1 || say "WARN: the audit rules were written but not loaded (they load at the next boot)"
   fi
 
-  say "taking the baseline (a minute or two)..."
-  take_baseline
+  # The check's own units are written and enabled before the baseline, so they are
+  # part of it and the first check has nothing to report. The timer is started only
+  # after the baseline exists: no check can run without one.
   cat >"$UNIT_DIR/$UNIT.service" <<EOF
 [Unit]
 Description=Weekly integrity check of this server (scripts/ru_integrity.sh)
@@ -159,7 +160,10 @@ Persistent=true
 WantedBy=timers.target
 EOF
   systemctl daemon-reload || stop "systemctl daemon-reload failed"
-  systemctl enable --now "$UNIT.timer" >/dev/null 2>&1 || stop "could not switch the weekly check on"
+  systemctl enable "$UNIT.timer" >/dev/null 2>&1 || stop "could not enable the weekly check"
+  say "taking the baseline (a minute or two)..."
+  take_baseline
+  systemctl start "$UNIT.timer" >/dev/null 2>&1 || stop "could not start the weekly check"
   check quiet
   if [[ -s "$STATE/rkhunter-known.txt" ]]; then
     say "rkhunter's $(grep -c . "$STATE/rkhunter-known.txt") warnings about the server as it is today are taken as known."
