@@ -174,10 +174,15 @@ check() {
   as_root
   [[ -s "$STATE/aide.db" ]] || stop "there is no baseline yet: run --apply first"
   install -d -m 0700 "$LOGS"
-  local dpkg_modified=0 added=0 removed=0 changed=0 warnings=0 updated=no rc=0
+  local dpkg_modified=0 dpkg_missing=0 added=0 removed=0 changed=0 warnings=0 updated=no rc=0
   # c = a configuration file: changing those is normal, AIDE watches them instead.
   if have dpkg; then
-    dpkg -V 2>/dev/null | awk '$2 != "c"' >"$LOGS/dpkg.txt" || true
+    # dpkg -V lists every file the image leaves out on purpose (man pages, docs,
+    # translations: path-exclude) as "missing". That is normal and only counted.
+    # A changed file is a line with flags, e.g. "??5??????" (checksum changed).
+    dpkg -V 2>/dev/null | awk '$2 != "c"' >"$LOGS/dpkg-all.txt" || true
+    dpkg_missing="$(grep -c '^missing' "$LOGS/dpkg-all.txt" || true)"
+    grep -v '^missing' "$LOGS/dpkg-all.txt" >"$LOGS/dpkg.txt" || true
     dpkg_modified="$(grep -c . "$LOGS/dpkg.txt" || true)"
   fi
   aide --config="$AIDE_CONF" --check >"$LOGS/aide.txt" 2>&1 || rc=$?
@@ -198,7 +203,7 @@ check() {
   fi
   {
     printf 'checked_at=%s\n' "$(date +%s)"
-    printf 'dpkg_modified=%s\n' "${dpkg_modified:-0}"
+    printf 'dpkg_modified=%s\ndpkg_missing=%s\n' "${dpkg_modified:-0}" "${dpkg_missing:-0}"
     printf 'aide_added=%s\naide_removed=%s\naide_changed=%s\n' "${added:-0}" "${removed:-0}" "${changed:-0}"
     printf 'rkhunter_new_warnings=%s\n' "${warnings:-0}"
     printf 'packages_updated_since_baseline=%s\n' "$updated"
