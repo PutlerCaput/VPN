@@ -41,6 +41,9 @@ fi
 [[ -s secrets/yookassa_secret_key.txt ]] || write_secret yookassa_secret_key "$(ask 'YooKassa secret key (empty if not using YooKassa)')"
 [[ -s secrets/abuse_report_token.txt ]] || write_secret abuse_report_token "$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 
+# Empty = the local database. The file must exist: compose declares it.
+[[ -e secrets/db_gateway_token.txt ]] || : > secrets/db_gateway_token.txt
+
 chmod 600 secrets/*.txt
 # The bot runs as uid 1000 and compose mounts secret files with host ownership.
 if [[ "$(id -u)" -eq 0 ]]; then
