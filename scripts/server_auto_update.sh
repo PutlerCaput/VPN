@@ -182,7 +182,10 @@ fi
 if pgrep -f "$BUSY_PATTERN" >/dev/null 2>&1; then
   block "an update, a backup, a cleanup or another maintenance script is running"
 fi
-if pgrep -x 'apt|apt-get|dpkg|unattended-upgr' >/dev/null 2>&1; then
+# Only real package operations count (see server_cleanup.sh): the resident
+# unattended-upgrade-shutdown shares its process name with an upgrade in progress.
+if pgrep -x 'apt|apt-get|dpkg' >/dev/null 2>&1 \
+  || pgrep -f '(^|/)unattended-upgrade( |$)' >/dev/null 2>&1; then
   block "the package manager is running"
 fi
 

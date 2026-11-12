@@ -193,7 +193,12 @@ if ((AUTO)); then
   if pgrep -f "$BUSY_PATTERN" >/dev/null 2>&1; then
     auto_skip "an update, a backup or another maintenance script is running"
   fi
-  if pgrep -x 'apt|apt-get|dpkg|unattended-upgr' >/dev/null 2>&1; then
+  # Only real package operations count. unattended-upgrade-shutdown runs all the
+  # time on Ubuntu and shares the process name "unattended-upgr" with an upgrade
+  # in progress (that one is bin/unattended-upgrade): matching the name made every
+  # weekly run skip.
+  if pgrep -x 'apt|apt-get|dpkg' >/dev/null 2>&1 \
+    || pgrep -f '(^|/)unattended-upgrade( |$)' >/dev/null 2>&1; then
     auto_skip "the package manager is running"
   fi
   troubled="$(unhealthy_containers)"

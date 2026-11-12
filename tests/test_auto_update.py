@@ -692,6 +692,51 @@ def test_it_waits_while_a_real_cleanup_script_is_running(
     assert changes(env) == []
 
 
+def named_process(tmp_path: Path, name: str, *args: str) -> subprocess.Popen[bytes]:
+    """A real process with the name and command line of a system tool."""
+    folder = tmp_path / "named"
+    folder.mkdir(exist_ok=True)
+    script = folder / name
+    script.write_text("#!/bin/bash\nsleep 30\n", encoding="utf-8")
+    script.chmod(0o755)
+    return subprocess.Popen([str(script), *args])  # noqa: S603
+
+
+def test_the_resident_upgrade_helper_is_not_a_running_upgrade(
+    env: dict[str, str], tmp_path: Path
+) -> None:
+    # Ubuntu keeps unattended-upgrade-shutdown running all the time, and the kernel
+    # cuts its process name to "unattended-upgr", the same as a real upgrade's.
+    (tmp_path / "bin" / "pgrep").unlink()  # the real pgrep, a real process
+    helper = named_process(tmp_path, "unattended-upgrade-shutdown", "--wait-for-signal")
+    try:
+        time.sleep(0.5)
+        command = ["pgrep", "-x", "unattended-upgr"]
+        by_name = subprocess.run(command, capture_output=True, check=False)  # noqa: S603
+        assert by_name.returncode == 0  # a check by that name would have matched it
+        result = update(env)
+    finally:
+        helper.kill()
+        helper.wait()
+    assert "AUTO_UPDATE_SKIPPED" not in result.stdout, result.stdout
+    assert "AUTO_UPDATE_OK" in result.stdout
+
+
+def test_a_running_upgrade_still_makes_it_wait(
+    env: dict[str, str], tmp_path: Path
+) -> None:
+    (tmp_path / "bin" / "pgrep").unlink()  # the real pgrep, a real process
+    upgrade = named_process(tmp_path, "unattended-upgrade", "-d")
+    try:
+        time.sleep(0.5)
+        result = update(env)
+    finally:
+        upgrade.kill()
+        upgrade.wait()
+    assert_skipped(env, result, "the package manager is running")
+    assert changes(env) == []
+
+
 # --------------------------------------------------- what stops it, and says so
 @pytest.mark.parametrize(
     ("extra", "reason", "text"),
