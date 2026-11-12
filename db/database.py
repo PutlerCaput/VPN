@@ -312,6 +312,8 @@ MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("payments", "channel", "TEXT"),
 )
 HEX_KEY_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+# The term in legal/privacy.md, section 7 (a test keeps the two in step).
+RETENTION_YEARS = 5
 
 
 def now() -> int:
@@ -1772,21 +1774,25 @@ class Database:
         )
 
     async def purge_retained_records(self, now_ts: int) -> int:
-        """Retention from the privacy policy (legal/privacy.md, section 7)."""
-        year = 365 * 86400
+        """Retention from the privacy policy (legal/privacy.md, section 7).
+
+        A backstop: scripts/retention_archiver.py moves closed months into
+        sealed archives long before this, and deletes the archives when their
+        term is over. Nothing is removed here before the term either way.
+        """
+        limit = now_ts - RETENTION_YEARS * 365 * 86400
         removed = await self._execute(
-            "DELETE FROM support_messages WHERE created_at < ?", (now_ts - year,)
+            "DELETE FROM support_messages WHERE created_at < ?", (limit,)
         )
-        # Incidents and the admin audit trail: the 3-year limitation period.
         # AUTOBAN evidence stays: scripts/compliance_archiver.py archives it and
         # only then removes the row.
         removed += await self._execute(
             "DELETE FROM anomalies WHERE created_at < ? AND kind != 'AUTOBAN'",
-            (now_ts - 3 * year,),
+            (limit,),
         )
         removed += await self._execute(
             "DELETE FROM audit_log WHERE created_at < ? AND action != 'autoban'",
-            (now_ts - 3 * year,),
+            (limit,),
         )
         return removed
 

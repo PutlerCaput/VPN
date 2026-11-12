@@ -61,7 +61,13 @@ async def test_retention_purges_old_support_links_incidents_and_audit(
 ) -> None:
     db = services.db
     now = int(time.time())
-    old, fresh = now - 4 * 365 * 86400, now - 86400
+    # Five years is the term; four-year-old records must survive.
+    old, kept, fresh = now - 6 * 365 * 86400, now - 4 * 365 * 86400, now - 86400
+    await db._execute(
+        "INSERT INTO support_messages (admin_message_id, telegram_id, created_at) "
+        "VALUES (9, 5, ?)",
+        (kept,),
+    )
     for ts, msg_id in ((old, 1), (fresh, 2)):
         await db._execute(
             "INSERT INTO support_messages (admin_message_id, telegram_id, created_at) "
@@ -77,6 +83,10 @@ async def test_retention_purges_old_support_links_incidents_and_audit(
             (5, "test", ts),
         )
     assert await db.purge_retained_records(now) == 3
-    for table in ("support_messages", "anomalies", "audit_log"):
+    for table in ("anomalies", "audit_log"):
         rows = await db._fetchall(f"SELECT created_at FROM {table}", ())  # noqa: S608
         assert [r["created_at"] for r in rows] == [fresh]
+    rows = await db._fetchall(
+        "SELECT created_at FROM support_messages ORDER BY created_at", ()
+    )
+    assert [r["created_at"] for r in rows] == [kept, fresh]

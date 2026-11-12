@@ -164,6 +164,16 @@ def test_plain_set_cannot_write_the_database_settings(box: Box) -> None:
     assert "DATABASE_URL" not in box.settings()
 
 
+def test_the_retention_backstop_is_a_number_of_days(box: Box) -> None:
+    result = box.run("--set", "CONN_LOG_RETENTION_DAYS=1826", HEALTH_TIMEOUT="1")
+    assert result.returncode == 0, result.stderr
+    assert box.settings()["CONN_LOG_RETENTION_DAYS"] == "1826"
+    for bad in ("five-years", "0", "-5", "1826; reboot"):
+        refused = box.run("--set", f"CONN_LOG_RETENTION_DAYS={bad}")
+        assert refused.returncode == 1
+    assert box.settings()["CONN_LOG_RETENTION_DAYS"] == "1826"
+
+
 def test_back_to_the_local_file(box: Box) -> None:
     switch(box)
     result = box.run("--database-local", HEALTH_TIMEOUT="1")

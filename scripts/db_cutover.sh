@@ -12,6 +12,9 @@
 #   bash db_cutover.sh status     where the data is and whether it answers
 #   bash db_cutover.sh update     later releases: new gateway code to RU (do this
 #                                 BEFORE updating the bot on DE)
+#   bash db_cutover.sh connection-log on|off
+#                                 the connection records switch. "on" is refused
+#                                 until the bot publishes the policy that names them
 #
 # Nothing secret is shown or stored on the phone: the database, its key and the
 # access token only pass through, from one ssh to the other.
@@ -26,6 +29,7 @@ RU_DATA="${RU_DATA:-/var/lib/vpn-db}"
 RU_SECRETS="${RU_SECRETS:-/etc/vpn-db/secrets}"
 RU_FIREWALL="${RU_FIREWALL:-/root/ru_firewall.sh}"
 RU_PUBLIC="${RU_PUBLIC:-45.138.157.65}"
+BACKUP_ENV_DE="${BACKUP_ENV_DE:-/etc/node-backup.env}"
 CONTAINER="${CONTAINER:-node-rental-bot-1}"
 GATEWAY_URL="${GATEWAY_URL:-http://10.204.0.1:8444}"
 TUNNEL_PORT="${DB_TUNNEL_PORT:-51820}"
@@ -39,13 +43,15 @@ stop() {
   printf 'CUTOVER_STOPPED: %s\n' "$*" >&2
   exit 1
 }
+# BatchMode: a question from ssh in the middle of a relay would hang it. A key
+# with a passphrase therefore has to be loaded first (ssh-add).
 de() { "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=15 "$DE" "$@"; }
 ru() { "$SSH_BIN" -o BatchMode=yes -o ConnectTimeout=15 "$RU" "$@"; }
 
 # The bot's folder on DE and the image it runs, as docker knows them.
 bot_facts() {
   WORKDIR_DE="$(de "docker inspect -f '{{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}' $CONTAINER")" \
-    || stop "DE does not answer, or the container $CONTAINER is not there"
+    || stop "DE does not answer, or the container $CONTAINER is not there. Check: ssh $DE true (a key with a passphrase needs ssh-add first)"
   IMAGE_DE="$(de "docker inspect -f '{{.Config.Image}}' $CONTAINER")"
   [[ "$WORKDIR_DE" == /* && -n "$IMAGE_DE" ]] || stop "could not read the bot's folder and image on DE"
 }
@@ -88,7 +94,8 @@ check() {
 copy_code() {
   step "Copy the gateway's code from DE to RU"
   de "tar -C $DE_SRC --exclude=__pycache__ -czf - db logging_setup.py deploy/db-gateway \
-      scripts/db_gateway_install.sh scripts/db_tunnel.sh scripts/db_tool.py scripts/ru_firewall.sh" \
+      scripts/db_gateway_install.sh scripts/db_tunnel.sh scripts/db_tool.py scripts/ru_firewall.sh \
+      scripts/retention_archiver.py scripts/ru_integrity.sh scripts/retire_payment_edge.sh" \
     | ru "rm -rf $RU_SRC.new && mkdir -p $RU_SRC.new && tar -C $RU_SRC.new -xzf - \
           && rm -rf $RU_SRC && mv $RU_SRC.new $RU_SRC" \
     || stop "the copy did not arrive (is $DE_SRC up to date on DE?)"
@@ -144,6 +151,22 @@ tunnel() {
   stop "the tunnel is configured but the servers do not see each other after $n tries (udp $TUNNEL_PORT from DE to RU)"
 }
 
+archive_key() {
+  # The five-year archive is sealed to the same public key as the nightly backup:
+  # the private half is with the owner only, on neither server.
+  step "Five-year archive on RU"
+  local recipient
+  recipient="$(de "sed -n 's/^AGE_RECIPIENT=//p' $BACKUP_ENV_DE 2>/dev/null | tail -1")" || true
+  recipient="${recipient//[\"\'[:space:]]/}"
+  if [[ "$recipient" =~ ^age1[0-9a-z]{58}$ ]]; then
+    ru "bash $RU_SRC/scripts/db_gateway_install.sh --archive-key '$recipient'" \
+      || say "WARN: the archive key was not set on RU; the monthly archive is off"
+  else
+    say "not switched on: DE has no backup key yet (docs/BACKUPS.md). Set the backup up,"
+    say "then run prepare again. Until then records simply stay in the database."
+  fi
+}
+
 prepare() {
   bot_facts
   de "docker exec $CONTAINER python -c 'import db.remote' >/dev/null 2>&1" \
@@ -153,6 +176,7 @@ prepare() {
   tunnel
   step "Gateway on RU (installed, not started)"
   ru "bash $RU_SRC/scripts/db_gateway_install.sh --apply" || stop "the gateway was not installed on RU"
+  archive_key
   say ""
   say "CUTOVER_PREPARED: the bot still uses the file on DE; nothing has moved."
   say "Next, in a quiet hour (the bot is offline for a few minutes):  bash db_cutover.sh switch"
@@ -246,9 +270,44 @@ update() {
   copy_code
   step "Gateway on RU: new code"
   ru "bash $RU_SRC/scripts/db_gateway_install.sh --apply" || stop "the gateway was not updated on RU"
+  archive_key
   ru "bash $RU_SRC/scripts/db_gateway_install.sh --status"
   say ""
   say "CUTOVER_GATEWAY_UPDATED. Now the bot, on DE:  bash $DE_SRC/scripts/update_bot.sh $DE_SRC --apply"
+}
+
+connection_log() {
+  local want="${1:-}" n
+  [[ "$want" == on || "$want" == off ]] || stop "usage: db_cutover.sh connection-log on|off"
+  bot_facts
+  if [[ "$want" == on ]]; then
+    # People are told before it starts: the policy the bot publishes must already
+    # describe these records. The check is piped in, as update_bot.sh --doctor does;
+    # what it reads is the policy inside the running bot's image.
+    de "docker exec -i $CONTAINER python3 - --policy-keeps-connection-records < $DE_SRC/scripts/doctor_bot.py" \
+      || stop "the policy the bot publishes does not describe connection records yet. Update the bot first: bash $DE_SRC/scripts/update_bot.sh $DE_SRC --apply"
+  fi
+  if bot_is_remote; then
+    step "Connection records $want (on RU, next to the data)"
+    ru "bash $RU_SRC/scripts/db_gateway_install.sh --connection-log $want" \
+      || stop "the switch was not changed on RU"
+    # The bot reads the switch when it connects to the gateway.
+    de "docker restart $CONTAINER >/dev/null" || stop "the switch is set, but the bot did not restart"
+    for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      [[ "$(bot_health)" == healthy ]] && break
+      sleep "${POLL_SECONDS:-10}"
+    done
+    [[ "$(bot_health)" == healthy ]] || stop "the switch is set, but the bot is not healthy after $n checks"
+  else
+    step "Connection records $want (the database is still on DE)"
+    if [[ "$want" == on ]]; then
+      de "bash $DE_SRC/scripts/update_bot.sh --set ACTIVITY_LOGGING_ENABLED=true" || stop "the switch was not changed"
+    else
+      de "bash $DE_SRC/scripts/update_bot.sh --set ACTIVITY_LOGGING_ENABLED=false" || stop "the switch was not changed"
+    fi
+  fi
+  say ""
+  say "CUTOVER_CONNECTION_LOG $want"
 }
 
 status() {
@@ -263,6 +322,7 @@ status() {
   de "bash $DE_SRC/scripts/db_tunnel.sh --status" || true
   step "RU"
   ru "bash $RU_SRC/scripts/db_gateway_install.sh --status; bash $RU_FIREWALL --status; \
+      bash $RU_SRC/scripts/ru_integrity.sh --status; \
       df -h --output=avail / | tail -1 | sed 's/^ */free disk: /'" || say "RU does not answer"
 }
 
@@ -273,5 +333,6 @@ case "${1:-}" in
   rollback) rollback ;;
   status) status ;;
   update) update ;;
-  *) stop "usage: db_cutover.sh check | prepare | switch | rollback | status | update" ;;
+  connection-log) connection_log "${2:-}" ;;
+  *) stop "usage: db_cutover.sh check | prepare | switch | rollback | status | update | connection-log on|off" ;;
 esac

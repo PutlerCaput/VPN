@@ -7,7 +7,13 @@
 #   bash db_gateway_install.sh --start    check the database file, its key and the
 #                                         tunnel, then start and enable the service
 #   bash db_gateway_install.sh --stop     stop and disable the service; data stays
-#   bash db_gateway_install.sh --status   one line: OK or WARN
+#   bash db_gateway_install.sh --status   OK or WARN: the service, the monthly archive
+#   bash db_gateway_install.sh --archive-key age1...
+#                                         the owner's PUBLIC key for the five-year
+#                                         archive; switches the monthly timer on
+#   bash db_gateway_install.sh --connection-log on|off
+#                                         the connection records switch, next to the
+#                                         data. On only with the policy that names it
 #
 # Run it from the folder the files were copied to (it installs the code that
 # lies next to it). No Docker: a Python environment and a systemd unit.
@@ -29,6 +35,9 @@ TOKEN_FILE="$SECRETS/db_gateway_token"
 KEY_FILE="$SECRETS/db_key"
 UNIT="node-db-gateway.service"
 UNIT_DIR="$PREFIX/etc/systemd/system"
+ARCHIVE_UNIT="node-retention-archive"
+ARCHIVE_ENV="$ETC/retention.env"
+ARCHIVE_DIR="$DATA/archive"
 LISTEN_HOST="${DB_GATEWAY_HOST:-10.204.0.1}" # this server's end of the wg-db tunnel
 LISTEN_PORT="${DB_GATEWAY_PORT:-8444}"
 PYTHON="${PYTHON_BIN:-python3}"
@@ -45,7 +54,9 @@ as_root() { [[ "$(id -u)" == 0 ]] || stop "run as root"; }
 source_complete() {
   local f
   for f in db/__init__.py db/database.py db/endpoint.py db/gateway.py logging_setup.py \
-    deploy/db-gateway/requirements.txt "deploy/db-gateway/$UNIT"; do
+    scripts/retention_archiver.py deploy/db-gateway/requirements.txt \
+    "deploy/db-gateway/$UNIT" "deploy/db-gateway/$ARCHIVE_UNIT.service" \
+    "deploy/db-gateway/$ARCHIVE_UNIT.timer"; do
     [[ -s "$SRC/$f" ]] || stop "the copy is incomplete: $SRC/$f is missing"
   done
 }
@@ -110,9 +121,15 @@ apply() {
   rm -f "$APP"/db/*.py
   install -m 0644 "$SRC"/db/*.py "$APP/db/"
   install -m 0644 "$SRC/logging_setup.py" "$APP/logging_setup.py"
+  install -d -m 0755 "$APP/scripts"
+  install -m 0644 "$SRC/scripts/retention_archiver.py" "$APP/scripts/retention_archiver.py"
   if [[ -f "$SRC/scripts/db_tool.py" ]]; then
-    install -d -m 0755 "$APP/scripts"
     install -m 0644 "$SRC/scripts/db_tool.py" "$APP/scripts/db_tool.py"
+  fi
+  if ! command -v age >/dev/null 2>&1 || ! command -v age-keygen >/dev/null 2>&1; then
+    say "installing age (the archive is encrypted with it)..."
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q age >/dev/null \
+      || say "WARN: age could not be installed; the monthly archive will not run until it is"
   fi
 
   [[ -x "$VENV/bin/python" ]] || "$PYTHON" -m venv "$VENV" || stop "could not create $VENV"
@@ -177,6 +194,9 @@ EOF
   chown "root:$SERVICE_USER" "$ENV_FILE"
   chmod 0640 "$ENV_FILE"
   install -m 0644 "$SRC/deploy/db-gateway/$UNIT" "$UNIT_DIR/$UNIT"
+  install -m 0644 "$SRC/deploy/db-gateway/$ARCHIVE_UNIT.service" "$UNIT_DIR/$ARCHIVE_UNIT.service"
+  install -m 0644 "$SRC/deploy/db-gateway/$ARCHIVE_UNIT.timer" "$UNIT_DIR/$ARCHIVE_UNIT.timer"
+  install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$ARCHIVE_DIR"
   systemctl daemon-reload || stop "systemctl daemon-reload failed"
   if [[ "$(systemctl is-active "$UNIT" 2>/dev/null || true)" == active ]]; then
     systemctl restart "$UNIT" || stop "the new code is installed but the service did not restart"
@@ -225,6 +245,12 @@ halt() {
   say "DB_GATEWAY_HALTED: the service is stopped and off on boot. Data, key and token are kept."
 }
 
+connection_log_now() {
+  local value
+  value="$(grep '^ACTIVITY_LOGGING_ENABLED=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2)"
+  [[ "$value" == true ]] && printf on || printf off
+}
+
 status() {
   if [[ "$(systemctl is-active "$UNIT" 2>/dev/null || true)" != active ]]; then
     say "WARN gateway: $UNIT is not running"
@@ -233,6 +259,50 @@ status() {
   else
     say "WARN gateway: running but not answering on $LISTEN_HOST:$LISTEN_PORT"
   fi
+  [[ -f "$ENV_FILE" ]] && say "OK connection records: $(connection_log_now)"
+  if [[ ! -s "$ARCHIVE_ENV" ]]; then
+    say "WARN retention archive: the owner's public key is not set (--archive-key age1...)"
+  elif [[ -x "$VENV/bin/python" ]]; then
+    "$VENV/bin/python" "$APP/scripts/retention_archiver.py" --archive-dir "$ARCHIVE_DIR" --status
+  fi
+}
+
+archive_key() {
+  as_root
+  local recipient="$1"
+  [[ "$recipient" =~ ^age1[0-9a-z]{58}$ ]] \
+    || stop "that is not an age PUBLIC key (age1 followed by 58 characters)"
+  [[ -f "$UNIT_DIR/$ARCHIVE_UNIT.timer" ]] || stop "not installed yet: run --apply first"
+  command -v age >/dev/null 2>&1 || stop "age is not installed: apt-get install -y age"
+  printf '# The owner'"'"'s PUBLIC key: archives are sealed to it, only the owner opens them.\nAGE_RECIPIENT=%s\n' \
+    "$recipient" >"$ARCHIVE_ENV.new"
+  chown "root:$SERVICE_USER" "$ARCHIVE_ENV.new"
+  chmod 0640 "$ARCHIVE_ENV.new"
+  mv "$ARCHIVE_ENV.new" "$ARCHIVE_ENV"
+  systemctl enable --now "$ARCHIVE_UNIT.timer" >/dev/null 2>&1 || stop "could not switch the monthly timer on"
+  say "DB_GATEWAY_ARCHIVE_ON: closed months are sealed to this key on the 2nd of each month."
+  say "Records are kept 5 years; only the owner's private key opens an archive."
+}
+
+connection_log() {
+  as_root
+  local want="$1" value
+  [[ "$want" == on || "$want" == off ]] || stop "usage: --connection-log on|off"
+  [[ -f "$ENV_FILE" ]] || stop "not installed yet: run --apply first"
+  [[ "$want" == on ]] && value=true || value=false
+  if [[ "$(connection_log_now)" == "$want" ]]; then
+    say "DB_GATEWAY_CONNECTION_LOG $want (already)"
+    return
+  fi
+  grep -v '^ACTIVITY_LOGGING_ENABLED=' "$ENV_FILE" >"$ENV_FILE.new" || true
+  printf 'ACTIVITY_LOGGING_ENABLED=%s\n' "$value" >>"$ENV_FILE.new"
+  chown "root:$SERVICE_USER" "$ENV_FILE.new"
+  chmod 0640 "$ENV_FILE.new"
+  mv "$ENV_FILE.new" "$ENV_FILE"
+  if [[ "$(systemctl is-active "$UNIT" 2>/dev/null || true)" == active ]]; then
+    systemctl restart "$UNIT" || stop "the setting is saved but the service did not restart"
+  fi
+  say "DB_GATEWAY_CONNECTION_LOG $want"
 }
 
 case "${1:-}" in
@@ -241,5 +311,13 @@ case "${1:-}" in
   --start) start ;;
   --stop) halt ;;
   --status) status ;;
-  *) stop "usage: db_gateway_install.sh [--apply | --start | --stop | --status]" ;;
+  --archive-key)
+    [[ $# -eq 2 ]] || stop "usage: db_gateway_install.sh --archive-key age1..."
+    archive_key "$2"
+    ;;
+  --connection-log)
+    [[ $# -eq 2 ]] || stop "usage: db_gateway_install.sh --connection-log on|off"
+    connection_log "$2"
+    ;;
+  *) stop "usage: db_gateway_install.sh [--apply | --start | --stop | --status | --archive-key KEY | --connection-log on|off]" ;;
 esac
