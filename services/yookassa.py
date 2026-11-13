@@ -12,6 +12,14 @@ Two receipt modes:
 Notifications from YooKassa are not signed. The webhook therefore trusts only
 the payment id from the body and re-reads the payment from the API with the
 shop credentials before crediting anything.
+
+Two ways to confirm an SBP payment:
+- "redirect": YooKassa returns a link to its checkout page on yoomoney.ru. The
+  page loads its scripts from YooMoney's CDN; where that CDN is unreachable the
+  payer sees a blank page.
+- "qr": YooKassa returns the SBP link itself (https://qr.nspk.ru/...). The bot
+  draws the QR code and gives a button that opens the bank app; no YooMoney page
+  is involved.
 """
 
 from __future__ import annotations
@@ -20,6 +28,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal, DecimalException
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -91,6 +100,43 @@ def _error_parts(response: httpx.Response) -> tuple[str | None, str]:
 
 def is_valid_email(value: str) -> bool:
     return len(value) <= 254 and EMAIL_RE.fullmatch(value) is not None
+
+
+# The SBP link YooKassa returns for the QR confirmation. Banks recognise it in
+# a QR code, and on a phone it opens the bank app.
+SBP_LINK_HOST = "qr.nspk.ru"
+CONFIRMATION_TYPES = ("redirect", "qr")
+
+
+def confirmation_link(confirmation: Any) -> Any:
+    """The payer's link from a payment's confirmation, whatever its type.
+
+    Not validated here: the caller checks it before storing or showing it.
+    """
+    if not isinstance(confirmation, dict):
+        return None
+    if confirmation.get("type") == "qr":
+        return confirmation.get("confirmation_data")
+    return confirmation.get("confirmation_url")
+
+
+def is_sbp_link(url: str) -> bool:
+    """An HTTPS SBP payment link of NSPK: shown as a QR code and a bank button."""
+    if len(url) > 4096 or any(ch.isspace() or not ch.isprintable() for ch in url):
+        return False
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return False
+    return (
+        parts.scheme == "https"
+        and (parts.hostname or "").lower() == SBP_LINK_HOST
+        and parts.username is None
+        and parts.password is None
+        and port in (None, 443)
+        and len(parts.path) > 1
+    )
 
 
 def rub_value(amount_rub: int) -> str:
@@ -173,13 +219,20 @@ class YooKassaClient:
         transport: httpx.AsyncBaseTransport | None = None,
         proxy_url: str | None = None,
         payment_method: str | None = None,
+        confirmation: str = "redirect",
     ) -> None:
         if receipt_mode not in ("self_employed", "fiscal"):
             raise ValueError("receipt_mode must be self_employed or fiscal")
         if payment_method not in (None, "sbp"):
             raise ValueError("payment_method must be None or sbp")
+        if confirmation not in CONFIRMATION_TYPES:
+            raise ValueError("confirmation must be redirect or qr")
+        if confirmation == "qr" and payment_method != "sbp":
+            # The QR scenario is used here for SBP only: its link is an SBP link.
+            raise ValueError("the qr confirmation needs payment_method sbp")
         # "sbp": the payer goes straight to the bank app, no card form.
         self.payment_method = payment_method
+        self.confirmation = confirmation
         self.shop_id = shop_id
         self.return_url = return_url
         self.receipt_mode = receipt_mode
@@ -215,7 +268,8 @@ class YooKassaClient:
         body: dict[str, Any] = {
             "amount": amount,
             "capture": True,
-            "confirmation": {"type": "redirect", "return_url": self.return_url},
+            # For "qr" the bank app opens return_url after the payment.
+            "confirmation": {"type": self.confirmation, "return_url": self.return_url},
             "metadata": {"payment_id": payment_id},
         }
         if self.payment_method is not None:
@@ -266,13 +320,8 @@ class YooKassaClient:
         data = await self._request(
             "POST", "/payments", json=body, headers={"Idempotence-Key": payment_id}
         )
-        confirmation = data.get("confirmation")
         yookassa_id = data.get("id")
-        url = (
-            confirmation.get("confirmation_url")
-            if isinstance(confirmation, dict)
-            else None
-        )
+        url = confirmation_link(data.get("confirmation"))
         if not isinstance(yookassa_id, str) or not isinstance(url, str):
             raise YooKassaError("create_payment: unexpected response")
         return CreatedYooKassaPayment(yookassa_id=yookassa_id, confirmation_url=url)

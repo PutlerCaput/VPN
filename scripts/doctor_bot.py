@@ -63,6 +63,14 @@ def check_settings(s: Any) -> bool:
     )
     if rest:
         line("OK", "YooKassa API keys are set (SBP payments)")
+        if getattr(s, "yookassa_confirmation", "redirect") == "qr":
+            line("OK", "SBP by QR: the bot shows the QR code and a bank-app button")
+        else:
+            line(
+                "OK",
+                "SBP through the YooMoney checkout page. If the page stays blank "
+                "for payers: --set YOOKASSA_CONFIRMATION=qr",
+            )
     else:
         line("FAIL", "YooKassa API keys are missing: rubles by SBP cannot be taken")
     in_bot = getattr(s, "yookassa_in_bot", True)

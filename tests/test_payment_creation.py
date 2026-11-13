@@ -15,6 +15,12 @@ from services.payment_creation import CreationVoided, YooKassaCreationService
 from services.payment_reconciliation import PaymentReconciler
 from services.yookassa import YooKassaClient
 
+# What YooKassa returns for the QR confirmation of an SBP payment.
+SBP_LINK = (
+    "https://qr.nspk.ru/AS1A005FUPOCRTFF8M7OSAQRJ7I5R0HQ"
+    "?type=02&bank=100000000111&sum=29900&cur=RUB&crc=AB75"
+)
+
 
 class Provider:
     def __init__(self) -> None:
@@ -22,6 +28,7 @@ class Provider:
         self.lose_first_response = False
         self.omit_confirmation = False
         self.completed = False
+        self.sbp_link = SBP_LINK
         self.remote: dict[str, Any] = {}
 
     async def handle(self, request: httpx.Request) -> httpx.Response:
@@ -30,13 +37,20 @@ class Provider:
         key = request.headers["Idempotence-Key"]
         body = json.loads(request.content)
         self.calls.append((key, body))
+        if body["confirmation"]["type"] == "qr":
+            confirmation = {"type": "qr", "confirmation_data": self.sbp_link}
+        else:
+            confirmation = {
+                "type": "redirect",
+                "confirmation_url": "https://yoomoney.ru/checkout/test",
+            }
         self.remote = {
             "id": str(UUID(key)),
             "amount": body["amount"],
             "metadata": body["metadata"],
             "paid": False,
             "status": "pending",
-            "confirmation": {"confirmation_url": "https://yoomoney.ru/checkout/test"},
+            "confirmation": confirmation,
         }
         if self.omit_confirmation:
             self.remote.pop("confirmation")
@@ -62,6 +76,66 @@ async def ready(services: Any) -> Any:
     await services.provisioning.accept_offer_and_start_trial(910001)
     yield services, provider, client
     await client.close()
+
+
+@pytest.fixture
+async def ready_qr(services: Any) -> Any:
+    """The shop confirms SBP payments by QR: the bot shows the SBP link itself."""
+    provider = Provider()
+    client = YooKassaClient(
+        "123456",
+        "test_key",
+        return_url="https://app.test",
+        transport=httpx.MockTransport(provider.handle),
+        payment_method="sbp",
+        confirmation="qr",
+    )
+    services.yookassa = client
+    services.billing.yookassa = client
+    await services.db.create_user(910001, "buyer", None)
+    await services.provisioning.accept_offer_and_start_trial(910001)
+    yield services, provider, client
+    await client.close()
+
+
+async def test_qr_confirmation_stores_and_returns_the_sbp_link(ready_qr: Any) -> None:
+    services, provider, _ = ready_qr
+    result = await services.billing.create(910001, 1, "sbp")
+    assert result.data["payment_url"] == SBP_LINK
+    assert result.data["provider"] == "yookassa"
+    ((_, body),) = provider.calls
+    assert body["confirmation"] == {"type": "qr", "return_url": "https://app.test"}
+    assert body["payment_method_data"] == {"type": "sbp"}
+    creation = await services.db.get_yookassa_creation(result.payment_id)
+    assert creation is not None
+    assert creation["confirmation_url"] == SBP_LINK
+    # Asking again shows the same order and link: no second payment.
+    again = await services.billing.create(910001, 1, "sbp")
+    assert again.payment_id == result.payment_id
+    assert again.data["payment_url"] == SBP_LINK
+    assert len(provider.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        "sbp://qr.nspk.ru/AS1A005FUPOCRTFF8M7OSAQRJ7I5R0HQ",
+        "http://qr.nspk.ru/AS1A005FUPOCRTFF8M7OSAQRJ7I5R0HQ",
+        "https://user@qr.nspk.ru/AS1A005FUPOCRTFF8M7OSAQRJ7I5R0HQ",
+    ],
+)
+async def test_a_qr_answer_that_is_not_an_https_link_is_never_shown(
+    ready_qr: Any, link: str
+) -> None:
+    services, provider, _ = ready_qr
+    provider.sbp_link = link
+    with pytest.raises(BillingError, match="^provider_error$"):
+        await services.billing.create(910001, 1, "sbp")
+    (order,) = await services.db.payment_history(910001)
+    creation = await services.db.get_yookassa_creation(order["payment_id"])
+    assert creation is not None
+    assert creation["confirmation_url"] is None
+    assert creation["state"] == "pending"
 
 
 async def test_completed_invoice_waits_for_verified_reconciliation(ready: Any) -> None:
