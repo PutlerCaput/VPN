@@ -24,6 +24,17 @@ URL = "http://10.204.0.1:8444"
 DOCKER = r"""#!/bin/bash
 echo "docker $*" >> "$CALLS"
 case "$*" in
+  "exec -i "*" python3 -")
+    # The QR check of update_bot.sh: a 10 RUB test payment in the live shop.
+    script="$(cat)"
+    if [[ "$script" == *PAYMENT_QR_CHECK* ]]; then
+      if [[ "${FAKE_QR:-ok}" == ok ]]; then
+        echo "PAYMENT_QR_CHECK_OK: YooKassa returns an SBP link"
+      else
+        echo "PAYMENT_QR_CHECK_FAILED: no QR payment: HTTP 400 invalid_request"
+        exit 1
+      fi
+    fi ;;
   "inspect -f {{.Config.Image}}"*) echo "node-rental-bot:latest" ;;
   *com.docker.compose.project.working_dir*) echo "$WORKDIR" ;;
   *com.docker.compose.project*) echo "node-rental" ;;
@@ -218,6 +229,53 @@ def test_the_retention_backstop_is_a_number_of_days(box: Box) -> None:
         refused = box.run("--set", f"CONN_LOG_RETENTION_DAYS={bad}")
         assert refused.returncode == 1
     assert box.settings()["CONN_LOG_RETENTION_DAYS"] == "1826"
+
+
+def test_switching_to_sbp_by_qr_checks_the_shop_first(box: Box) -> None:
+    result = box.run("--set", "YOOKASSA_CONFIRMATION=qr", HEALTH_TIMEOUT="1")
+    assert result.returncode == 0, result.stderr
+    assert "PAYMENT_QR_CHECK_OK" in result.stdout
+    assert box.settings()["YOOKASSA_CONFIRMATION"] == "qr"
+    assert box.recreated() == 1
+    log = box.calls.read_text()
+    assert log.index("docker exec -i node-rental-bot-1 python3 -") < log.index(
+        "docker compose -p node-rental up -d"
+    )
+
+
+def test_a_failed_qr_check_changes_nothing(box: Box) -> None:
+    before = box.env_file.read_text()
+    result = box.run(
+        "--set", "YOOKASSA_CONFIRMATION=qr", FAKE_QR="refused", HEALTH_TIMEOUT="1"
+    )
+    assert result.returncode == 1
+    assert "the QR check did not pass; nothing was changed" in result.stderr
+    assert "HTTP 400 invalid_request" in result.stdout
+    assert box.env_file.read_text() == before
+    assert box.recreated() == 0
+    assert not list(box.workdir.glob(".env.before-set-*"))
+
+
+def test_back_to_the_checkout_page_needs_no_check(box: Box) -> None:
+    result = box.run("--set", "YOOKASSA_CONFIRMATION=redirect", HEALTH_TIMEOUT="1")
+    assert result.returncode == 0, result.stderr
+    assert "docker exec" not in box.calls.read_text()
+    assert box.settings()["YOOKASSA_CONFIRMATION"] == "redirect"
+    for bad in ("QR", "embedded", "qr;reboot", ""):
+        refused = box.run("--set", f"YOOKASSA_CONFIRMATION={bad}")
+        assert refused.returncode == 1
+    assert box.settings()["YOOKASSA_CONFIRMATION"] == "redirect"
+
+
+def test_the_qr_check_alone_changes_nothing(box: Box) -> None:
+    passed = box.run("--payment-qr-check")
+    assert passed.returncode == 0, passed.stderr
+    assert "PAYMENT_QR_CHECK_OK" in passed.stdout
+    failed = box.run("--payment-qr-check", FAKE_QR="refused")
+    assert failed.returncode == 1
+    assert "PAYMENT_QR_CHECK_FAILED" in failed.stdout
+    assert box.recreated() == 0
+    assert "YOOKASSA_CONFIRMATION" not in box.settings()
 
 
 def test_back_to_the_local_file(box: Box) -> None:

@@ -15,7 +15,7 @@ import pytest
 import handlers.payments as payments_handlers
 from services.billing import BillingError
 from services.yookassa import YooKassaClient
-from tests.test_payment_creation import Provider
+from tests.test_payment_creation import SBP_LINK, Provider
 
 USER = 990011
 PAGE = "https://yoomoney.ru/checkout/test"  # the fake provider's checkout link
@@ -209,6 +209,27 @@ async def test_link_of_another_shop_is_never_offered(
     assert await services.db.cancel_own_payment(USER, old)
     created = await services.billing.create(USER, 2, "sbp", "standard")
     assert created.data["payment_url"] == PAGE
+
+
+async def test_open_order_with_an_sbp_link_shows_its_qr_code_again(
+    services: Any, provider: Any
+) -> None:
+    await _buyer(services)
+    order_id = uuid.uuid4().hex
+    await _order(services, order_id, state="ready", url=SBP_LINK)
+    message = AsyncMock()
+    await payments_handlers.show_open_payment(message, USER, services)
+    message.answer.assert_not_awaited()
+    sent = message.answer_photo.await_args
+    assert sent.args[0].filename == "sbp.png"
+    assert order_id in sent.kwargs["caption"]
+    assert "отсканируйте QR-код" in sent.kwargs["caption"]
+    rows = sent.kwargs["reply_markup"].inline_keyboard
+    assert rows[0][0].url == SBP_LINK
+    assert [b.callback_data for row in rows[1:] for b in row] == [
+        f"paycheck:{order_id}",
+        f"paycancel:{order_id}",
+    ]
 
 
 async def test_retry_button_completes_an_order_waiting_for_its_link(

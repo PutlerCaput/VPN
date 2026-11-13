@@ -8,6 +8,8 @@
 #   bash update_bot.sh --set CONFIG_DELIVERY=subscription STARS_AUTORENEW_ENABLED=true
 #   bash update_bot.sh --set-secret TELEGRAM_PAYMENT_TOKEN   # typed hidden on the server
 #   bash update_bot.sh --payment-status                       # what can take payments now
+#   bash update_bot.sh --payment-qr-check   # can YooKassa give SBP payments by QR?
+#   bash update_bot.sh --set YOOKASSA_CONFIRMATION=qr   # the same check, then switch
 #   bash update_bot.sh --doctor                               # read-only check of everything
 #   bash update_bot.sh --disable-usdt                         # turn the /usdt payments off
 #   bash update_bot.sh --set-public-url https://app.example.com  # site address for links
@@ -92,7 +94,18 @@ STARS_ENABLED STARS_AUTORENEW_ENABLED STARS_RUB_PER_STAR YOOKASSA_IN_BOT TRIAL_T
 AWG_ENABLED AWG_AGENT_URL AWG_AGENT_TOKEN TELEGRAM_PAYMENT_TOKEN \
 YOOKASSA_RECEIPT_MODE ACTIVITY_LOGGING_ENABLED AUTOBAN_MODE TELEGRAM_PROXY_URL \
 SERVER_TRAFFIC_LIMIT_GB SERVER_TRAFFIC_COUNTS SERVER_TRAFFIC_RESET_DAY SERVER_TRAFFIC_PAUSE_TRIALS \
-RU_DIRECT_SUBSCRIPTION CONN_LOG_RETENTION_DAYS"
+RU_DIRECT_SUBSCRIPTION CONN_LOG_RETENTION_DAYS YOOKASSA_CONFIRMATION"
+
+# Creates a 10 RUB test payment with the QR confirmation in the live shop and
+# says whether YooKassa answers with an SBP link. Prints no secret and no link.
+payment_qr_check() {
+  docker exec -i "$CONTAINER" python3 - <"$(dirname "$SELF")/payment_qr_check.py"
+}
+
+if [[ "${1:-}" == "--payment-qr-check" ]]; then
+  payment_qr_check
+  exit $?
+fi
 
 if [[ "${1:-}" == "--payment-status" ]]; then
   # Safe summary only: which payment paths are configured, never any value.
@@ -129,6 +142,7 @@ print(json.dumps({
     "bot_payment_menu": menu,
     "local_webhook_status": webhook,
     "receipt_mode": s.yookassa_receipt_mode,
+    "sbp_confirmation": getattr(s, "yookassa_confirmation", "redirect"),
 }, ensure_ascii=False, indent=1))
 PY
   exit $?
@@ -396,10 +410,20 @@ if [[ "${1:-}" == "--set" ]]; then
     if [[ "$key" == RU_DIRECT_SUBSCRIPTION && ! "$value" =~ ^(true|false)$ ]]; then
       fail "usage: --set RU_DIRECT_SUBSCRIPTION=true  (set by scripts/ru_direct.sh)"
     fi
+    if [[ "$key" == YOOKASSA_CONFIRMATION && ! "$value" =~ ^(redirect|qr)$ ]]; then
+      fail "usage: --set YOOKASSA_CONFIRMATION=qr  (qr: the bot shows the SBP QR code; redirect: the YooMoney page)"
+    fi
     if [[ "$key" == ENABLED_TIERS ]]; then
       [[ "$value" =~ ^(standard|basic|complete|prime)(,(standard|basic|complete|prime))*$ ]] \
         || fail "usage: --set ENABLED_TIERS=standard  (standard, basic, complete, prime)"
     fi
+  done
+  for pair in "$@"; do
+    # Switch to QR only when YooKassa really answers with an SBP link: a refusal
+    # here would otherwise stop every ruble payment.
+    [[ "$pair" == YOOKASSA_CONFIRMATION=qr ]] || continue
+    say "Checking that YooKassa gives SBP payments by QR (a 10 RUB test payment nobody can pay)..."
+    payment_qr_check || fail "the QR check did not pass; nothing was changed"
   done
   ENV_FILE="$WORKDIR/.env"
   [[ -f "$ENV_FILE" ]] || fail "$ENV_FILE not found"

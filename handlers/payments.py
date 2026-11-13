@@ -60,7 +60,12 @@ from services.stars import (
 )
 from services.telegram_rub import CHECKOUT_ERRORS as RUB_CHECKOUT_ERRORS
 from services.telegram_rub import payment_id_from as rub_payment_id_from
-from services.yookassa import YooKassaError, YooKassaRejected, is_valid_email
+from services.yookassa import (
+    YooKassaError,
+    YooKassaRejected,
+    is_sbp_link,
+    is_valid_email,
+)
 
 logger = logging.getLogger(__name__)
 router = Router(name="payments")
@@ -154,6 +159,12 @@ BILLING_ERRORS = {
         "обратитесь в поддержку."
     ),
 }
+
+BANK_APP_BUTTON = "🏦 Открыть приложение банка"
+SBP_LINK_HOWTO = (
+    f"На телефоне нажмите «{BANK_APP_BUTTON}». На компьютере отсканируйте "
+    "QR-код камерой телефона или в приложении банка."
+)
 
 EMAIL_PROMPT = (
     "📧 Укажите email для кассового чека (54-ФЗ). Он нужен только для отправки "
@@ -445,18 +456,34 @@ async def create_and_show(
     if method == "stars":
         await send_stars_invoice(message, payment.payment_id, data)
     elif method == "sbp" and data.get("provider") == "yookassa":
+        receipt = (
+            "Кассовый чек придёт на ваш email."
+            if data.get("receipt") == "fiscal"
+            else "Чек самозанятого формируется в «Мой налог» автоматически."
+        )
+        link = data["payment_url"]
+        if is_sbp_link(link):
+            # The SBP link itself: no YooMoney page between the payer and the bank.
+            await message.answer_photo(
+                BufferedInputFile(render_qr_png(link), filename="sbp.png"),
+                caption=(
+                    f"🇷🇺 <b>Оплата через СБП</b>\n\n"
+                    f"{plan}\nСумма: <b>{data['amount_rub']} ₽</b>\n"
+                    f"Номер платежа: <code>{payment.payment_id}</code>\n\n"
+                    f"{SBP_LINK_HOWTO} Узел продлится автоматически. {receipt}"
+                ),
+                reply_markup=yookassa_payment_kb(
+                    link, payment.payment_id, bank_app=True
+                ),
+            )
+            return
         await message.answer(
             f"🇷🇺 <b>Оплата в рублях</b>\n\n"
             f"{plan}\nСумма: <b>{data['amount_rub']} ₽</b>\n"
             f"Номер платежа: <code>{payment.payment_id}</code>\n\n"
             "Нажмите кнопку ниже: откроется приложение банка для оплаты через СБП. "
-            "Узел продлится автоматически. "
-            + (
-                "Кассовый чек придёт на ваш email."
-                if data.get("receipt") == "fiscal"
-                else "Чек самозанятого формируется в «Мой налог» автоматически."
-            ),
-            reply_markup=yookassa_payment_kb(data["payment_url"], payment.payment_id),
+            f"Узел продлится автоматически. {receipt}",
+            reply_markup=yookassa_payment_kb(link, payment.payment_id),
         )
     elif method == "sbp":
         manual_hint = (
@@ -795,10 +822,11 @@ def open_payment_kb(
     payment_id: str, url: str | None, state: str | None = None
 ) -> InlineKeyboardMarkup | None:
     """Buttons for the open order. Cancel only when no checkout is in progress."""
-    if url and is_yookassa_page(url):
+    if url and (is_yookassa_page(url) or is_sbp_link(url)):
+        pay = BANK_APP_BUTTON if is_sbp_link(url) else "💳 Оплатить через СБП"
         return InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="💳 Оплатить через СБП", url=url)],
+                [InlineKeyboardButton(text=pay, url=url)],
                 [
                     InlineKeyboardButton(
                         text="🔄 Проверить оплату",
@@ -885,13 +913,22 @@ async def show_open_payment(
             "Оплатите его или отмените, чтобы выбрать другой срок. "
             "Неоплаченный счёт отменяется сам через час."
         )
-    await message.answer(
+    text = (
         "🧾 <b>У вас уже есть неоплаченный счёт</b>\n\n"
         f"Тариф: <b>{tier.title if tier else order['tier']}</b>, "
         f"срок: <b>{order['months']} мес.</b>, сумма: <b>{amount}</b>\n"
-        f"Номер: <code>{order['payment_id']}</code>\n\n{hint}",
-        reply_markup=open_payment_kb(str(order["payment_id"]), url, state),
+        f"Номер: <code>{order['payment_id']}</code>\n\n{hint}"
     )
+    keyboard = open_payment_kb(str(order["payment_id"]), url, state)
+    if url and state != "review" and is_sbp_link(url):
+        # The same QR code again: a payer on a computer scans it with the phone.
+        await message.answer_photo(
+            BufferedInputFile(render_qr_png(url), filename="sbp.png"),
+            caption=f"{text}\n\n{SBP_LINK_HOWTO}",
+            reply_markup=keyboard,
+        )
+        return
+    await message.answer(text, reply_markup=keyboard)
 
 
 @router.callback_query(F.data.startswith("paycancel:"))

@@ -262,9 +262,11 @@ def autorenew_cancel_kb(subscription_id: str) -> InlineKeyboardMarkup:
 
 
 def yookassa_payment_kb(
-    payment_url: str, payment_id: str | None = None
+    payment_url: str, payment_id: str | None = None, *, bank_app: bool = False
 ) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text="💳 Оплатить через СБП", url=payment_url)]]
+    # bank_app: the link is the SBP link itself and opens the bank app directly.
+    text = "🏦 Открыть приложение банка" if bank_app else "💳 Оплатить через СБП"
+    rows = [[InlineKeyboardButton(text=text, url=payment_url)]]
     if payment_id:
         rows.append(
             [

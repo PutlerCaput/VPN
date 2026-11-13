@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { ApiError, endpoints, type SbpPayment } from "../api/client";
+import { QRCode } from "../components/QRCode";
 
 const ERRORS: Record<string, string> = {
   offer_not_accepted: "Сначала примите оферту.",
@@ -110,15 +111,33 @@ export function PaymentPage() {
   );
 }
 
+// The SBP link itself (YooKassa's QR confirmation): shown as a QR code, and on a
+// phone it opens the bank app. No YooMoney checkout page is involved.
+function isSbpLink(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname === "qr.nspk.ru";
+  } catch {
+    return false;
+  }
+}
+
 function YooKassaInstructions({ payment }: { payment: SbpPayment }) {
   if (payment.provider !== "yookassa") {
     return <p className="error">Оплата через ЮKassa временно недоступна. Обратитесь в поддержку.</p>;
   }
+  const sbpLink = isSbpLink(payment.payment_url);
   return (
     <section className="card">
       <h2>Оплата в рублях: {payment.amount_rub} ₽</h2>
+      {sbpLink && (
+        <QRCode
+          value={payment.payment_url}
+          label="На компьютере отсканируйте QR-код камерой телефона или в приложении банка."
+        />
+      )}
       <a className="btn primary" href={payment.payment_url} target="_blank" rel="noopener noreferrer">
-        🏦 Оплатить через СБП
+        {sbpLink ? "🏦 Открыть приложение банка" : "🏦 Оплатить через СБП"}
       </a>
       <p>Номер платежа: <code>{payment.payment_id}</code></p>
       <p className="small">

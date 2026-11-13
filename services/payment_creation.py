@@ -22,6 +22,7 @@ from services.yookassa import (
     YooKassaClient,
     YooKassaError,
     YooKassaRejected,
+    confirmation_link,
 )
 
 RETRY_WINDOW_SECONDS = 23 * 3600
@@ -64,10 +65,8 @@ def validated_response(
             raise YooKassaError("creation response amount mismatch")
     except (DecimalException, KeyError, TypeError):
         raise YooKassaError("creation response invalid amount") from None
-    confirmation = response.get("confirmation")
-    url = (
-        confirmation.get("confirmation_url") if isinstance(confirmation, dict) else None
-    )
+    # The checkout page (redirect) or the SBP link (qr): both are HTTPS links.
+    url = confirmation_link(response.get("confirmation"))
     # A completed/cancelled invoice can lack a checkout link. Preserve its
     # verified ID anyway so authenticated status reconciliation can finish it.
     if url is None:

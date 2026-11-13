@@ -289,6 +289,9 @@ class Settings(BaseSettings):
     yookassa_vat_code: int = Field(1, ge=1, le=12)  # 1 = без НДС
     yookassa_tax_system_code: int | None = Field(2, ge=1, le=6)  # 2 = УСН доходы
     yookassa_return_url: str | None = None
+    # SBP confirmation: redirect = YooMoney checkout page; qr = the bot shows the
+    # SBP QR code and a bank-app button itself (update_bot.sh checks it first).
+    yookassa_confirmation: Literal["redirect", "qr"] = "redirect"
     # Explicit per-provider routing; never apply a global proxy to the VPN/bot.
     yookassa_egress: Literal["direct", "ru_gateway"] = "direct"
     yookassa_proxy_url: str | None = None
