@@ -148,6 +148,27 @@ ssh root@45.138.157.65 'sha256sum /usr/local/sbin/ru_integrity.sh'
 Хеши должны совпасть. Затем `bash /usr/local/sbin/ru_integrity.sh --check` должен показать
 ровно эти две записи, и только после этого `--accept`.
 
+Долгие запуски. `--check` и `--accept` ничего не печатают, пока не закончат: сначала
+`dpkg -V`, затем AIDE, затем rkhunter, итог одной строкой в конце. На RU `--check` идёт
+больше десяти минут, `--accept` дольше (снимок, потом такая же полная проверка). Из
+Termux это ненадёжно: связь с телефона может оборваться, а вывод пропадёт, хотя проверка
+дойдёт до конца (13 ноября так и вышло: `last-check.txt` обновился, на экране ничего не
+было).
+Надёжнее запускать в фоне, как это делает недельный таймер, и потом читать итог:
+
+```bash
+# проверка: юнит недельного таймера, низкий приоритет
+ssh root@45.138.157.65 'systemctl start --no-block vpn-integrity-check.service'
+# принять новое состояние за базу
+ssh root@45.138.157.65 'systemd-run --unit=vpn-integrity-accept --collect --no-block -p Nice=19 -p IOSchedulingClass=idle /bin/bash /usr/local/sbin/ru_integrity.sh --accept'
+# готово, когда is-active покажет inactive; затем
+ssh root@45.138.157.65 'systemctl is-active vpn-integrity-accept; journalctl -u vpn-integrity-accept --no-pager -n 6; /usr/local/sbin/ru_integrity.sh --status'
+```
+
+Пока идёт `--accept`, `--status` показывает прежний итог. Идёт ли проверка, видно по
+`ps -eo pid,etime,args | grep -E "ru_integrity|dpkg -V|aide|rkhunter"`; когда она
+закончилась, смотрите время `last-check.txt` в `/var/log/vpn-integrity/`.
+
 Ограничение: уведомлений нет. С RU не доступен Telegram, результат нужно смотреть
 командой выше.
 
