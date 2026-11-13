@@ -32,8 +32,11 @@
 - Владелец оплатил рубли через бота по новой схеме (его слово: «Оплатил»). Это и есть
   подтверждение «платежи идут» для этапа 2.
 
-**Этап 2 вывода старой платёжной цепочки.**
-- DE: `retire_payment_edge.sh --apply` дан владельцу; вывод пока не получен.
+**Этап 2 вывода старой платёжной цепочки: завершён на обоих серверах.**
+- DE: отчёт `retire_payment_edge.sh` (без параметров, только чтение) после `--apply`:
+  `nothing is left`, `RETIRE_REPORT_DONE`. `--doctor`: `DOCTOR: 26 ok, 0 warnings,
+  0 problems` (в нём «YooKassa API reachable» напрямую, то есть оплата от удалённого не
+  зависела). Вывод самого `--apply` владелец не присылал: результат подтверждён отчётом.
 - RU: `retire_payment_edge.sh --apply` выполнен. Проверка целостности (`--check`, 05:47 UTC)
   показала 47 записей: 29 удалённых и 18 изменённых, добавленных 0; `dpkg.txt` и
   `rkhunter.txt` пусты. Все удалённые — файлы пакета `squid` (`/usr/sbin/squid`,
@@ -43,18 +46,31 @@
   изменённые — каталоги, из которых убрали содержимое (`/etc`, `/etc/apparmor.d`,
   `/etc/init.d`, `/etc/logrotate.d`, `/etc/nginx`, `/etc/rc0.d`–`rc6.d`, `/etc/systemd/system`,
   `/etc/ufw/applications.d`, `/etc/wireguard`, `/usr/lib/systemd/system`, `/usr/sbin`).
-  Постороннего нет, `--accept` разрешён; запущен в фоне (`systemd-run`, см.
-  [RU_HARDENING.md](RU_HARDENING.md), «Долгие запуски»).
+  Постороннего нет. `--accept` запущен в фоне (`systemd-run`, см.
+  [RU_HARDENING.md](RU_HARDENING.md), «Долгие запуски») и завершился в 06:40 UTC:
+  `RU_INTEGRITY_ACCEPTED: today's state is the new baseline.`, затем `--status`:
+  `OK integrity: checked 0 days ago, nothing changed`. Строка в журнале rkhunter
+  `Please inspect this machine, because it may be infected` — его стандартная фраза при
+  любых предупреждениях в прогоне; это известные предупреждения, принятые за базу
+  12 ноября, новых нет.
 - Урок: `--check` и `--accept` молчат много минут, а с телефона связь может оборваться;
   для них описан запуск в фоне и чтение итога.
 
+**Перезагрузка DE (не срочно).** `--doctor` на DE пишет `a reboot is waiting (0 d)`: 13 ноября
+появилась отметка `/var/run/reboot-required` (пакеты, которым нужна перезагрузка, перечислены
+в `/var/run/reboot-required.pkgs`). Это строка `OK`; `WARN` будет через 14 дней. Ежемесячное
+обновление сервер само не перезагружает: нужно выполнить `reboot` в тихий час, контейнеры
+поднимутся сами, затем `--doctor`.
+
 **Что дальше.**
-- Принять результат `--accept` на RU (`RU_INTEGRITY_ACCEPTED`, затем `OK integrity`).
-- Прислать вывод этапа 2 на DE (`RETIRE_DONE (de)` и `--doctor`).
-- Остальное из списка 12 ноября без изменений: удалить `.env.before-update-20261112T163450Z-277268`
-  и `/root/docker-compose.before-secret.yml` через несколько дней; в воскресенье 15 ноября
-  первые запуски таймеров (контроль целостности RU около 01:30 UTC, очистка DE около 04:30
-  UTC), затем `--doctor` и `ru_integrity.sh --status`.
+- Перезагрузить DE в тихий час в ближайшие две недели (см. выше).
+- Через несколько дней: удалить `.env.before-update-20261112T163450Z-277268` и
+  `/root/docker-compose.before-secret.yml`, когда откат образа станет не нужен; остальные
+  копии `.env.before-*` удалит еженедельная очистка.
+- Воскресенье 15 ноября: первые запуски таймеров (контроль целостности RU около 01:30 UTC,
+  очистка DE около 04:30 UTC), затем `--doctor` и `ru_integrity.sh --status`.
+- Dependabot: если останутся 2 low-алерта по `deepmerge`, закрыть их в интерфейсе GitHub.
+- По желанию: сообщить поддержке ЮKassa про узел CDN 80.92.207.16 (см. PAYMENTS_SBP_QR.md).
 
 ## 12 ноября 2026 — итоги дня (вывод владельца)
 
