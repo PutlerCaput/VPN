@@ -32,8 +32,9 @@ def pseudonymous_node_username(secret: str, telegram_id: int) -> str:
     name back to the Telegram ID. The same ID always gives the same name, so a
     retried creation finds its account instead of making a second one.
     """
-    if telegram_id <= 0:
-        raise ValueError("telegram_id must be positive")
+    # Negative ids are accounts made on the site by email (no Telegram behind them).
+    if telegram_id == 0:
+        raise ValueError("telegram_id must not be zero")
     subkey = hmac.new(secret.encode(), NODE_NAME_CONTEXT, hashlib.sha256).digest()
     digest = hmac.new(subkey, str(telegram_id).encode(), hashlib.sha256).hexdigest()
     return "n" + digest[:20]

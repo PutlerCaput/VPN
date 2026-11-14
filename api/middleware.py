@@ -34,12 +34,15 @@ USER_KEY = web.RequestKey[dict[str, Any]]("user")
 PUBLIC_PATHS = frozenset(
     {
         "/auth/telegram",
+        "/auth/email/request",
+        "/auth/email/verify",
         "/auth/refresh",
         "/legal/offer",
         "/legal/privacy",
         "/push/vapid-key",
     }
 )
+AUTH_PATHS = frozenset({"/auth/telegram", "/auth/email/request", "/auth/email/verify"})
 BANNED_ALLOWED = frozenset({"/me", "/auth/logout"})
 
 SECURITY_HEADERS = {
@@ -60,6 +63,9 @@ def build_limiters() -> dict[str, SlidingWindowLimiter]:
         "config_user": SlidingWindowLimiter(10, 60),
         # Each call sends a message to the user's chat.
         "bot_message_user": SlidingWindowLimiter(5, 60),
+        # Each code is an email somebody receives: few per address and per sender.
+        "email_code_ip": SlidingWindowLimiter(5, 3600),
+        "email_code_address": SlidingWindowLimiter(5, 3600),
     }
 
 
@@ -140,7 +146,7 @@ async def auth_middleware(request: web.Request, handler: Handler) -> web.StreamR
     request[CLIENT_IP_KEY] = ip
 
     if path in PUBLIC_PATHS:
-        limiter = limits["auth_ip"] if path == "/auth/telegram" else limits["public_ip"]
+        limiter = limits["auth_ip"] if path in AUTH_PATHS else limits["public_ip"]
         if not limiter.hit(ip):
             return _rate_limited(limiter.retry_after(ip))
         return await handler(request)

@@ -11,6 +11,7 @@ from db.database import Database
 from services.awg import AwgService
 from services.billing import BillingService
 from services.cryptopay import CryptoPayClient
+from services.email_login import EmailLogin
 from services.health import ServiceHealth
 from services.marzban import MarzbanClient
 from services.notifier import Notifier
@@ -44,4 +45,5 @@ class Services:
     awg: AwgService | None = None
     telegram_rub: TelegramRubPayments | None = None
     traffic: ServerTrafficWatch | None = None
+    email_login: EmailLogin | None = None
     limiters: list[SlidingWindowLimiter] = field(default_factory=list)

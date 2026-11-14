@@ -7,6 +7,7 @@ kopecks for RUB, cents for USDT. Every query is parameterized.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import re
 import time
 from collections import OrderedDict
@@ -302,6 +303,25 @@ CREATE TABLE IF NOT EXISTS server_traffic_alerts (
 )
 
 
+# Login by email. An account made on the site has a negative telegram_id: nothing
+# of Telegram stands behind it, and no Telegram message is ever sent to it.
+EMAIL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS email_accounts (
+    email TEXT PRIMARY KEY,
+    telegram_id INTEGER NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS email_codes (
+    email TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL,
+    purpose TEXT NOT NULL CHECK (purpose IN ('login', 'link')),
+    telegram_id INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    sent_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+"""
+
 # Columns added after the first release: (table, column, definition).
 MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("users", "receipt_email", "TEXT"),
@@ -392,6 +412,7 @@ class Database:
         await self.conn.execute("PRAGMA foreign_keys=ON")
         await self.conn.execute("PRAGMA busy_timeout=5000")
         await self.conn.executescript(SCHEMA)
+        await self.conn.executescript(EMAIL_SCHEMA)
         for table, column, definition in MIGRATIONS:
             async with self.conn.execute(f"PRAGMA table_info({table})") as cur:
                 columns = {row[1] for row in await cur.fetchall()}
@@ -601,6 +622,126 @@ class Database:
             (telegram_id, username, referred_by, now()),
         )
         return rowcount == 1
+
+    # ------------------------------------------------------ login by email
+    async def put_email_code(
+        self,
+        email: str,
+        code_hash: str,
+        purpose: str,
+        telegram_id: int | None,
+        ttl_seconds: int,
+        min_interval_seconds: int,
+    ) -> bool:
+        """Stores the one code an address may have. False: one was sent just now."""
+        current = now()
+        async with self.transaction() as conn:
+            cur = await conn.execute(
+                "SELECT sent_at FROM email_codes WHERE email = ?", (email,)
+            )
+            row = await cur.fetchone()
+            if row is not None and current - int(row[0]) < min_interval_seconds:
+                return False
+            await conn.execute(
+                "INSERT OR REPLACE INTO email_codes "
+                "(email, code_hash, purpose, telegram_id, attempts, sent_at, "
+                "expires_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
+                (
+                    email,
+                    code_hash,
+                    purpose,
+                    telegram_id,
+                    current,
+                    current + ttl_seconds,
+                ),
+            )
+            await conn.execute(
+                "DELETE FROM email_codes WHERE expires_at < ?", (current - 86400,)
+            )
+        return True
+
+    async def drop_email_code(self, email: str) -> None:
+        await self._execute("DELETE FROM email_codes WHERE email = ?", (email,))
+
+    async def check_email_code(
+        self, email: str, code_hash: str, purpose: str, max_attempts: int
+    ) -> dict[str, Any]:
+        """Uses the code up. result: ok (with telegram_id), wrong or none.
+
+        A right code works once. A wrong one counts; after max_attempts the code is
+        gone and a new one has to be asked for.
+        """
+        current = now()
+        async with self.transaction() as conn:
+            cur = await conn.execute(
+                "SELECT code_hash, purpose, telegram_id, attempts, expires_at "
+                "FROM email_codes WHERE email = ?",
+                (email,),
+            )
+            row = await cur.fetchone()
+            if row is None or int(row[4]) < current or row[1] != purpose:
+                return {"result": "none", "telegram_id": None}
+            if not hmac.compare_digest(str(row[0]), code_hash):
+                if int(row[3]) + 1 >= max_attempts:
+                    await conn.execute(
+                        "DELETE FROM email_codes WHERE email = ?", (email,)
+                    )
+                else:
+                    await conn.execute(
+                        "UPDATE email_codes SET attempts = attempts + 1 "
+                        "WHERE email = ?",
+                        (email,),
+                    )
+                return {"result": "wrong", "telegram_id": None}
+            await conn.execute("DELETE FROM email_codes WHERE email = ?", (email,))
+            return {"result": "ok", "telegram_id": row[2]}
+
+    async def account_for_email(self, email: str) -> int:
+        """The account this address signs in to; a new site account if none yet."""
+        async with self.transaction() as conn:
+            cur = await conn.execute(
+                "SELECT telegram_id FROM email_accounts WHERE email = ?", (email,)
+            )
+            row = await cur.fetchone()
+            if row is not None:
+                return int(row[0])
+            cur = await conn.execute(
+                "SELECT COALESCE(MIN(telegram_id), 0) FROM users WHERE telegram_id < 0"
+            )
+            lowest = await cur.fetchone()
+            new_id = int(lowest[0] if lowest else 0) - 1
+            await conn.execute(
+                "INSERT INTO users (telegram_id, username, status, referred_by, "
+                "created_at) VALUES (?, NULL, 'pending', NULL, ?)",
+                (new_id, current_time := now()),
+            )
+            await conn.execute(
+                "INSERT INTO email_accounts (email, telegram_id, created_at) "
+                "VALUES (?, ?, ?)",
+                (email, new_id, current_time),
+            )
+            return new_id
+
+    async def link_email(self, email: str, telegram_id: int) -> bool:
+        """Ties an address to an existing account. False: either is already tied."""
+        rowcount = await self._execute(
+            "INSERT OR IGNORE INTO email_accounts (email, telegram_id, created_at) "
+            "VALUES (?, ?, ?)",
+            (email, telegram_id, now()),
+        )
+        return rowcount == 1
+
+    async def email_of(self, telegram_id: int) -> str | None:
+        row = await self._fetchone(
+            "SELECT email FROM email_accounts WHERE telegram_id = ?", (telegram_id,)
+        )
+        return str(row["email"]) if row else None
+
+    async def email_taken(self, email: str) -> bool:
+        row = await self._fetchone(
+            "SELECT 1 AS x FROM email_accounts WHERE email = ?", (email,)
+        )
+        return row is not None
 
     async def update_profile(
         self,

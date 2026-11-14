@@ -18,6 +18,9 @@ class Notifier:
         self.push = push
 
     async def telegram(self, telegram_id: int, text: str) -> bool:
+        if telegram_id < 0:
+            # An account made on the site by email: there is no chat to write to.
+            return False
         try:
             await self.bot.send_message(
                 telegram_id, text, disable_web_page_preview=True

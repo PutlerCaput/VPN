@@ -36,7 +36,9 @@ from services.awg import AwgAgent, AwgService
 from services.billing import BillingService
 from services.container import Services
 from services.cryptopay import CryptoPayClient
+from services.email_login import EmailLogin
 from services.health import ServiceHealth
+from services.mailer import Mailer
 from services.marzban import MarzbanClient
 from services.notifier import Notifier
 from services.payment_reconciliation import PaymentReconciler
@@ -133,6 +135,12 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
         ),
         monitor=AnomalyMonitor(db, marzban, provisioning, settings),
         yookassa=yookassa,
+        email_login=EmailLogin(
+            db,
+            Mailer(settings),
+            settings.jwt_secret.get_secret_value(),
+            settings.email_code_ttl_seconds,
+        ),
         stars=(
             StarsPayments(db, provisioning, bot, settings.admin_telegram_id)
             if settings.stars_enabled

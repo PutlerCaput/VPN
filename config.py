@@ -304,6 +304,17 @@ class Settings(BaseSettings):
     jwt_refresh_ttl_seconds: int = 30 * 24 * 3600
     telegram_auth_max_age_seconds: int = 300
 
+    # --- Login by a code sent to an email (the site, when Telegram is unreachable)
+    # Off until SMTP_HOST is set. The password is a secret; nothing else is.
+    smtp_host: str | None = None
+    smtp_port: int = 465
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_from: str | None = None
+    # 465 speaks TLS from the first byte; 587 upgrades with STARTTLS.
+    smtp_security: Literal["tls", "starttls"] = "tls"
+    email_code_ttl_seconds: int = 600
+
     # --- Web Push -----------------------------------------------------------
     vapid_public: str | None = None
     vapid_private: SecretStr | None = None
