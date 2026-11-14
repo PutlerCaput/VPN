@@ -14,6 +14,11 @@ Runs inside the bot container (it has the panel's address and password):
     --fingerprint NAME     the TLS fingerprint clients imitate, on every address
                            (chrome, firefox, safari, ios, edge, random, randomized)
     --tag TAG              (first) work on that inbound instead of the main one
+    --fragment-copy ADDRESS:PORT [SETTING]
+                           next to that address, the same one with the TLS
+                           ClientHello fragmented (default 100-200,10-20,tlshello)
+    --fragment-remove ADDRESS:PORT
+                           take the fragmented copy away again
     --remove {SERVER_IP}   drop the panel's default address of the inbound (a new
                            inbound gets one; an entry only the relay may reach
                            must not be offered with this server's own address)
@@ -70,12 +75,14 @@ def describe(hosts: dict[str, Any]) -> list[str]:
     for tag, entries in hosts.items():
         for entry in entries or []:
             state = "off" if entry.get("is_disabled") else "on"
+            spec = entry.get("fragment_setting")
+            fragment = f" fragment={spec}" if spec else ""
             lines.append(
                 f"{tag}: {entry.get('address')}:{entry.get('port') or 'inbound port'}"
                 f" cover={entry.get('sni') or '-'}"
                 f" fingerprint={entry.get('fingerprint') or '-'}"
-                f" remark={entry.get('remark')!r}"
-                f" {state}"
+                + fragment
+                + f" remark={entry.get('remark')!r} {state}"
             )
     return lines
 
@@ -101,6 +108,65 @@ def with_added(
 
 
 SERVER_IP = "{SERVER_IP}"
+# Marzban's fragment setting: packet lengths, pause in ms, which packets
+# ("tlshello": the TLS ClientHello, which carries the cover name).
+FRAGMENT_RE = re.compile(
+    r"^\d{1,4}(-\d{1,4})?,\d{1,4}(-\d{1,4})?,(tlshello|\d{1,3}-\d{1,3})$"
+)
+DEFAULT_FRAGMENT = "100-200,10-20,tlshello"
+
+
+def with_fragment_copy(
+    hosts: dict[str, Any], address: str, port: int, spec: str
+) -> dict[str, Any]:
+    """Next to an address, the same address with the ClientHello fragmented.
+
+    The plain one stays: on some networks fragmenting helps, on others it is
+    itself a sign or breaks the handshake, so clients and the probe compare both.
+    """
+    if not FRAGMENT_RE.fullmatch(spec):
+        raise ValueError(f"not a fragment setting like {DEFAULT_FRAGMENT}: {spec!r}")
+    for tag, entries in hosts.items():
+        plain = [
+            e
+            for e in entries or []
+            if e.get("address") == address
+            and e.get("port") == port
+            and not e.get("fragment_setting")
+        ]
+        if not plain:
+            continue
+        if any(
+            e.get("address") == address
+            and e.get("port") == port
+            and e.get("fragment_setting") == spec
+            for e in entries
+        ):
+            return hosts
+        result = copy.deepcopy(hosts)
+        new = copy.deepcopy(plain[0])
+        new["fragment_setting"] = spec
+        new["remark"] = f"{plain[0].get('remark') or 'VPN'} (fragment)"
+        result[tag].append(new)
+        return result
+    raise ValueError(f"no plain address {address}:{port} to copy")
+
+
+def without_fragment_copy(
+    hosts: dict[str, Any], address: str, port: int
+) -> dict[str, Any]:
+    result = copy.deepcopy(hosts)
+    for tag, entries in result.items():
+        result[tag] = [
+            e
+            for e in entries or []
+            if not (
+                e.get("address") == address
+                and e.get("port") == port
+                and e.get("fragment_setting")
+            )
+        ]
+    return result
 
 
 def matches(entry: dict[str, Any], address: str, port: int) -> bool:
@@ -181,6 +247,26 @@ async def main(argv: list[str]) -> int:
             await client.put_hosts(wanted)
             print("\n".join(describe(await client.get_hosts())))
             print(f"VPN_ENTRIES_OK: fingerprint {argv[1]} on every address")
+            return 0
+        if argv and argv[0] in ("--fragment-copy", "--fragment-remove"):
+            if len(argv) not in (2, 3):
+                print(
+                    "usage: --fragment-copy ADDRESS:PORT [SETTING]"
+                    " | --fragment-remove ADDRESS:PORT"
+                )
+                return 2
+            address, port = parse_target(argv[1])
+            if argv[0] == "--fragment-copy":
+                spec = argv[2] if len(argv) == 3 else DEFAULT_FRAGMENT
+                wanted = with_fragment_copy(hosts, address, port, spec)
+            else:
+                wanted = without_fragment_copy(hosts, address, port)
+            if wanted == hosts:
+                print(f"VPN_ENTRIES_UNCHANGED: {argv[0][2:]} {address}:{port}")
+                return 0
+            await client.put_hosts(wanted)
+            print("\n".join(describe(await client.get_hosts())))
+            print(f"VPN_ENTRIES_OK: {argv[0][2:]} {address}:{port}")
             return 0
         if len(argv) != 2 or argv[0] not in ("--add", "--remove"):
             print(
