@@ -433,6 +433,10 @@ loop() {
   if command -v termux-wake-lock >/dev/null 2>&1; then api_call termux-wake-lock >/dev/null; fi
   say "PROBE_LOOP: measuring every $minutes min (pid $$). Stop: bash $SELF loop-stop"
   while :; do
+    # One short line per run, but never more than about 200 kB in all.
+    if [[ -f "$PROBE_HOME/run.out" && "$(wc -c <"$PROBE_HOME/run.out")" -gt 200000 ]]; then
+      : >"$PROBE_HOME/run.out"
+    fi
     bash "$SELF" run >>"$PROBE_HOME/run.out" 2>&1 &
     runner=$!
     wait "$runner" || true

@@ -66,14 +66,23 @@ Termux и Termux:API должны быть из одного источника:
 
 ## Установка
 
-**Termux (на этом телефоне).** Взять файлы с DE и сверить хеши. Хеши должны совпасть:
+**Termux (на этом телефоне).** Сначала обновить исходники на DE, затем взять файлы и сверить
+хеши. Хеши должны совпасть:
 
 ```
+ssh de 'git -C /root/vpn-src pull --ff-only && git -C /root/vpn-src log --oneline -1'
 mkdir -p ~/vpn-probe-src
 ssh de 'cat /root/vpn-src/scripts/probe/vpn_probe.sh' > ~/vpn-probe-src/vpn_probe.sh
 ssh de 'cat /root/vpn-src/scripts/probe/install_probe.sh' > ~/vpn-probe-src/install_probe.sh
 ssh de 'sha256sum /root/vpn-src/scripts/probe/vpn_probe.sh /root/vpn-src/scripts/probe/install_probe.sh'
 sha256sum ~/vpn-probe-src/vpn_probe.sh ~/vpn-probe-src/install_probe.sh
+```
+
+**Termux.** Если на телефоне стояла прежняя версия, её журнал лучше убрать: в нём строки с
+неверной пометкой `mobile` (сеть тогда не определялась, а записывалась как мобильная):
+
+```
+rm -f ~/vpn-probe/probe.log ~/vpn-probe/state ~/vpn-probe/alerts.log
 ```
 
 **Termux.** Поставить. Адрес сайта и порты точки входа подставить свои (здесь адрес сайта из

@@ -680,6 +680,23 @@ def test_a_wake_lock_that_never_answers_does_not_block_the_loop(phone: Phone) ->
     assert "PROBE_LOOP: measuring every 1 min" in out
 
 
+def test_the_loop_keeps_its_output_file_small(phone: Phone) -> None:
+    phone.home.mkdir(parents=True, exist_ok=True)
+    (phone.home / "run.out").write_text("x" * 250_000)
+    loop = start_loop(phone, "1")
+    try:
+        phone.wait_for_runs(1)
+        phone.run("loop-stop")
+        loop.communicate(timeout=30)
+    finally:
+        if loop.poll() is None:
+            loop.kill()
+    out = (phone.home / "run.out").read_text()
+    assert "xxxx" not in out
+    assert out.startswith("PROBE_RUN net=")
+    assert len(out) < 2_000
+
+
 def test_the_loop_takes_its_period_from_the_settings(phone: Phone) -> None:
     phone.configure(PROBE_SITE_URL="https://app.test", PROBE_PERIOD="2")
     loop = start_loop(phone)
