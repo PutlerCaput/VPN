@@ -21,6 +21,9 @@ services:
       AWG_PORT: ${AWG_PORT:-39051}
       AWG_SUBNET: ${AWG_SUBNET:-10.67.0.0/24}
       AWG_ENDPOINT_HOST: ${AWG_ENDPOINT_HOST:?set AWG_ENDPOINT_HOST}
+      # 1 = clients use the server's filtering resolver (malware, phishing, adult,
+      # gambling blocked). Only used when the resolver is available.
+      AWG_DNS_FILTER: ${AWG_DNS_FILTER:-1}
       AWG_DNS: ${AWG_DNS:-1.1.1.1, 1.0.0.1}
     ports:
       - "${AWG_PORT:-39051}:${AWG_PORT:-39051}/udp"
