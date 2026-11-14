@@ -409,7 +409,7 @@ loop_cleanup() {
   if [[ "$(cat "$PROBE_HOME/loop.pid" 2>/dev/null || true)" == "$$" ]]; then
     rm -f "$PROBE_HOME/loop.pid"
   fi
-  if command -v termux-wake-unlock >/dev/null 2>&1; then termux-wake-unlock || true; fi
+  if command -v termux-wake-unlock >/dev/null 2>&1; then api_call termux-wake-unlock >/dev/null; fi
 }
 
 # For a phone without the Termux:API app (no job scheduler): run every N minutes
@@ -430,7 +430,7 @@ loop() {
   trap loop_cleanup EXIT
   trap 'exit 0' INT TERM
   # Keeps the phone's CPU awake with the screen off; no Termux:API needed.
-  if command -v termux-wake-lock >/dev/null 2>&1; then termux-wake-lock || true; fi
+  if command -v termux-wake-lock >/dev/null 2>&1; then api_call termux-wake-lock >/dev/null; fi
   say "PROBE_LOOP: measuring every $minutes min (pid $$). Stop: bash $SELF loop-stop"
   while :; do
     bash "$SELF" run >>"$PROBE_HOME/run.out" 2>&1 &

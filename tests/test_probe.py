@@ -622,11 +622,11 @@ def test_the_stale_check_follows_the_period(phone: Phone) -> None:
 
 
 # --------------------------------------------------------------------- the loop
-def start_loop(phone: Phone, *args: str) -> subprocess.Popen[str]:
+def start_loop(phone: Phone, *args: str, **env: str) -> subprocess.Popen[str]:
     """A loop whose "minute" is a second, so that a test can watch it measure."""
     return subprocess.Popen(  # noqa: S603
         ["/bin/bash", str(PROBE), "loop", *args],
-        env=phone.live_env(PROBE_LOOP_UNIT="1"),
+        env=phone.live_env(PROBE_LOOP_UNIT="1", **env),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -660,6 +660,24 @@ def test_the_loop_measures_again_and_again_until_it_is_stopped(phone: Phone) -> 
     runs = phone.runs_logged()
     time.sleep(2.5)
     assert phone.runs_logged() == runs
+
+
+def test_a_wake_lock_that_never_answers_does_not_block_the_loop(phone: Phone) -> None:
+    phone.add_stub("termux-wake-lock", HANGS)
+    phone.add_stub("termux-wake-unlock", HANGS)
+    loop = start_loop(phone, "1", PROBE_API_TIMEOUT="1")
+    try:
+        phone.wait_for_runs(1, seconds=20)
+        began = time.monotonic()
+        phone.run("loop-stop")
+        out, err = loop.communicate(timeout=30)
+        # The unlock hangs as well: it is given up after the timeout, not waited for.
+        assert time.monotonic() - began < 15
+    finally:
+        if loop.poll() is None:
+            loop.kill()
+    assert loop.returncode == 0, err
+    assert "PROBE_LOOP: measuring every 1 min" in out
 
 
 def test_the_loop_takes_its_period_from_the_settings(phone: Phone) -> None:
