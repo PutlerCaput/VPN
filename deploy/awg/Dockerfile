@@ -31,10 +31,12 @@ RUN --mount=type=secret,id=proxy_ca \
 FROM alpine:3.20
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
-    apk add --no-cache python3 iproute2 iptables
+    apk add --no-cache python3 iproute2 iptables unbound ca-certificates
 COPY --from=go-build /src/amneziawg-go/amneziawg-go /usr/bin/amneziawg-go
 COPY --from=tools-build /src/amneziawg-tools/src/wg /usr/bin/awg
 COPY agent.py /opt/awg/agent.py
+# Builds the block zone of the DNS filter (dns/README in docs/AWG_DNS_FILTER.md).
+COPY dns/blocklist.py /opt/awg/dns/blocklist.py
 # Userspace implementation on purpose: no kernel module needs to be installed.
 ENV WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD=1 PYTHONUNBUFFERED=1
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
