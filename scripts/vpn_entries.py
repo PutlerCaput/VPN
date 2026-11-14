@@ -53,7 +53,9 @@ def describe(hosts: dict[str, Any]) -> list[str]:
             state = "off" if entry.get("is_disabled") else "on"
             lines.append(
                 f"{tag}: {entry.get('address')}:{entry.get('port') or 'inbound port'}"
-                f" cover={entry.get('sni') or '-'} remark={entry.get('remark')!r}"
+                f" cover={entry.get('sni') or '-'}"
+                f" fingerprint={entry.get('fingerprint') or '-'}"
+                f" remark={entry.get('remark')!r}"
                 f" {state}"
             )
     return lines
