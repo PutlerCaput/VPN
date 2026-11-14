@@ -16,7 +16,8 @@ What differs from a local database:
 * ``transaction()`` and ``conn`` do not exist here: a multi-statement change
   belongs in a ``Database`` method, which then runs remotely as one call.
 * Timestamps written by ``Database`` come from the gateway's clock;
-  ``clock_skew_seconds`` is measured at ``connect()`` for the doctor.
+  ``clock_skew_seconds`` and ``tokens_accepted`` are read at ``connect()`` for
+  the doctor.
 * The two servers are updated one after the other, the gateway first:
   ``connect()`` refuses a gateway that lacks a method this bot can call.
 """
@@ -82,6 +83,8 @@ class RemoteDatabase(Database):
         self.path = self.base_url
         self.activity_logging_enabled = False
         self.clock_skew_seconds = 0
+        # 2 while the gateway's token is being replaced (set at connect()).
+        self.tokens_accepted = 1
         self._remote_encrypted = False
         self._headers = {
             "Authorization": f"Bearer {token}",
@@ -141,6 +144,7 @@ class RemoteDatabase(Database):
         self._remote_encrypted = bool(facts.get("encrypted"))
         self.activity_logging_enabled = bool(facts.get("activity_logging_enabled"))
         self.clock_skew_seconds = int(facts.get("server_time") or 0) - int(time.time())
+        self.tokens_accepted = int(facts.get("tokens_accepted") or 1)
 
     async def close(self) -> None:
         if self._session is not None:

@@ -15,6 +15,12 @@ Every other request carries ``Authorization: Bearer <token>``. Traffic is plain
 HTTP, so the service refuses to listen anywhere but a loopback or private
 address: it is meant for a WireGuard tunnel between the two servers.
 
+While the token is being replaced, a second one is accepted next to it
+(``db_gateway_token_next``): the bot switches over at its own pace, the old
+token is dropped only after nobody uses it any more, and a failed switch can go
+back (docs/RU_DATABASE_CUTOVER.md, "Смена токена"). ``/v1/info`` says how many
+tokens are accepted and when each was last used for real work.
+
 A repeated request id returns the first answer instead of running the method
 again, so a client that lost a response can retry a write safely. A method
 keeps running when its caller disconnects, so the answer is there for the
@@ -46,7 +52,13 @@ from pathlib import Path
 from typing import Any
 
 from aiohttp import web
-from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic import (
+    Field,
+    SecretStr,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from db.database import Database, DatabaseKeyError, PendingPaymentLimitError
@@ -134,6 +146,8 @@ class GatewaySettings(BaseSettings):
     database_path: str = "data/bot.db"
     db_key: SecretStr | None = None
     db_gateway_token: SecretStr
+    # Exists only while the token is being replaced (see the module docstring).
+    db_gateway_token_next: SecretStr | None = None
     db_gateway_host: str
     db_gateway_port: int = Field(8444, ge=1024, le=65535)
     # A missing file is a wrong path far more often than a first installation,
@@ -161,6 +175,31 @@ class GatewaySettings(BaseSettings):
             raise ValueError(
                 f"db_gateway_token must be at least {MIN_TOKEN_LENGTH} characters"
             )
+        return value
+
+    @field_validator("db_gateway_token_next", mode="before")
+    @classmethod
+    def _blank_next_is_none(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
+
+    @field_validator("db_gateway_token_next")
+    @classmethod
+    def _next_is_long_and_new(
+        cls, value: SecretStr | None, info: ValidationInfo
+    ) -> SecretStr | None:
+        if value is None:
+            return None
+        if len(value.get_secret_value()) < MIN_TOKEN_LENGTH:
+            raise ValueError(
+                f"db_gateway_token_next must be at least {MIN_TOKEN_LENGTH} characters"
+            )
+        current = info.data.get("db_gateway_token")
+        if current is not None and hmac.compare_digest(
+            value.get_secret_value().encode(), current.get_secret_value().encode()
+        ):
+            raise ValueError("db_gateway_token_next must differ from db_gateway_token")
         return value
 
     @field_validator("db_gateway_host")
@@ -229,26 +268,70 @@ def _error(status: int, code: str) -> web.Response:
     return _reply(status, _json({"error": {"type": code, "message": code}}))
 
 
-def create_gateway_app(database: Database, token: str) -> web.Application:
-    """The gateway application around an already connected ``Database``."""
+class _TokenUse:
+    """How often and how lately a token did real work (not introspection)."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self._last: float | None = None
+
+    def record(self) -> None:
+        self.calls += 1
+        self._last = time.monotonic()
+
+    def facts(self) -> dict[str, int | None]:
+        idle = None if self._last is None else int(time.monotonic() - self._last)
+        return {"calls": self.calls, "idle_seconds": idle}
+
+
+def create_gateway_app(
+    database: Database, token: str, next_token: str | None = None
+) -> web.Application:
+    """The gateway application around an already connected ``Database``.
+
+    ``next_token`` is accepted next to ``token`` while the token is replaced.
+    """
     if len(token) < MIN_TOKEN_LENGTH:
         raise ValueError(f"token must be at least {MIN_TOKEN_LENGTH} characters")
+    if next_token is not None:
+        if len(next_token) < MIN_TOKEN_LENGTH:
+            raise ValueError(
+                f"next token must be at least {MIN_TOKEN_LENGTH} characters"
+            )
+        if hmac.compare_digest(next_token.encode(), token.encode()):
+            raise ValueError("next token must differ from the token")
     methods = remote_methods()
     shapes = api_shapes()
     replay = _Replay()
     running: set[asyncio.Task[None]] = set()
-    expected = f"Bearer {token}".encode()
+    started = time.monotonic()
+    accepted = {"current": f"Bearer {token}".encode()}
+    if next_token is not None:
+        accepted["next"] = f"Bearer {next_token}".encode()
+    uses = {name: _TokenUse() for name in accepted}
 
     @web.middleware
     async def authenticate(
         request: web.Request,
         handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
     ) -> web.StreamResponse:
-        if request.path != "/healthz":
-            given = request.headers.get("Authorization", "").encode()
-            if not hmac.compare_digest(given, expected):
-                return _error(401, "unauthorized")
-        return await handler(request)
+        if request.path == "/healthz":
+            return await handler(request)
+        given = request.headers.get("Authorization", "").encode()
+        who: str | None = None
+        for name, wanted in accepted.items():
+            # Every candidate is compared: the answer time does not say which.
+            if hmac.compare_digest(given, wanted):
+                who = name
+        if who is None:
+            return _error(401, "unauthorized")
+        try:
+            return await handler(request)
+        finally:
+            # Recorded after the answer, so /v1/info does not count itself, and
+            # only work counts: asking how the tokens are used is not using one.
+            if request.path != "/v1/info":
+                uses[who].record()
 
     async def healthz(_request: web.Request) -> web.Response:
         return web.Response(text="ok")
@@ -270,6 +353,9 @@ def create_gateway_app(database: Database, token: str) -> web.Application:
                     "server_time": int(time.time()),
                     "methods": len(methods),
                     "api": shapes,
+                    "tokens_accepted": len(accepted),
+                    "uptime_seconds": int(time.monotonic() - started),
+                    "token_use": {name: use.facts() for name, use in uses.items()},
                 }
             ),
         )
@@ -448,7 +534,12 @@ async def serve(settings: GatewaySettings) -> None:
         activity_logging_enabled=settings.activity_logging_enabled,
     )
     await database.connect()
-    app = create_gateway_app(database, settings.db_gateway_token.get_secret_value())
+    next_token = settings.db_gateway_token_next
+    app = create_gateway_app(
+        database,
+        settings.db_gateway_token.get_secret_value(),
+        next_token.get_secret_value() if next_token is not None else None,
+    )
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, settings.db_gateway_host, settings.db_gateway_port)
@@ -459,6 +550,9 @@ async def serve(settings: GatewaySettings) -> None:
     try:
         await site.start()
         logger.info("gateway_started")
+        if next_token is not None:
+            # One line per start: a rotation that was opened and forgotten.
+            logger.warning("gateway_two_tokens")
         await stop.wait()
     finally:
         await runner.cleanup()

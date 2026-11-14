@@ -937,6 +937,7 @@ async def test_bot_startup_refuses_a_wrong_token(
 def gateway_env(monkeypatch: pytest.MonkeyPatch, **values: str) -> None:
     for name in (
         "DB_GATEWAY_TOKEN",
+        "DB_GATEWAY_TOKEN_NEXT",
         "DB_GATEWAY_HOST",
         "DB_GATEWAY_PORT",
         "DB_GATEWAY_CREATE",
@@ -1103,6 +1104,138 @@ async def test_gateway_creates_a_database_only_when_told_to(
         with pytest.raises(asyncio.CancelledError):
             await serving
     assert path.stat().st_size > 0
+
+
+# ------------------------------------------------------- replacing the token
+NEXT_TOKEN = "next-gateway-token-" + "1" * 24
+NEXT_AUTH = {"Authorization": f"Bearer {NEXT_TOKEN}"}
+
+
+@pytest.fixture
+async def rotating(local: Database) -> AsyncIterator[TestServer]:
+    """The gateway while its token is being replaced: both are accepted."""
+    server = TestServer(create_gateway_app(local, GATEWAY_TOKEN, NEXT_TOKEN))
+    await server.start_server()
+    yield server
+    await server.close()
+
+
+async def token_facts(
+    http: aiohttp.ClientSession, server: TestServer, headers: dict[str, str]
+) -> dict[str, Any]:
+    async with http.get(server.make_url("/v1/info"), headers=headers) as response:
+        assert response.status == 200
+        facts: dict[str, Any] = await response.json()
+        return facts
+
+
+async def test_both_tokens_work_during_a_rotation_and_nothing_else(
+    rotating: TestServer, http: aiohttp.ClientSession
+) -> None:
+    for headers in (AUTH, NEXT_AUTH):
+        status, _, _ = await post(http, rotating, call_body("ping"), headers)
+        assert status == 200
+    for headers in ({}, {"Authorization": "Bearer " + "x" * 40}):
+        status, _, _ = await post(http, rotating, call_body("ping"), headers)
+        assert status == 401
+        async with http.get(rotating.make_url("/v1/info"), headers=headers) as response:
+            assert response.status == 401
+
+
+async def test_info_says_how_the_tokens_are_used(
+    rotating: TestServer, http: aiohttp.ClientSession
+) -> None:
+    first = await token_facts(http, rotating, NEXT_AUTH)
+    assert first["tokens_accepted"] == 2
+    assert first["uptime_seconds"] >= 0
+    assert first["token_use"] == {
+        "current": {"calls": 0, "idle_seconds": None},
+        "next": {"calls": 0, "idle_seconds": None},
+    }
+    # Asking is not using: neither question moved anything.
+    assert (await token_facts(http, rotating, AUTH))["token_use"] == first["token_use"]
+    status, _, _ = await post(http, rotating, call_body("ping"), NEXT_AUTH)
+    assert status == 200
+    after = (await token_facts(http, rotating, AUTH))["token_use"]
+    assert after["next"]["calls"] == 1
+    assert 0 <= after["next"]["idle_seconds"] <= 2
+    assert after["current"] == {"calls": 0, "idle_seconds": None}
+
+
+async def test_with_one_token_the_info_reports_one(
+    gateway: TestServer, http: aiohttp.ClientSession
+) -> None:
+    facts = await token_facts(http, gateway, AUTH)
+    assert facts["tokens_accepted"] == 1
+    assert list(facts["token_use"]) == ["current"]
+
+
+async def test_the_client_learns_how_many_tokens_are_accepted(
+    rotating: TestServer, remote: RemoteDatabase
+) -> None:
+    assert remote.tokens_accepted == 1
+    client = RemoteDatabase(str(rotating.make_url("/")), NEXT_TOKEN)
+    await client.connect()
+    try:
+        assert client.tokens_accepted == 2
+    finally:
+        await client.close()
+
+
+async def test_a_second_token_must_be_long_and_different(local: Database) -> None:
+    with pytest.raises(ValueError, match="32"):
+        create_gateway_app(local, GATEWAY_TOKEN, "short")
+    with pytest.raises(ValueError, match="differ"):
+        create_gateway_app(local, GATEWAY_TOKEN, GATEWAY_TOKEN)
+
+
+def test_gateway_settings_take_a_second_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    gateway_env(
+        monkeypatch,
+        DB_GATEWAY_TOKEN=GATEWAY_TOKEN,
+        DB_GATEWAY_HOST="10.204.0.1",
+        DB_GATEWAY_TOKEN_NEXT=f" {NEXT_TOKEN}\n",
+    )
+    settings = GatewaySettings()
+    assert settings.db_gateway_token_next is not None
+    assert settings.db_gateway_token_next.get_secret_value() == NEXT_TOKEN
+    assert NEXT_TOKEN not in repr(settings)
+
+
+@pytest.mark.parametrize("blank", ["", "  ", "\n"])
+def test_a_blank_second_token_is_no_second_token(
+    monkeypatch: pytest.MonkeyPatch, blank: str
+) -> None:
+    gateway_env(
+        monkeypatch,
+        DB_GATEWAY_TOKEN=GATEWAY_TOKEN,
+        DB_GATEWAY_HOST="10.204.0.1",
+        DB_GATEWAY_TOKEN_NEXT=blank,
+    )
+    assert GatewaySettings().db_gateway_token_next is None
+
+
+@pytest.mark.parametrize("second", ["short-secret", GATEWAY_TOKEN])
+def test_a_bad_second_token_refuses_to_start_and_names_only_the_field(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    second: str,
+) -> None:
+    import db.gateway as gateway_module
+
+    gateway_env(
+        monkeypatch,
+        DB_GATEWAY_TOKEN=GATEWAY_TOKEN,
+        DB_GATEWAY_HOST="10.204.0.1",
+        DB_GATEWAY_TOKEN_NEXT=second,
+    )
+    with pytest.raises(SystemExit) as caught:
+        gateway_module.main()
+    assert caught.value.code == 2
+    err = capsys.readouterr().err
+    assert "db_gateway_token_next" in err
+    assert second not in err
+    assert GATEWAY_TOKEN not in err
 
 
 def test_short_tokens_are_refused_everywhere(local: Database) -> None:

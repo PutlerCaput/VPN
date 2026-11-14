@@ -24,7 +24,7 @@ import pytest
 from aiohttp.test_utils import unused_port
 
 from db.database import Database
-from db.remote import RemoteDatabase
+from db.remote import RemoteDatabase, RemoteDatabaseError
 
 ROOT = Path(__file__).resolve().parents[1]
 KEY = "ab" * 32
@@ -419,3 +419,172 @@ def test_unknown_arguments_are_refused(box: Box) -> None:
         result = box.run(*arguments)
         assert result.returncode == 1
         assert "usage" in result.stderr
+
+
+# ----------------------------------------------------------- replacing the token
+def next_file(box: Box) -> Path:
+    return box.etc / "secrets" / "db_gateway_token_next"
+
+
+async def work_with(box: Box, token: str) -> str:
+    """A real database call with this token: it counts as the token being used."""
+    client = RemoteDatabase(f"http://127.0.0.1:{box.port}", token)
+    try:
+        await client.connect()
+        user = await client.get_user(777)
+        assert user is not None
+        return str(user["username"])
+    finally:
+        await client.close()
+
+
+def refused(box: Box, token: str) -> bool:
+    try:
+        asyncio.run(work_with(box, token))
+    except RemoteDatabaseError as exc:
+        return "401" in str(exc)
+    return False
+
+
+def running_gateway(box: Box) -> None:
+    box.run("--apply")
+    box.put_database()
+    started = box.run("--start")
+    assert started.returncode == 0, started.stderr
+
+
+def test_a_token_change_opens_with_two_tokens_and_shows_nothing(box: Box) -> None:
+    running_gateway(box)
+    old = box.token_file.read_text()
+    assert "token change: none open" in box.run().stdout
+    opened = box.run("--rotate-token")
+    assert opened.returncode == 0, opened.stderr
+    assert "DB_GATEWAY_ROTATION_OPEN" in opened.stdout
+    new = next_file(box).read_text()
+    assert re.fullmatch(r"[0-9a-f]{64}", new)
+    assert new != old
+    assert mode(next_file(box)) == 0o440
+    for text in (opened.stdout, opened.stderr):
+        assert old not in text
+        assert new not in text
+    # Both tokens work, the current token's file is untouched, and it is said.
+    assert box.token_file.read_text() == old
+    assert asyncio.run(work_with(box, old)) == "moved"
+    assert asyncio.run(work_with(box, new)) == "moved"
+    assert box.run("--status").stdout.count("WARN token change") == 1
+    assert "token change: OPEN" in box.run().stdout
+    again = box.run("--rotate-token")
+    assert again.returncode == 1
+    assert "already open" in again.stderr
+
+
+def test_a_token_change_needs_the_gateway_running(box: Box) -> None:
+    box.run("--apply")
+    result = box.run("--rotate-token")
+    assert result.returncode == 1
+    assert "start it first" in result.stderr
+    assert not next_file(box).exists()
+
+
+def test_the_old_token_goes_only_after_the_new_one_is_in_use(box: Box) -> None:
+    running_gateway(box)
+    old = box.token_file.read_text()
+    box.run("--rotate-token")
+    new = next_file(box).read_text()
+    fast = {"TOKEN_ROTATION_IDLE_SECONDS": "2"}
+
+    # Nobody has used the new token: nothing happens, both still work.
+    early = box.run("--finish-token-rotation", **fast)
+    assert early.returncode == 3  # "not yet": db_cutover.sh waits on this code
+    assert "nobody has used the new token yet" in early.stderr
+    assert next_file(box).read_text() == new
+    assert box.token_file.read_text() == old
+
+    # The bot moved over: the new token works, the old one has fallen silent.
+    assert asyncio.run(work_with(box, new)) == "moved"
+    time.sleep(2.3)
+    done = box.run("--finish-token-rotation", **fast)
+    assert done.returncode == 0, done.stderr
+    assert "DB_GATEWAY_TOKEN_ROTATED" in done.stdout
+    for text in (done.stdout, done.stderr):
+        assert old not in text
+        assert new not in text
+    assert box.token_file.read_text() == new
+    assert not next_file(box).exists()
+    assert not (box.etc / "secrets" / "db_gateway_token.finishing").exists()
+    assert asyncio.run(work_with(box, new)) == "moved"
+    assert refused(box, old)
+    assert "token change" not in box.run("--status").stdout
+
+
+def test_finish_refuses_while_the_old_token_is_still_in_use(box: Box) -> None:
+    running_gateway(box)
+    old = box.token_file.read_text()
+    box.run("--rotate-token")
+    new = next_file(box).read_text()
+    assert asyncio.run(work_with(box, new)) == "moved"
+    time.sleep(2.3)
+    # A client that is still on the old token shows itself just before.
+    assert asyncio.run(work_with(box, old)) == "moved"
+    early = box.run("--finish-token-rotation", TOKEN_ROTATION_IDLE_SECONDS="2")
+    assert early.returncode == 3
+    assert "the old token was used" in early.stderr
+    assert "nothing was changed" in early.stderr
+    assert next_file(box).read_text() == new
+    assert box.token_file.read_text() == old
+    assert asyncio.run(work_with(box, old)) == "moved"
+    assert asyncio.run(work_with(box, new)) == "moved"
+
+
+def test_a_young_gateway_does_not_count_the_silence(box: Box) -> None:
+    """A restart wipes what was seen: a short silence proves nothing."""
+    running_gateway(box)
+    box.run("--rotate-token")
+    assert asyncio.run(work_with(box, next_file(box).read_text())) == "moved"
+    early = box.run("--finish-token-rotation", TOKEN_ROTATION_IDLE_SECONDS="600")
+    assert early.returncode == 3
+    assert "restarted" in early.stderr
+    assert next_file(box).exists()
+
+
+def test_giving_the_new_token_up_keeps_the_old_one(box: Box) -> None:
+    running_gateway(box)
+    old = box.token_file.read_text()
+    box.run("--rotate-token")
+    new = next_file(box).read_text()
+    cancelled = box.run("--cancel-token-rotation", TOKEN_ROTATION_IDLE_SECONDS="2")
+    assert cancelled.returncode == 0, cancelled.stderr
+    assert "DB_GATEWAY_ROTATION_CANCELLED" in cancelled.stdout
+    assert not next_file(box).exists()
+    assert box.token_file.read_text() == old
+    assert asyncio.run(work_with(box, old)) == "moved"
+    assert refused(box, new)
+
+
+def test_giving_up_is_refused_when_the_bot_works_with_the_new_token(box: Box) -> None:
+    running_gateway(box)
+    box.run("--rotate-token")
+    new = next_file(box).read_text()
+    assert asyncio.run(work_with(box, new)) == "moved"
+    result = box.run("--cancel-token-rotation", TOKEN_ROTATION_IDLE_SECONDS="30")
+    assert result.returncode == 3
+    assert "Finish the change" in result.stderr
+    assert next_file(box).exists()
+    assert asyncio.run(work_with(box, new)) == "moved"
+
+
+def test_finish_and_cancel_need_an_open_change(box: Box) -> None:
+    running_gateway(box)
+    for command in ("--finish-token-rotation", "--cancel-token-rotation"):
+        result = box.run(command)
+        assert result.returncode == 1
+        assert "no token change is open" in result.stderr
+
+
+def test_the_idle_setting_must_be_a_number(box: Box) -> None:
+    running_gateway(box)
+    box.run("--rotate-token")
+    result = box.run("--finish-token-rotation", TOKEN_ROTATION_IDLE_SECONDS="soon")
+    assert result.returncode == 1
+    assert "must be a number" in result.stderr
+    assert next_file(box).exists()

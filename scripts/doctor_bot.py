@@ -254,6 +254,12 @@ async def check_database(s: Any) -> bool | None:
         skew = abs(client.clock_skew_seconds)
         if skew > MAX_CLOCK_SKEW_SECONDS:
             line("WARN", f"the two servers' clocks differ by {skew} s: fix their time")
+        if getattr(client, "tokens_accepted", 1) > 1:
+            line(
+                "WARN",
+                "the gateway still accepts two tokens: a token rotation was started "
+                "and not finished (RU: db_gateway_install.sh --finish-token-rotation)",
+            )
         return bool(client.activity_logging_enabled)
     finally:
         await client.close()

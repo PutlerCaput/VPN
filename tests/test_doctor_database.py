@@ -231,3 +231,38 @@ async def test_an_unreachable_or_unwilling_gateway_is_a_failure(
     out = capsys.readouterr().out
     assert "FAIL database gateway refused the bot" in out
     assert "wrong-token" not in out
+
+
+async def test_an_unfinished_token_rotation_is_flagged(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The gateway accepts two tokens only while a token change is open."""
+    import db.remote as remote_module
+
+    class Client:
+        encrypted = True
+        clock_skew_seconds = 0
+        activity_logging_enabled = False
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            self.tokens_accepted = accepted[0]
+
+        async def connect(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    accepted = [1]
+    monkeypatch.setattr(remote_module, "RemoteDatabase", Client)
+    configured = settings(
+        database_url="http://10.204.0.1:8444", db_gateway_token=SecretStr("t" * 40)
+    )
+    await doctor.check_database(configured)
+    assert "two tokens" not in capsys.readouterr().out
+
+    accepted[0] = 2
+    await doctor.check_database(configured)
+    out = capsys.readouterr().out
+    assert "WARN the gateway still accepts two tokens" in out
+    assert "--finish-token-rotation" in out

@@ -15,6 +15,13 @@
 #   bash db_cutover.sh connection-log on|off
 #                                 the connection records switch. "on" is refused
 #                                 until the bot publishes the policy that names them
+#   bash db_cutover.sh rotate-token
+#                                 a new gateway token, with no downtime: RU accepts
+#                                 the old and the new one, the bot takes the new one
+#                                 (and keeps the old one if that fails), then the
+#                                 old one is dropped. Run  update  first
+#   bash db_cutover.sh rotate-token cancel
+#                                 give an open token change up, keep the old token
 #
 # Nothing secret is shown or stored on the phone: the database, its key and the
 # access token only pass through, from one ssh to the other.
@@ -310,6 +317,83 @@ connection_log() {
   say "CUTOVER_CONNECTION_LOG $want"
 }
 
+# Runs a gateway option on RU until it stops saying "not yet" (exit code 3):
+# the old token needs a couple of quiet minutes before it can be dropped.
+# Returns 0 when it worked, 3 when it still said "not yet" at the end, else its code.
+ru_until_ready() {
+  local option="$1" limit="$2" waited=0 rc tick="${POLL_SECONDS:-15}"
+  ((tick > 0)) || tick=1
+  while :; do
+    rc=0
+    ru "bash $RU_SRC/scripts/db_gateway_install.sh $option" || rc=$?
+    ((rc == 0)) && return 0
+    ((rc == 3)) || return "$rc"
+    ((waited < limit)) || return 3
+    sleep "${POLL_SECONDS:-15}"
+    waited=$((waited + tick))
+  done
+}
+
+# The bot is on the old token (or the change is given up on purpose): the new
+# token goes. Refused for a minute or two while the bot may still be using it.
+give_the_new_token_up() {
+  local rc=0
+  ru_until_ready --cancel-token-rotation "${ROTATE_WAIT_SECONDS:-600}" || rc=$?
+  ((rc == 0)) || return "$rc"
+}
+
+rotate_token() {
+  local mode="${1:-}" rc=0
+  [[ -z "$mode" || "$mode" == cancel ]] || stop "usage: db_cutover.sh rotate-token [cancel]"
+  bot_facts
+  bot_is_remote || stop "the bot does not use the gateway: there is no gateway token to change"
+  ru "grep -q -- --rotate-token $RU_SRC/scripts/db_gateway_install.sh" \
+    || stop "the gateway scripts on RU are older than this one: run  bash db_cutover.sh update  first"
+  if [[ "$mode" == cancel ]]; then
+    step "Give the open token change up"
+    ru "test -e $RU_SECRETS/db_gateway_token_next" || stop "no token change is open"
+    give_the_new_token_up || stop "the new token could not be given up yet (the bot may still use it): try again in a few minutes, or finish it with  bash db_cutover.sh rotate-token"
+    say ""
+    say "CUTOVER_TOKEN_CHANGE_CANCELLED: the old token works as before."
+    return
+  fi
+  [[ "$(bot_health)" == healthy ]] || stop "the bot is not healthy: fix that first (bash db_cutover.sh status)"
+
+  step "1/3 RU: a new token, accepted next to the old one"
+  if ru "test -e $RU_SECRETS/db_gateway_token_next"; then
+    say "a change is already open on RU: continuing it"
+  else
+    ru "bash $RU_SRC/scripts/db_gateway_install.sh --rotate-token" \
+      || stop "no new token was made; nothing changed and the old token works"
+  fi
+
+  step "2/3 DE: the bot takes the new token (and keeps the old one if it does not come up)"
+  if ! ru "cat $RU_SECRETS/db_gateway_token_next" \
+    | de "bash $DE_SRC/scripts/update_bot.sh --database-gateway $GATEWAY_URL"; then
+    # update_bot.sh put the old token back if it got as far as changing it.
+    say "The bot did not come up with the new token; the old one is back."
+    give_the_new_token_up \
+      || say "WARN: the new token is still accepted on RU for now: later,  bash db_cutover.sh rotate-token cancel"
+    stop "the token was not changed: the bot works with the old one"
+  fi
+
+  step "3/3 RU: wait until the old token is silent, then drop it"
+  ru_until_ready --finish-token-rotation "${ROTATE_WAIT_SECONDS:-600}" || rc=$?
+  if ((rc == 3)); then
+    stop "the old token is still being used after ${ROTATE_WAIT_SECONDS:-600}s. The bot is on the new token and both tokens are accepted, so nothing is broken. Find what else uses the old token, then run  bash db_cutover.sh rotate-token  again"
+  elif ((rc != 0)); then
+    stop "the old token was not dropped (see above); both tokens are still accepted, so nothing is broken"
+  fi
+
+  step "Check"
+  [[ "$(bot_health)" == healthy ]] || stop "the token is changed, but the bot is not healthy: bash db_cutover.sh status"
+  ru "bash $RU_SRC/scripts/db_gateway_install.sh --status"
+  say ""
+  say "CUTOVER_TOKEN_ROTATED: the bot and the gateway use a new token; the old one is destroyed."
+  say "On RU the integrity check will show the changed token file: look, then accept (docs/RU_HARDENING.md)."
+  say "Older .env.before-* copies on DE may still hold the old token; it opens nothing now."
+}
+
 status() {
   bot_facts
   step "DE"
@@ -334,5 +418,6 @@ case "${1:-}" in
   status) status ;;
   update) update ;;
   connection-log) connection_log "${2:-}" ;;
-  *) stop "usage: db_cutover.sh check | prepare | switch | rollback | status | update | connection-log on|off" ;;
+  rotate-token) rotate_token "${2:-}" ;;
+  *) stop "usage: db_cutover.sh check | prepare | switch | rollback | status | update | connection-log on|off | rotate-token [cancel]" ;;
 esac
