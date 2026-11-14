@@ -26,6 +26,12 @@ STATE="${TRANSPORT_STATE:-/var/lib/marzban/.vless-transport}"   # path of the ba
 WAIT_SECONDS="${WAIT_SECONDS:-60}"
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 SRC="$(dirname "$HERE")"
+# Signed releases (docs/SIGNED_RELEASES.md): once the guard is installed, only the
+# code the owner signed is built.
+RELEASE_GUARD="${RELEASE_GUARD_BIN:-/usr/local/sbin/vpn-release-guard}"
+if [[ -x "$RELEASE_GUARD" ]]; then
+  "$RELEASE_GUARD" --verify-head "$SRC" || exit 1
+fi
 
 say() { printf '%s\n' "$*"; }
 stop() {

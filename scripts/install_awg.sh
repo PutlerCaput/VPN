@@ -35,6 +35,12 @@ fi
 SOURCE="${1:-}"
 [[ -n "$SOURCE" && -f "$SOURCE/deploy/awg/Dockerfile" ]] \
   || fail "usage: install_awg.sh <new source folder> [--apply]"
+# Signed releases (docs/SIGNED_RELEASES.md): once the guard is installed, only the
+# code the owner signed is built.
+RELEASE_GUARD="${RELEASE_GUARD_BIN:-/usr/local/sbin/vpn-release-guard}"
+if [[ -x "$RELEASE_GUARD" ]]; then
+  "$RELEASE_GUARD" --verify-head "$SOURCE" || exit 1
+fi
 APPLY=0
 [[ "${2:-}" == "--apply" ]] && APPLY=1
 
