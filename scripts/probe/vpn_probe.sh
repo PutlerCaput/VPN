@@ -11,6 +11,11 @@
 # says what is reachable and how fast. docs/PROBE_RU_MOBILE.md explains it.
 #
 #   bash vpn_probe.sh run          one measurement: log it, alert on a change
+#   bash vpn_probe.sh loop [MIN]   measure every MIN minutes (PROBE_PERIOD, 15) until
+#                                  stopped: for a phone without the Termux:API app,
+#                                  which has no job scheduler. Keep Termux alive (it
+#                                  takes a wake lock)
+#   bash vpn_probe.sh loop-stop    stop that loop
 #   bash vpn_probe.sh summary [H]  per network and target over the last H hours (24)
 #   bash vpn_probe.sh last         the last run, target by target
 #   bash vpn_probe.sh status       one line: OK or WARN (for a quick look)
@@ -30,11 +35,17 @@ NOW="${PROBE_NOW:-$(date +%s)}"
 PROBE_SITE_URL=""
 PROBE_ENTRIES=""
 PROBE_CONTROLS="https://ya.ru/ http://connectivitycheck.gstatic.com/generate_204"
-PROBE_TELEGRAM="https://api.telegram.org/ https://t.me/"
+# The bot and the Mini App need api.telegram.org and t.me; the site's login
+# widget loads from telegram.org and signs in at oauth.telegram.org.
+PROBE_TELEGRAM="https://api.telegram.org/ https://t.me/ https://telegram.org/ https://oauth.telegram.org/"
+API_TIMEOUT="${PROBE_API_TIMEOUT:-8}"
+JOB_ID="${PROBE_JOB_ID:-4712}"   # the Android job install_probe.sh schedules
+LOOP_UNIT="${PROBE_LOOP_UNIT:-60}"   # seconds in a "minute": tests make it 1
 PROBE_NET=""
 PROBE_OPERATOR=""
 PROBE_TIMEOUT=10
 PROBE_FAIL_STREAK=3
+PROBE_PERIOD=15   # minutes between runs, as scheduled: the stale check counts in these
 
 say() { printf '%s\n' "$*"; }
 stop() {
@@ -54,7 +65,7 @@ load_config() {
     value="${value%\"}"
     value="${value#\"}"
     case "$key" in
-      PROBE_SITE_URL | PROBE_ENTRIES | PROBE_CONTROLS | PROBE_TELEGRAM | PROBE_NET | PROBE_OPERATOR | PROBE_TIMEOUT | PROBE_FAIL_STREAK)
+      PROBE_SITE_URL | PROBE_ENTRIES | PROBE_CONTROLS | PROBE_TELEGRAM | PROBE_NET | PROBE_OPERATOR | PROBE_TIMEOUT | PROBE_FAIL_STREAK | PROBE_PERIOD)
         printf -v "$key" '%s' "$value"
         ;;
     esac
@@ -70,6 +81,8 @@ validate_config() {
     || stop "PROBE_TIMEOUT must be 1..60 seconds"
   [[ "$PROBE_FAIL_STREAK" =~ ^[0-9]{1,2}$ && "$PROBE_FAIL_STREAK" -ge 1 && "$PROBE_FAIL_STREAK" -le 20 ]] \
     || stop "PROBE_FAIL_STREAK must be 1..20 runs"
+  [[ "$PROBE_PERIOD" =~ ^[1-9][0-9]{0,3}$ && "$PROBE_PERIOD" -le 1440 ]] \
+    || stop "PROBE_PERIOD must be 1..1440 minutes"
   if [[ -n "$PROBE_SITE_URL" ]]; then
     [[ "$PROBE_SITE_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]] \
       || stop "PROBE_SITE_URL must look like https://app.example.com (no path)"
@@ -87,25 +100,47 @@ validate_config() {
     || stop "nothing of ours to measure: set PROBE_SITE_URL and PROBE_ENTRIES in $CONF"
 }
 
+# A Termux:API command, never for long: without the Termux:API app some versions
+# wait for an answer that never comes, and a measurement must not hang on it.
+api_call() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$API_TIMEOUT" "$@" 2>/dev/null || true
+  else
+    "$@" 2>/dev/null || true
+  fi
+}
+
+# True when the Android job scheduler already runs this probe. A loop next to it would
+# measure twice, and every failure would count twice towards an alert.
+scheduler_has_the_job() {
+  command -v termux-job-scheduler >/dev/null 2>&1 || return 1
+  api_call termux-job-scheduler --pending | grep -q "$JOB_ID"
+}
+
 # What kind of network the phone is on right now, and whose: "<net> <operator>".
+# Only what the Termux:API really answered counts: any other text (for instance
+# the notice that the app is not installed) means "unknown", not "mobile".
 network_facts() {
   local net="$PROBE_NET" operator="$PROBE_OPERATOR" info
   if [[ -z "$net" ]]; then
     net=unknown
     if command -v termux-wifi-connectioninfo >/dev/null 2>&1; then
-      info="$(termux-wifi-connectioninfo 2>/dev/null || true)"
-      if [[ -n "$info" ]]; then
+      info="$(api_call termux-wifi-connectioninfo)"
+      if grep -q '"supplicant_state"' <<<"$info"; then
         if grep -q '"supplicant_state": *"COMPLETED"' <<<"$info"; then net=wifi; else net=mobile; fi
       fi
     fi
   fi
   if [[ -z "$operator" ]]; then
-    operator=unknown
     if command -v termux-telephony-deviceinfo >/dev/null 2>&1; then
-      operator="$(termux-telephony-deviceinfo 2>/dev/null \
+      operator="$(api_call termux-telephony-deviceinfo \
         | sed -n 's/.*"network_operator_name": *"\([^"]*\)".*/\1/p' | head -1 || true)"
-      operator="${operator:-unknown}"
     fi
+    # Without the Termux:API app Android still names the SIM's operator (first SIM).
+    if [[ -z "$operator" ]] && command -v getprop >/dev/null 2>&1; then
+      operator="$(getprop gsm.operator.alpha 2>/dev/null | cut -d, -f1 | head -1 || true)"
+    fi
+    operator="${operator:-unknown}"
   fi
   # One word per field in the log: no tabs, no odd characters.
   operator="$(printf '%s' "$operator" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-24)"
@@ -181,18 +216,22 @@ check_entry() {
   add_row "entry:$host:$port" ours "$status" "$reason" "$code" "$(ms "$tcp")" "$(ms "$tls")" "$(ms "$total")"
 }
 
+# notify <down|up> <text>: always into alerts.log; as a notification only when the
+# Termux:API app is there to show it.
 notify() {
-  local target="$1" text="$2"
+  local kind="$1" text="$2"
   printf '%s\t%s\n' "$NOW" "$text" >>"$ALERTS"
   if command -v termux-notification >/dev/null 2>&1; then
-    termux-notification --id "vpn-probe-${target//[^A-Za-z0-9]/_}" --title "VPN probe" \
-      --content "$text" >/dev/null 2>&1 || true
+    api_call termux-notification --id "vpn-probe-$kind-$NOW" --title "VPN probe" \
+      --content "$text" >/dev/null
   fi
 }
 
-# State: "<target> <status> <failures in a row> <alerted 0|1>" per line.
+# State: "<target> <status> <failures in a row> <alerted 0|1>" per line. A run that
+# crosses the line for several targets at once (Telegram has four) is one message.
 update_state() {
   local valid="$1" net="$2" operator="$3" row target kind status streak alerted old
+  local went_down="" came_back=""
   touch "$STATE"
   for row in "${ROWS[@]}"; do
     IFS=$'\t' read -r target kind status _ <<<"$row"
@@ -205,11 +244,11 @@ update_state() {
       streak=$((streak + 1))
       if ((streak >= PROBE_FAIL_STREAK && alerted == 0)); then
         alerted=1
-        notify "$target" "Не отвечает: $target (запусков подряд: $streak, сеть $net/$operator)"
+        went_down+="${went_down:+, }$target"
       fi
     else
       if ((alerted == 1)); then
-        notify "$target" "Снова отвечает: $target (сеть $net/$operator)"
+        came_back+="${came_back:+, }$target"
       fi
       streak=0
       alerted=0
@@ -217,6 +256,12 @@ update_state() {
     { awk -v t="$target" '$1 != t' "$STATE"; printf '%s %s %s %s\n' "$target" "$status" "$streak" "$alerted"; } >"$STATE.new"
     mv "$STATE.new" "$STATE"
   done
+  if [[ -n "$went_down" ]]; then
+    notify down "Не отвечает: $went_down (запусков подряд: $PROBE_FAIL_STREAK, сеть $net/$operator)"
+  fi
+  if [[ -n "$came_back" ]]; then
+    notify up "Снова отвечает: $came_back (сеть $net/$operator)"
+  fi
 }
 
 trim_log() {
@@ -335,8 +380,8 @@ status() {
   local latest age failing
   latest="$(awk -F'\t' 'NR > 1 && $1 > m { m = $1 } END { print m }' "$LOG")"
   age=$(((NOW - latest) / 60))
-  if ((age > 3 * 15)); then
-    say "WARN probe: the last run was $age min ago; is the job still scheduled?"
+  if ((age > 3 * PROBE_PERIOD)); then
+    say "WARN probe: the last run was $age min ago; has the schedule (or the loop) stopped?"
     return 0
   fi
   failing="$(awk -F'\t' -v t="$latest" 'NR > 1 && $1 == t && $5 != "control" && $6 == "fail" && $12 == 1 { printf "%s ", $4 }' "$LOG")"
@@ -344,6 +389,96 @@ status() {
     say "WARN probe: not answering: $failing(run $age min ago)"
   else
     say "OK probe: last run $age min ago, nothing of ours failing"
+  fi
+}
+
+SELF="$(readlink -f "$0")"
+
+# Is this pid really our loop? A pid file can outlive a reboot, and by then the number
+# may belong to anything. When /proc cannot tell, the pid file is trusted.
+is_our_loop() {
+  local pid="$1" cmd
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  if [[ -r "/proc/$pid/cmdline" ]]; then
+    cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+    [[ "$cmd" == *vpn_probe.sh*loop* ]] || return 1
+  fi
+  return 0
+}
+
+# The loop's tidying, once, whichever way it ends. Only its own pid file is removed:
+# a newer loop may already have written another.
+loop_cleanup() {
+  local child
+  for child in "${runner:-}" "${sleeper:-}"; do
+    if [[ -n "$child" ]]; then kill "$child" 2>/dev/null || true; fi
+  done
+  if [[ "$(cat "$PROBE_HOME/loop.pid" 2>/dev/null || true)" == "$$" ]]; then
+    rm -f "$PROBE_HOME/loop.pid"
+  fi
+  if command -v termux-wake-unlock >/dev/null 2>&1; then api_call termux-wake-unlock >/dev/null; fi
+}
+
+# For a phone without the Termux:API app (no job scheduler): run every N minutes
+# until stopped. Each round is a fresh process, so settings changes apply at once.
+# The measurement and the pause are waited for in the background, so that a stop
+# takes effect at once and not after a measurement that may last a minute.
+loop() {
+  local minutes="${1:-$PROBE_PERIOD}" pid runner="" sleeper=""
+  [[ "$minutes" =~ ^[1-9][0-9]{0,3}$ ]] || stop "usage: vpn_probe.sh loop [minutes]"
+  install -d -m 0700 "$PROBE_HOME"
+  if [[ -f "$PROBE_HOME/loop.pid" ]]; then
+    pid="$(cat "$PROBE_HOME/loop.pid" 2>/dev/null || true)"
+    if is_our_loop "$pid"; then
+      stop "a loop is already running (pid $pid); stop it first: bash $SELF loop-stop"
+    fi
+  fi
+  if scheduler_has_the_job; then
+    stop "the Android scheduler already runs the probe (job $JOB_ID), and a loop next to it would measure twice. Keep one: install_probe.sh --loop cancels the job, or  termux-job-scheduler --cancel --job-id $JOB_ID"
+  fi
+  printf '%s\n' "$$" >"$PROBE_HOME/loop.pid"
+  trap loop_cleanup EXIT
+  trap 'exit 0' INT TERM
+  # Keeps the phone's CPU awake with the screen off; no Termux:API needed.
+  if command -v termux-wake-lock >/dev/null 2>&1; then api_call termux-wake-lock >/dev/null; fi
+  say "PROBE_LOOP: measuring every $minutes min (pid $$). Stop: bash $SELF loop-stop"
+  while :; do
+    # One short line per run, but never more than about 200 kB in all.
+    if [[ -f "$PROBE_HOME/run.out" && "$(wc -c <"$PROBE_HOME/run.out")" -gt 200000 ]]; then
+      : >"$PROBE_HOME/run.out"
+    fi
+    bash "$SELF" run >>"$PROBE_HOME/run.out" 2>&1 &
+    runner=$!
+    wait "$runner" || true
+    runner=""
+    sleep "$((minutes * LOOP_UNIT))" &
+    sleeper=$!
+    wait "$sleeper" || true
+    sleeper=""
+  done
+}
+
+loop_stop() {
+  local pid=""
+  [[ -f "$PROBE_HOME/loop.pid" ]] && pid="$(cat "$PROBE_HOME/loop.pid" 2>/dev/null || true)"
+  if is_our_loop "$pid"; then
+    kill "$pid" 2>/dev/null || true
+    # A process that has ended but is not yet collected by its parent is not ours any more.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      is_our_loop "$pid" || break
+      sleep 0.2
+    done
+    if is_our_loop "$pid"; then
+      say "PROBE_LOOP_STOPPING: pid $pid has been told to stop and is still ending"
+    else
+      rm -f "$PROBE_HOME/loop.pid"
+      say "PROBE_LOOP_STOPPED: pid $pid"
+    fi
+  else
+    # No loop, or a pid file left from before a reboot: the number is not ours to kill.
+    rm -f "$PROBE_HOME/loop.pid"
+    say "no loop is running"
   fi
 }
 
@@ -357,14 +492,17 @@ show_config() {
   say "PROBE_OPERATOR=${PROBE_OPERATOR:-(detected)}"
   say "PROBE_TIMEOUT=$PROBE_TIMEOUT"
   say "PROBE_FAIL_STREAK=$PROBE_FAIL_STREAK"
+  say "PROBE_PERIOD=$PROBE_PERIOD"
 }
 
 load_config
 case "${1:-}" in
   run) validate_config; run ;;
+  loop) validate_config; loop "${2:-}" ;;
+  loop-stop) loop_stop ;;
   summary) summary "${2:-24}" ;;
   last) last_run ;;
   status) status ;;
   config) show_config ;;
-  *) stop "usage: vpn_probe.sh run | summary [hours] | last | status | config" ;;
+  *) stop "usage: vpn_probe.sh run | loop [minutes] | loop-stop | summary [hours] | last | status | config" ;;
 esac
