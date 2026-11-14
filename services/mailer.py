@@ -67,5 +67,5 @@ class Mailer:
             await asyncio.to_thread(self._send, message)
         except (OSError, smtplib.SMTPException) as exc:
             # The address and the code stay out of the log.
-            logger.warning("mail_send_failed", extra={"error": type(exc).__name__})
+            logger.warning("mail_send_failed", extra={"failure": type(exc).__name__})
             raise MailError("send failed") from exc
