@@ -397,6 +397,17 @@ def test_the_operator_comes_from_the_system_when_the_app_has_none(
     (tmp_path / "getprop.txt").write_text("\n")
     plain.run("run", now=START + 900)
     assert plain.latest()["site"]["operator"] == "unknown"
+    # Two slots: "slot1,slot2". The name of the one that has a SIM is taken, whichever
+    # slot it is in.
+    for answer, expected in [
+        ("Sovcombank,\n", "Sovcombank"),
+        (",MTS RUS\n", "MTS_RUS"),
+        ("MTS RUS,Beeline\n", "MTS_RUS"),
+        (",\n", "unknown"),
+    ]:
+        (tmp_path / "getprop.txt").write_text(answer)
+        plain.run("run", now=START + 1800)
+        assert plain.latest()["site"]["operator"] == expected, answer
 
 
 def test_the_manual_network_name_beats_every_detection(tmp_path: Path) -> None:
