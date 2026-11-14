@@ -95,7 +95,7 @@ AWG_ENABLED AWG_AGENT_URL AWG_AGENT_TOKEN TELEGRAM_PAYMENT_TOKEN \
 YOOKASSA_RECEIPT_MODE ACTIVITY_LOGGING_ENABLED AUTOBAN_MODE TELEGRAM_PROXY_URL \
 SERVER_TRAFFIC_LIMIT_GB SERVER_TRAFFIC_COUNTS SERVER_TRAFFIC_RESET_DAY SERVER_TRAFFIC_PAUSE_TRIALS \
 RU_DIRECT_SUBSCRIPTION CONN_LOG_RETENTION_DAYS YOOKASSA_CONFIRMATION \
-SMTP_HOST SMTP_PORT SMTP_SECURITY SMTP_USERNAME SMTP_FROM SMTP_FROM_NAME SMTP_PASSWORD"
+MARZBAN_EXTRA_INBOUND_TAGS SMTP_HOST SMTP_PORT SMTP_SECURITY SMTP_USERNAME SMTP_FROM SMTP_FROM_NAME SMTP_PASSWORD"
 
 # Creates a 10 RUB test payment with the QR confirmation in the live shop and
 # says whether YooKassa answers with an SBP link. Prints no secret and no link.
@@ -385,8 +385,12 @@ if [[ "${1:-}" == "--set" ]]; then
     [[ "$pair" == *=* && ( " $SETTABLE_KEYS " == *" $key "* \
       || ( "$key" == PUBLIC_BASE_URL && "${ALLOW_PUBLIC_URL:-0}" == 1 ) ) ]] \
       || fail "not allowed: $key (allowed: $SETTABLE_KEYS)"
-    [[ -n "$value" && "$value" != *$'\n'* && "$value" != *[\"\'\\\$\`]* ]] \
+    # MARZBAN_EXTRA_INBOUND_TAGS may be emptied: no extra entry for new users.
+    [[ ( -n "$value" || "$key" == MARZBAN_EXTRA_INBOUND_TAGS ) && "$value" != *$'\n'* && "$value" != *[\"\'\\\$\`]* ]] \
       || fail "invalid value for $key"
+    if [[ "$key" == MARZBAN_EXTRA_INBOUND_TAGS && ! "$value" =~ ^([A-Za-z0-9_-]{3,40}(,[A-Za-z0-9_-]{3,40})*)?$ ]]; then
+      fail "usage: --set MARZBAN_EXTRA_INBOUND_TAGS=VLESS-GRPC-REALITY  (tags without spaces, comma-separated; empty for none)"
+    fi
     if [[ "$key" == ACTIVITY_LOGGING_ENABLED && ! "$value" =~ ^(true|false)$ ]]; then
       fail "usage: --set ACTIVITY_LOGGING_ENABLED=false"
     fi

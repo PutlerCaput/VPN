@@ -9,6 +9,8 @@ Runs inside the bot container (it has the panel's address and password):
     --add ADDRESS:PORT     add this address for the inbound, copying the cover name
                            and the other settings of the inbound's first address
     --remove ADDRESS:PORT  take it out again
+    --attach TAG           give every user the VLESS inbound TAG as well (after a
+                           new inbound was added to Xray: their links follow)
 
 Only Marzban's host table changes: no key, user or Xray setting, no restart of the
 VPN. A client gets the new address with its next subscription update and can
@@ -91,6 +93,35 @@ def without(hosts: dict[str, Any], tag: str, address: str, port: int) -> dict[st
     return result
 
 
+def tags_with(current: list[str], base: str, extra: str) -> list[str] | None:
+    """The user's VLESS tags with ``extra``; None if nothing changes."""
+    tags = list(current) or [base]
+    if extra in tags:
+        return None
+    return [*tags, extra]
+
+
+async def attach(client: Any, base: str, extra: str, hosts: dict[str, Any]) -> int:
+    if extra not in hosts:
+        print(
+            f"VPN_ENTRIES_STOPPED: the panel has no inbound {extra!r}; "
+            "add it to Xray first (vless_transport.sh)"
+        )
+        return 1
+    changed = skipped = 0
+    for user in await client.get_users_usage():
+        username = str(user.get("username") or "")
+        current = list((user.get("inbounds") or {}).get("vless") or [])
+        wanted = tags_with(current, base, extra)
+        if wanted is None:
+            skipped += 1
+            continue
+        await client.set_vless_inbounds(username, wanted)
+        changed += 1
+    print(f"VPN_ENTRIES_ATTACHED: {extra} for {changed} users ({skipped} had it)")
+    return 0
+
+
 async def main(argv: list[str]) -> int:
     from config import get_settings
     from services.marzban import MarzbanClient, MarzbanError
@@ -111,8 +142,10 @@ async def main(argv: list[str]) -> int:
             print("\n".join(describe(hosts)) or "no addresses")
             print(f"VPN_ENTRIES_PLAN: --add ADDRESS:PORT adds an address for {tag!r}")
             return 0
+        if len(argv) == 2 and argv[0] == "--attach":
+            return await attach(client, tag, argv[1], hosts)
         if len(argv) != 2 or argv[0] not in ("--add", "--remove"):
-            print("usage: [--add|--remove ADDRESS:PORT]")
+            print("usage: [--add|--remove ADDRESS:PORT | --attach TAG]")
             return 2
         address, port = parse_target(argv[1])
         if argv[0] == "--add":

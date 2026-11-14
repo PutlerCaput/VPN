@@ -246,6 +246,9 @@ class Settings(BaseSettings):
     marzban_username: str = "admin"
     marzban_password: SecretStr
     marzban_inbound_tag: str = "VLESS TCP REALITY"
+    # Further VLESS inbounds every new user gets as well (comma-separated tags):
+    # backup entries of another kind (docs/VPN_ENTRIES.md).
+    marzban_extra_inbound_tags: str = ""
     marzban_verify_tls: bool = True
     marzban_timeout: float = 15.0
 
