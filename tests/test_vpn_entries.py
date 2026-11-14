@@ -109,3 +109,28 @@ async def test_the_client_reads_and_writes_the_host_table() -> None:
     finally:
         await client.close()
     assert [m for m, _, _ in seen] == ["GET", "GET", "PUT"]
+
+
+def test_the_panels_default_address_can_be_dropped() -> None:
+    hosts = {
+        "VLESS-TCP-REALITY-RU": [
+            {"address": "{SERVER_IP}", "port": None, "sni": ""},
+            {"address": "198.51.100.7", "port": 2083, "sni": ""},
+        ]
+    }
+    result = entries.without(hosts, "VLESS-TCP-REALITY-RU", "{SERVER_IP}", 0)
+    assert result["VLESS-TCP-REALITY-RU"] == [
+        {"address": "198.51.100.7", "port": 2083, "sni": ""}
+    ]
+    only_default = {"X": [{"address": "{SERVER_IP}", "port": None}]}
+    with pytest.raises(ValueError, match="last address"):
+        entries.without(only_default, "X", "{SERVER_IP}", 0)
+
+
+def test_the_fingerprint_goes_on_every_address() -> None:
+    result = entries.with_fingerprint(HOSTS, "chrome")
+    assert {e["fingerprint"] for tag in result.values() for e in tag} == {"chrome"}
+    assert "fingerprint" not in HOSTS["Shadowsocks TCP"][0]  # input untouched
+    with pytest.raises(ValueError, match="fingerprint is one of"):
+        entries.with_fingerprint(HOSTS, "netscape")
+    assert "fingerprint=chrome" in "\n".join(entries.describe(HOSTS))

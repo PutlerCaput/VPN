@@ -74,8 +74,10 @@ def test_the_new_inbound_borrows_the_key_and_has_its_own_cover_and_port() -> Non
     assert len(stream["grpcSettings"]["serviceName"]) == 12
     assert stream["security"] == "reality"
     reality = stream["realitySettings"]
+    # Without a key of its own the base's is borrowed; the short id is always new.
     assert reality["privateKey"] == KEY
-    assert reality["shortIds"] == ["ab12"]
+    assert reality["shortIds"] != ["ab12"]
+    assert len(reality["shortIds"][0]) == 16
     assert reality["serverNames"] == ["dl.example.com"]
     assert reality["dest"] == "dl.example.com:443"
     assert new["sniffing"] == BASE_CONFIG["inbounds"][0]["sniffing"]
@@ -107,6 +109,44 @@ def test_bad_requests_are_refused(changes: dict[str, Any], message: str | None) 
         return
     with pytest.raises(ValueError, match=message):
         xray_add.add_inbound(BASE_CONFIG, **args)
+
+
+OWN_KEY = "k" * 43
+
+
+def test_an_own_key_and_a_tcp_entry() -> None:
+    result = xray_add.add_inbound(
+        BASE_CONFIG,
+        base="VLESS TCP REALITY",
+        tag="VLESS-TCP-REALITY-RU",
+        cover="ya.example.ru",
+        port=2098,
+        network="tcp",
+        private_key=OWN_KEY,
+    )
+    new = result["inbounds"][1]
+    stream = new["streamSettings"]
+    assert stream["network"] == "tcp"
+    assert "grpcSettings" not in stream
+    assert stream["realitySettings"]["privateKey"] == OWN_KEY
+    with pytest.raises(ValueError, match="x25519"):
+        xray_add.add_inbound(
+            BASE_CONFIG,
+            base="VLESS TCP REALITY",
+            tag="X-1-2",
+            cover="a.example.com",
+            port=2099,
+            private_key="short",
+        )
+    with pytest.raises(ValueError, match="grpc or tcp"):
+        xray_add.add_inbound(
+            BASE_CONFIG,
+            base="VLESS TCP REALITY",
+            tag="X-1-2",
+            cover="a.example.com",
+            port=2099,
+            network="ws",
+        )
 
 
 def test_the_same_tag_twice_is_refused() -> None:
@@ -207,6 +247,10 @@ case "$1" in
     args="$*"
     case "$args" in
       *"run -test"*) [ -f "$T/xray_refuses" ] && exit 1; exit 0 ;;
+      *"x25519"*)
+        echo "Private key: OWNKEYOWNKEYOWNKEYOWNKEYOWNKEYOWNKEYOWNKEYO"
+        echo "Public key: PUB" ;;
+      *"printenv MARZBAN_EXTRA_INBOUND_TAGS"*) cat "$T/extra_tags" 2>/dev/null ;;
       *"--attach"*) echo "VPN_ENTRIES_ATTACHED: 3 users" ;;
     esac
     ;;
@@ -215,17 +259,33 @@ esac
 SS = r"""#!/bin/bash
 echo "State Recv-Q Send-Q Local Peer"
 echo "LISTEN 0 0 0.0.0.0:2096 0.0.0.0:*"
-if [ -f "$T/listen_new" ]; then echo "LISTEN 0 0 0.0.0.0:2097 0.0.0.0:*"; fi
+if [ -f "$T/listen_new" ]; then
+  echo "LISTEN 0 0 0.0.0.0:2097 0.0.0.0:*"
+  echo "LISTEN 0 0 0.0.0.0:2098 0.0.0.0:*"
+fi
 """
+OPENSSL = (
+    '#!/bin/bash\necho "openssl $*" >> "$T/calls.log"\n'
+    'if [ -f "$T/no_x25519" ]; then echo "Server Temp Key: ECDH, P-256"; '
+    'else echo "Server Temp Key: X25519, 253 bits"; fi\n'
+)
 CURL = '#!/bin/bash\necho "curl $*" >> "$T/calls.log"\ncat "$T/tls_answer"\n'
 UFW = '#!/bin/bash\necho "ufw $*" >> "$T/calls.log"\n'
 UPDATE_BOT = '#!/bin/bash\necho "update_bot $*" >> "$T/calls.log"\n'
 
 
-def switch(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def switch(
+    tmp_path: Path, *args: str, **extra: str
+) -> subprocess.CompletedProcess[str]:
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
-    for name, body in {"docker": DOCKER, "ss": SS, "ufw": UFW, "curl": CURL}.items():
+    for name, body in {
+        "docker": DOCKER,
+        "ss": SS,
+        "ufw": UFW,
+        "curl": CURL,
+        "openssl": OPENSSL,
+    }.items():
         (bindir / name).write_text(body)
         (bindir / name).chmod(0o755)
     scripts = tmp_path / "src" / "scripts"
@@ -241,6 +301,7 @@ def switch(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
         "XRAY_CONFIG": str(tmp_path / "xray_config.json"),
         "TRANSPORT_STATE": str(tmp_path / "state"),
         "WAIT_SECONDS": "4",
+        **extra,
     }
     return subprocess.run(  # noqa: S603
         ["/bin/bash", str(scripts / "vless_transport.sh"), *args],
@@ -295,12 +356,16 @@ def test_a_config_xray_refuses_is_never_used(server: Path) -> None:
 def test_apply_switches_and_rollback_undoes(server: Path) -> None:
     done = switch(server, "--apply", "dl.example.com", "2097")
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "VLESS_TRANSPORT_OK: VLESS-GRPC-REALITY on 2097" in done.stdout
+    assert "VLESS_TRANSPORT_OK: VLESS-GRPC-REALITY (grpc) on 2097" in done.stdout
     live = json.loads((server / "xray_config.json").read_text())
     assert [i["port"] for i in live["inbounds"]] == [2096, 2097]
+    # Its own key from xray x25519, never printed.
+    own = live["inbounds"][1]["streamSettings"]["realitySettings"]["privateKey"]
+    assert own == "OWNKEYOWNKEYOWNKEYOWNKEYOWNKEYOWNKEYOWNKEYO"
+    assert own not in done.stdout + done.stderr
     log = calls(server)
     assert "docker restart marzban-marzban-1" in log
-    assert "ufw allow 2097/tcp" in log
+    assert "ufw allow 2097/tcp comment VLESS VLESS-GRPC-REALITY" in log
     assert "--attach VLESS-GRPC-REALITY" in log
     assert "update_bot --set MARZBAN_EXTRA_INBOUND_TAGS=VLESS-GRPC-REALITY" in log
     back = switch(server, "--rollback")
@@ -320,3 +385,42 @@ def test_xray_that_does_not_come_back_is_rolled_back_at_once(server: Path) -> No
     assert json.loads((server / "xray_config.json").read_text()) == BASE_CONFIG
     assert "--attach" not in calls(server)
     assert "ufw allow" not in calls(server)
+
+
+def test_a_relay_only_tcp_entry_keeps_the_other_tags(server: Path) -> None:
+    (server / "extra_tags").write_text("VLESS-GRPC-REALITY")
+    done = switch(
+        server,
+        "--apply",
+        "ya.example.ru",
+        "2098",
+        TRANSPORT_TAG="VLESS-TCP-REALITY-RU",
+        TRANSPORT_NETWORK="tcp",
+        ALLOW_FROM="198.51.100.7",
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "VLESS-TCP-REALITY-RU (tcp) on 2098" in done.stdout
+    log = calls(server)
+    assert "ufw allow from 198.51.100.7 to any port 2098 proto tcp" in log
+    assert (
+        "update_bot --set MARZBAN_EXTRA_INBOUND_TAGS="
+        "VLESS-GRPC-REALITY,VLESS-TCP-REALITY-RU" in log
+    )
+    assert "TRANSPORT_TAG=VLESS-TCP-REALITY-RU ALLOW_FROM=198.51.100.7" in done.stdout
+    back = switch(
+        server,
+        "--rollback",
+        TRANSPORT_TAG="VLESS-TCP-REALITY-RU",
+        ALLOW_FROM="198.51.100.7",
+    )
+    assert back.returncode == 0, back.stdout + back.stderr
+    assert "update_bot --set MARZBAN_EXTRA_INBOUND_TAGS=VLESS-GRPC-REALITY\n" in (
+        calls(server)
+    )
+
+
+def test_a_cover_without_x25519_is_refused(server: Path) -> None:
+    (server / "no_x25519").touch()
+    done = switch(server, "--check", "dl.example.com")
+    assert done.returncode == 1
+    assert "X25519" in done.stderr

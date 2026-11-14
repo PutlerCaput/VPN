@@ -11,6 +11,12 @@ Runs inside the bot container (it has the panel's address and password):
     --remove ADDRESS:PORT  take it out again
     --attach TAG           give every user the VLESS inbound TAG as well (after a
                            new inbound was added to Xray: their links follow)
+    --fingerprint NAME     the TLS fingerprint clients imitate, on every address
+                           (chrome, firefox, safari, ios, edge, random, randomized)
+    --tag TAG              (first) work on that inbound instead of the main one
+    --remove {SERVER_IP}   drop the panel's default address of the inbound (a new
+                           inbound gets one; an entry only the relay may reach
+                           must not be offered with this server's own address)
 
 Only Marzban's host table changes: no key, user or Xray setting, no restart of the
 VPN. A client gets the new address with its next subscription update and can
@@ -44,6 +50,19 @@ def parse_target(value: str) -> tuple[str, int]:
         if "." not in address:
             raise ValueError(f"not an IP address or a domain: {address!r}") from None
     return address, int(found["port"])
+
+
+FINGERPRINTS = ("chrome", "firefox", "safari", "ios", "edge", "random", "randomized")
+
+
+def with_fingerprint(hosts: dict[str, Any], name: str) -> dict[str, Any]:
+    if name not in FINGERPRINTS:
+        raise ValueError(f"fingerprint is one of {', '.join(FINGERPRINTS)}")
+    result = copy.deepcopy(hosts)
+    for entries in result.values():
+        for entry in entries or []:
+            entry["fingerprint"] = name
+    return result
 
 
 def describe(hosts: dict[str, Any]) -> list[str]:
@@ -81,13 +100,19 @@ def with_added(
     return result
 
 
+SERVER_IP = "{SERVER_IP}"
+
+
+def matches(entry: dict[str, Any], address: str, port: int) -> bool:
+    """SERVER_IP matches the panel's default address whatever its port."""
+    if entry.get("address") != address:
+        return False
+    return address == SERVER_IP or entry.get("port") == port
+
+
 def without(hosts: dict[str, Any], tag: str, address: str, port: int) -> dict[str, Any]:
     entries = hosts.get(tag) or []
-    kept = [
-        e
-        for e in entries
-        if not (e.get("address") == address and e.get("port") == port)
-    ]
+    kept = [e for e in entries if not matches(e, address, port)]
     if not kept:
         raise ValueError("refusing to remove the last address of the inbound")
     result = copy.deepcopy(hosts)
@@ -130,6 +155,8 @@ async def main(argv: list[str]) -> int:
 
     settings = get_settings()
     tag = settings.marzban_inbound_tag
+    if len(argv) >= 2 and argv[0] == "--tag":
+        tag, argv = argv[1], argv[2:]
     client = MarzbanClient(
         settings.marzban_url,
         settings.marzban_username,
@@ -145,11 +172,26 @@ async def main(argv: list[str]) -> int:
             print(f"VPN_ENTRIES_PLAN: --add ADDRESS:PORT adds an address for {tag!r}")
             return 0
         if len(argv) == 2 and argv[0] == "--attach":
-            return await attach(client, tag, argv[1], hosts)
+            return await attach(client, settings.marzban_inbound_tag, argv[1], hosts)
+        if len(argv) == 2 and argv[0] == "--fingerprint":
+            wanted = with_fingerprint(hosts, argv[1])
+            if wanted == hosts:
+                print(f"VPN_ENTRIES_UNCHANGED: every address already has {argv[1]}")
+                return 0
+            await client.put_hosts(wanted)
+            print("\n".join(describe(await client.get_hosts())))
+            print(f"VPN_ENTRIES_OK: fingerprint {argv[1]} on every address")
+            return 0
         if len(argv) != 2 or argv[0] not in ("--add", "--remove"):
-            print("usage: [--add|--remove ADDRESS:PORT | --attach TAG]")
+            print(
+                "usage: [--tag TAG] [--add|--remove ADDRESS:PORT]"
+                " | --attach TAG | --fingerprint NAME"
+            )
             return 2
-        address, port = parse_target(argv[1])
+        if argv[0] == "--remove" and argv[1] == SERVER_IP:
+            address, port = SERVER_IP, 0
+        else:
+            address, port = parse_target(argv[1])
         if argv[0] == "--add":
             wanted = with_added(hosts, tag, address, port)
         else:
@@ -159,10 +201,7 @@ async def main(argv: list[str]) -> int:
             return 0
         await client.put_hosts(wanted)
         after = await client.get_hosts()
-        present = any(
-            e.get("address") == address and e.get("port") == port
-            for e in after.get(tag) or []
-        )
+        present = any(matches(e, address, port) for e in after.get(tag) or [])
         print("\n".join(describe(after)))
         if present == (argv[0] == "--add"):
             print(f"VPN_ENTRIES_OK: {argv[0][2:]} {address}:{port}")
