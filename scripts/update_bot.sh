@@ -457,6 +457,12 @@ fi
 SOURCE="${1:-}"
 [[ -n "$SOURCE" && -f "$SOURCE/Dockerfile" && -f "$SOURCE/main.py" ]] \
   || fail "usage: update_bot.sh <new source folder> [--apply] [--env-add]"
+# Signed releases (docs/SIGNED_RELEASES.md): once the guard is installed, only the
+# code the owner signed is built.
+RELEASE_GUARD="${RELEASE_GUARD_BIN:-/usr/local/sbin/vpn-release-guard}"
+if [[ -x "$RELEASE_GUARD" ]]; then
+  "$RELEASE_GUARD" --verify-head "$SOURCE" || exit 1
+fi
 shift
 APPLY=0
 ENV_ADD=0

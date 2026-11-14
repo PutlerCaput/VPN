@@ -100,6 +100,9 @@ check() {
 
 copy_code() {
   step "Copy the gateway's code from DE to RU"
+  # Signed releases: RU gets only the code the owner signed on DE.
+  de "if [ -x /usr/local/sbin/vpn-release-guard ]; then /usr/local/sbin/vpn-release-guard --verify-head $DE_SRC; fi" \
+    || stop "the code on DE is not the signed release (docs/SIGNED_RELEASES.md)"
   de "tar -C $DE_SRC --exclude=__pycache__ -czf - db logging_setup.py deploy/db-gateway \
       scripts/db_gateway_install.sh scripts/db_tunnel.sh scripts/db_tool.py scripts/ru_firewall.sh \
       scripts/retention_archiver.py scripts/ru_integrity.sh scripts/retire_payment_edge.sh" \

@@ -84,6 +84,12 @@ site="$(container_env "$BOT_CONTAINER" PUBLIC_BASE_URL)"
 site="${site%/}"
 [[ "$site" =~ ^https://[a-z0-9-]+(\.[a-z0-9-]+)+$ ]] || site="https://app.cyberdefency.com"
 
+# Signed releases (docs/SIGNED_RELEASES.md): once the guard is installed, only the
+# code the owner signed is built.
+RELEASE_GUARD="${RELEASE_GUARD_BIN:-/usr/local/sbin/vpn-release-guard}"
+if [[ -x "$RELEASE_GUARD" ]]; then
+  "$RELEASE_GUARD" --verify-head "$src" || exit 1
+fi
 say "SOURCE $src $(git -C "$src" log -1 --format='%h %s' 2>/dev/null || true)"
 docker tag "$current" "$rollback"
 say "ROLLBACK_IMAGE $rollback (was $current)"
