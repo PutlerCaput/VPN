@@ -40,7 +40,7 @@ def describe(config: dict[str, Any]) -> list[str]:
         stream = inbound.get("streamSettings") or {}
         network = stream.get("network") or "tcp"
         security = stream.get("security") or "none"
-        listen = inbound.get("listen") or "0.0.0.0"  # noqa: S104 (a label, not a bind)
+        listen = inbound.get("listen") or "all addresses"
         clients = (inbound.get("settings") or {}).get("clients") or []
         flows = sorted({str(c.get("flow")) for c in clients if c.get("flow")})
         out.append(
