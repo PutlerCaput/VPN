@@ -335,3 +335,23 @@ def test_the_mailer_is_off_without_a_host(services: Any) -> None:
         update={"smtp_host": "smtp.example.com", "smtp_username": "a@example.com"}
     )
     assert Mailer(configured).enabled is True
+
+
+def test_the_letter_comes_from_the_service_name_and_address(
+    services: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    settings = services.settings.model_copy(
+        update={
+            "smtp_host": "smtp.example.com",
+            "smtp_username": "resend",
+            "smtp_from": "noreply@cyberdefency.com",
+        }
+    )
+    mailer = Mailer(settings)
+    captured: list[Any] = []
+    monkeypatch.setattr(mailer, "_send", captured.append)
+    asyncio.run(mailer.send("a@example.com", "Код входа: 123456", "текст"))
+    assert captured[0]["From"] == "Cyberdefency <noreply@cyberdefency.com>"
+    assert captured[0]["To"] == "a@example.com"

@@ -311,6 +311,8 @@ class Settings(BaseSettings):
     smtp_username: str | None = None
     smtp_password: SecretStr | None = None
     smtp_from: str | None = None
+    # The name shown next to the address in the letter.
+    smtp_from_name: str = "Cyberdefency"
     # 465 speaks TLS from the first byte; 587 upgrades with STARTTLS.
     smtp_security: Literal["tls", "starttls"] = "tls"
     email_code_ttl_seconds: int = 600

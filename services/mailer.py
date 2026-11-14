@@ -7,6 +7,7 @@ import logging
 import smtplib
 import ssl
 from email.message import EmailMessage
+from email.utils import formataddr
 
 from config import Settings
 
@@ -30,6 +31,7 @@ class Mailer:
         )
         self.sender = settings.smtp_from or settings.smtp_username
         self.security = settings.smtp_security
+        self.sender_name = settings.smtp_from_name
 
     @property
     def enabled(self) -> bool:
@@ -57,7 +59,7 @@ class Mailer:
         if not self.enabled:
             raise MailError("smtp is not configured")
         message = EmailMessage()
-        message["From"] = str(self.sender)
+        message["From"] = formataddr((self.sender_name, str(self.sender)))
         message["To"] = to
         message["Subject"] = subject
         message.set_content(text)
