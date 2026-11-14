@@ -105,11 +105,57 @@ bash /root/vpn-src/scripts/vless_transport.sh --rollback
 Проверка с телефона: в приложении обновить подписку, появится профиль gRPC; подключиться к нему
 без Wi-Fi и без других VPN.
 
+## Шаг 3: вход через RU под российской маскировкой
+
+Сейчас клиент идёт на российский адрес RU с именем `www.apple.com` в рукопожатии: «Apple на
+российском хостинге» — заметное несовпадение. Отдельный вход для пути через RU снимает его:
+маскировка — крупный российский сайт, проброс остаётся сырым (RU ничего не расшифровывает,
+REALITY заканчивается в DE), порт входа на DE открыт только для RU.
+
+1. DE. Подобрать имя: проверка требует TLS 1.3, HTTP/2 и X25519 с этого сервера.
+
+   ```bash
+   for c in ya.ru vk.com ozon.ru; do bash /root/vpn-src/scripts/vless_transport.sh --check "$c" 2>&1 | tail -1; done
+   ```
+
+2. DE. Вход TCP + REALITY (Vision, как основной) на 2098, только для RU, со своим ключом:
+
+   ```bash
+   TRANSPORT_NETWORK=tcp TRANSPORT_TAG=VLESS-TCP-REALITY-RU ALLOW_FROM=RU_SERVER_IP \
+     bash /root/vpn-src/scripts/vless_transport.sh --apply ИМЯ 2098
+   ```
+
+3. RU. Новый порт пробрасывается на этот вход (2083 — пример свободного порта):
+
+   ```bash
+   iptables -t nat -A PREROUTING -p tcp --dport 2083 -j DNAT --to-destination DE_SERVER_IP:2098
+   iptables -t nat -A POSTROUTING -d DE_SERVER_IP -p tcp --dport 2098 -j MASQUERADE
+   netfilter-persistent save
+   ```
+
+4. DE. В подписку — адрес RU для этого входа, и без адреса DE, который панель создала сама (на
+   него клиент всё равно не пробьётся: порт открыт только для RU):
+
+   ```bash
+   docker exec -i node-rental-bot-1 python3 - --tag VLESS-TCP-REALITY-RU --add RU_SERVER_IP:2083 < /root/vpn-src/scripts/vpn_entries.py
+   docker exec -i node-rental-bot-1 python3 - --tag VLESS-TCP-REALITY-RU --remove '{SERVER_IP}' < /root/vpn-src/scripts/vpn_entries.py
+   ```
+
+Откат: `TRANSPORT_TAG=VLESS-TCP-REALITY-RU ALLOW_FROM=RU_SERVER_IP bash … --rollback` и удаление
+двух правил iptables на RU (`-D` вместо `-A`).
+
+## Отпечаток клиента
+
+Всем адресам — отпечаток Chrome (uTLS): рукопожатие клиента неотличимо от браузера.
+
+```bash
+docker exec -i node-rental-bot-1 python3 - --fingerprint chrome < /root/vpn-src/scripts/vpn_entries.py
+```
+
 ## Дальше
 
-- Проброс gRPC-входа и через RU (как сейчас 443 → 2096), если замеры покажут, что прямой путь в
-  Германию у какого-то оператора режут.
-- Маскировку старого входа можно сменить тем же способом позже: это затрагивает всех клиентов, и
-  сначала стоит увидеть, как работает новая.
+- Маскировку старого входа (`www.apple.com`) сменить тем же способом позже: это затрагивает всех
+  клиентов, сначала стоит увидеть, как работают новые.
+- AmneziaWG через RU: проброс UDP на RU к `DE:39051` (порт 443/udp на DE занят сайтом: HTTP/3).
 
 Ни один вход не гарантирует доступности: что работает у какого оператора, показывают замеры.
