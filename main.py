@@ -65,6 +65,9 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
         settings.marzban_inbound_tag,
         verify_tls=settings.marzban_verify_tls,
         timeout=settings.marzban_timeout,
+        extra_inbound_tags=tuple(
+            t.strip() for t in settings.marzban_extra_inbound_tags.split(",")
+        ),
     )
     cryptopay = (
         CryptoPayClient(

@@ -67,10 +67,14 @@ class MarzbanClient:
         verify_tls: bool = True,
         timeout: float = 15.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        extra_inbound_tags: tuple[str, ...] = (),
     ) -> None:
         self._username = username
         self._password = password
         self.inbound_tag = inbound_tag
+        self.inbound_tags = [inbound_tag] + [
+            tag for tag in extra_inbound_tags if tag and tag != inbound_tag
+        ]
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout,
@@ -197,7 +201,7 @@ class MarzbanClient:
         body = {
             "username": username,
             "proxies": {"vless": {"flow": "xtls-rprx-vision"}},
-            "inbounds": {"vless": [self.inbound_tag]},
+            "inbounds": {"vless": list(self.inbound_tags)},
             "note": device_note(tier),
             "expire": expire,
             "data_limit": limit,
@@ -277,6 +281,19 @@ class MarzbanClient:
             "GET", f"/api/user/{username}", operation="get_user"
         )
         return self._check(response, "get_user")
+
+    async def set_vless_inbounds(
+        self, username: str, tags: list[str]
+    ) -> dict[str, Any]:
+        """Which VLESS inbounds a user may use (their links follow)."""
+        self._validate(username)
+        response = await self._request(
+            "PUT",
+            f"/api/user/{username}",
+            operation="set_inbounds",
+            json_body={"inbounds": {"vless": tags}},
+        )
+        return self._check(response, "set_inbounds")
 
     async def get_hosts(self) -> dict[str, Any]:
         """The addresses Marzban writes into subscriptions, by inbound tag."""
