@@ -206,7 +206,6 @@ case "$1" in
     shift
     args="$*"
     case "$args" in
-      *"tls ping"*) cat "$T/tls_answer" ;;
       *"run -test"*) [ -f "$T/xray_refuses" ] && exit 1; exit 0 ;;
       *"--attach"*) echo "VPN_ENTRIES_ATTACHED: 3 users" ;;
     esac
@@ -218,6 +217,7 @@ echo "State Recv-Q Send-Q Local Peer"
 echo "LISTEN 0 0 0.0.0.0:2096 0.0.0.0:*"
 if [ -f "$T/listen_new" ]; then echo "LISTEN 0 0 0.0.0.0:2097 0.0.0.0:*"; fi
 """
+CURL = '#!/bin/bash\necho "curl $*" >> "$T/calls.log"\ncat "$T/tls_answer"\n'
 UFW = '#!/bin/bash\necho "ufw $*" >> "$T/calls.log"\n'
 UPDATE_BOT = '#!/bin/bash\necho "update_bot $*" >> "$T/calls.log"\n'
 
@@ -225,7 +225,7 @@ UPDATE_BOT = '#!/bin/bash\necho "update_bot $*" >> "$T/calls.log"\n'
 def switch(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
-    for name, body in {"docker": DOCKER, "ss": SS, "ufw": UFW}.items():
+    for name, body in {"docker": DOCKER, "ss": SS, "ufw": UFW, "curl": CURL}.items():
         (bindir / name).write_text(body)
         (bindir / name).chmod(0o755)
     scripts = tmp_path / "src" / "scripts"
@@ -255,7 +255,7 @@ def switch(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
 @pytest.fixture
 def server(tmp_path: Path) -> Path:
     (tmp_path / "xray_config.json").write_text(json.dumps(BASE_CONFIG))
-    (tmp_path / "tls_answer").write_text("TLS Version: TLS 1.3\nALPN: h2\n")
+    (tmp_path / "tls_answer").write_text("2")
     return tmp_path
 
 
@@ -275,10 +275,11 @@ def test_check_changes_nothing(server: Path) -> None:
 
 
 def test_a_cover_without_tls_13_is_refused(server: Path) -> None:
-    (server / "tls_answer").write_text("TLS Version: TLS 1.2\n")
+    (server / "tls_answer").write_text("1.1")
     done = switch(server, "--apply", "old.example.com")
     assert done.returncode == 1
-    assert "does not answer TLS 1.3" in done.stderr
+    assert "does not answer TLS 1.3 with HTTP/2" in done.stderr
+    assert "--tlsv1.3 --http2" in calls(server)
     assert json.loads((server / "xray_config.json").read_text()) == BASE_CONFIG
 
 

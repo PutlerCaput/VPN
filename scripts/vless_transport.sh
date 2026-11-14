@@ -41,17 +41,19 @@ xray_test() {
 }
 
 check() {
-  local cover="$1" port="$2" candidate="$3" ping
+  local cover="$1" port="$2" candidate="$3" answer
   [[ -r "$CONFIG" ]] || stop "cannot read $CONFIG"
   [[ "$port" =~ ^[0-9]{4,5}$ ]] || stop "the port is a number, 1024-65535"
   docker inspect "$MARZBAN" >/dev/null 2>&1 || stop "no container $MARZBAN"
   if listening "$port"; then stop "port $port is already in use on this server"; fi
-  ping="$(docker exec "$MARZBAN" timeout 15 xray tls ping "$cover" 2>&1 || true)"
-  if ! grep -q "1\.3" <<<"$ping"; then
-    say "$ping" | grep -iE "tls|version|alpn|error|fail" | head -6
-    stop "$cover does not answer TLS 1.3 from this server: pick another cover name"
+  # REALITY needs a cover that speaks TLS 1.3 and HTTP/2 to this server. curl asks
+  # for exactly that and fails otherwise ("xray tls ping" does not print the version).
+  answer="$(curl -s -o /dev/null --max-time 10 --tlsv1.3 --http2 \
+    -w '%{http_version}' "https://$cover/" 2>/dev/null || true)"
+  if [[ "$answer" != 2 ]]; then
+    stop "$cover does not answer TLS 1.3 with HTTP/2 from this server (got '${answer:-nothing}'): pick another cover name"
   fi
-  say "cover $cover: TLS 1.3 answers from this server"
+  say "cover $cover: TLS 1.3 and HTTP/2 answer from this server"
   python3 "$HERE/xray_add_inbound.py" "$CONFIG" "$candidate" \
     --cover "$cover" --port "$port" --tag "$TAG" || stop "the candidate was not written"
   xray_test "$candidate" || stop "Xray refuses the candidate config; nothing was changed"
