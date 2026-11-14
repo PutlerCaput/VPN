@@ -144,6 +144,28 @@ REALITY заканчивается в DE), порт входа на DE откр�
 Откат: `TRANSPORT_TAG=VLESS-TCP-REALITY-RU ALLOW_FROM=RU_SERVER_IP bash … --rollback` и удаление
 двух правил iptables на RU (`-D` вместо `-A`).
 
+## Шаг 4: вход XHTTP (по желанию)
+
+XHTTP разбивает поток на обычные HTTP-запросы: для фильтра он похож на загрузку страниц и файлов.
+Marzban v0.8.4 выдаёт его в подписке приложениям на ядре Xray (v2rayNG и подобным); в подписках
+sing-box (Hiddify) и Clash такой вход пропускается: их ядра XHTTP не знают.
+
+```bash
+TRANSPORT_NETWORK=xhttp TRANSPORT_TAG=VLESS-XHTTP-REALITY \
+  bash /root/vpn-src/scripts/vless_transport.sh --apply ИМЯ 2099
+```
+
+## Профиль с фрагментацией
+
+Рядом с адресом — тот же адрес с рукопожатием TLS, разрезанным на части (`fragment_setting`
+Marzban). Обычный остаётся: у одних операторов фрагментация помогает, у других сама выглядит
+подозрительно.
+
+```bash
+docker exec -i node-rental-bot-1 python3 - --fragment-copy 45.138.157.65:443 < /root/vpn-src/scripts/vpn_entries.py
+# убрать: --fragment-remove 45.138.157.65:443
+```
+
 ## Отпечаток клиента
 
 Всем адресам — отпечаток Chrome (uTLS): рукопожатие клиента неотличимо от браузера.

@@ -138,7 +138,19 @@ def test_an_own_key_and_a_tcp_entry() -> None:
             port=2099,
             private_key="short",
         )
-    with pytest.raises(ValueError, match="grpc or tcp"):
+    xhttp = xray_add.add_inbound(
+        BASE_CONFIG,
+        base="VLESS TCP REALITY",
+        tag="VLESS-XHTTP-REALITY",
+        cover="a.example.com",
+        port=2099,
+        network="xhttp",
+    )["inbounds"][1]["streamSettings"]
+    assert xhttp["network"] == "xhttp"
+    assert xhttp["xhttpSettings"]["mode"] == "auto"
+    assert xhttp["xhttpSettings"]["path"].startswith("/")
+    assert len(xhttp["xhttpSettings"]["path"]) == 13
+    with pytest.raises(ValueError, match="grpc, tcp or xhttp"):
         xray_add.add_inbound(
             BASE_CONFIG,
             base="VLESS TCP REALITY",
