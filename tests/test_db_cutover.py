@@ -152,6 +152,9 @@ case "$*" in
       echo exited
     elif [[ -z "$(setting DATABASE_URL)" ]]; then
       echo healthy
+    elif [[ -f "$T/de/only-this-token" && "$(cat "$W/secrets/db_gateway_token.txt" 2>/dev/null)" != "$(cat "$T/de/only-this-token")" ]]; then
+      # A bot that works with one token only: the change of token cannot succeed.
+      echo starting
     elif [[ "$FAKE_BOT_CANNOT_REACH" != 1 ]] && (cd "$T/de/src" && "{sys.executable}" \\
         -c "$PROBE" "$(setting DATABASE_URL)" "$(cat "$W/secrets/db_gateway_token.txt" 2>/dev/null)") 2>>"$T/probe.log"; then
       echo healthy
@@ -319,6 +322,17 @@ class Rehearsal:
 
     def bot(self) -> str:
         return (self.tmp / "de" / "bot-state").read_text().strip()
+
+    def on_ru(self, command: str, **env: str) -> subprocess.CompletedProcess[str]:
+        """A command on the RU sandbox, as the phone's ssh would run it."""
+        return subprocess.run(  # noqa: S603
+            ["ssh", "root@45.138.157.65", command],  # noqa: S607
+            env={**self.env, **env},
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
 
     def gateway_running(self) -> bool:
         pidfile = self.tmp / "gateway.pid"
@@ -530,3 +544,150 @@ def test_an_unreachable_server_is_reported_plainly(lab: Rehearsal) -> None:
     assert "DE does not answer" in lab.run("check", FAKE_DOWN="de").stderr
     assert "RU does not answer" in lab.run("check", FAKE_DOWN="ru").stderr
     assert lab.run("nonsense").returncode == 1
+
+
+# ------------------------------------------------------------ a token change
+async def work_with(lab: Rehearsal, token: str) -> str:
+    """A real database call through the gateway with this token."""
+    from db.remote import RemoteDatabase
+
+    client = RemoteDatabase(f"http://127.0.0.1:{lab.port}", token)
+    try:
+        await client.connect()
+        user = await client.get_user(777)
+        assert user is not None
+        return str(user["username"])
+    finally:
+        await client.close()
+
+
+def accepted(lab: Rehearsal, token: str) -> bool:
+    from db.remote import RemoteDatabaseError
+
+    try:
+        return asyncio.run(work_with(lab, token)) == "moved"
+    except RemoteDatabaseError:
+        return False
+
+
+def on_the_gateway(lab: Rehearsal) -> None:
+    assert lab.run("prepare").returncode == 0
+    switched = lab.run("switch")
+    assert switched.returncode == 0, switched.stdout + switched.stderr
+
+
+QUICK = {"TOKEN_ROTATION_IDLE_SECONDS": "1", "POLL_SECONDS": "1"}
+
+
+def test_the_token_changes_without_the_bot_ever_being_locked_out(
+    lab: Rehearsal,
+) -> None:
+    on_the_gateway(lab)
+    old = (lab.ru_secrets / "db_gateway_token").read_text()
+    secret = lab.work / "secrets" / "db_gateway_token.txt"
+    assert secret.read_text() == old
+
+    changed = lab.run("rotate-token", **QUICK)
+    assert changed.returncode == 0, changed.stdout + changed.stderr
+    assert "CUTOVER_TOKEN_ROTATED" in changed.stdout
+    new = (lab.ru_secrets / "db_gateway_token").read_text()
+    assert new != old
+    assert secret.read_text() == new
+    assert stat.S_IMODE(secret.stat().st_mode) == 0o600
+    # One copy of the new token in the bot's folder, none of the old one.
+    assert lab.files_holding(new) == ["secrets/db_gateway_token.txt"]
+    assert lab.files_holding(old) == []
+    # Nothing is left on RU either, and nothing secret was shown.
+    assert not (lab.ru_secrets / "db_gateway_token_next").exists()
+    assert not (lab.ru_secrets / "db_gateway_token.finishing").exists()
+    shown = changed.stdout + changed.stderr + (lab.tmp / "ssh.log").read_text()
+    assert old not in shown
+    assert new not in shown
+    # The old token opens nothing now; the new one does; the bot is fine.
+    assert accepted(lab, new)
+    assert not accepted(lab, old)
+    assert lab.bot() == "running"
+    assert lab.gateway_running()
+    assert "token change" not in lab.run("status").stdout
+
+
+def test_a_bot_that_does_not_come_up_keeps_the_old_token(lab: Rehearsal) -> None:
+    on_the_gateway(lab)
+    old = (lab.ru_secrets / "db_gateway_token").read_text()
+    (lab.tmp / "de" / "only-this-token").write_text(old)
+    result = lab.run("rotate-token", **QUICK)
+    assert result.returncode == 1
+    assert "the old one is back" in result.stdout
+    assert "the bot works with the old one" in result.stderr
+    # RU gave the new token up; the old one is the only one, on both sides.
+    assert (lab.ru_secrets / "db_gateway_token").read_text() == old
+    assert not (lab.ru_secrets / "db_gateway_token_next").exists()
+    secret = lab.work / "secrets" / "db_gateway_token.txt"
+    assert secret.read_text() == old
+    assert accepted(lab, old)
+    assert lab.bot() == "running"
+
+
+def test_a_token_still_in_use_leaves_both_accepted_and_can_be_finished_later(
+    lab: Rehearsal,
+) -> None:
+    on_the_gateway(lab)
+    old = (lab.ru_secrets / "db_gateway_token").read_text()
+    # The silence needed is far longer than the wait: the change stays open.
+    waiting = lab.run(
+        "rotate-token",
+        TOKEN_ROTATION_IDLE_SECONDS="3600",
+        POLL_SECONDS="1",
+        ROTATE_WAIT_SECONDS="2",
+    )
+    assert waiting.returncode == 1
+    assert "still being used" in waiting.stderr
+    assert "nothing is broken" in waiting.stderr
+    next_token = (lab.ru_secrets / "db_gateway_token_next").read_text()
+    secret = lab.work / "secrets" / "db_gateway_token.txt"
+    assert secret.read_text() == next_token
+    assert (lab.ru_secrets / "db_gateway_token").read_text() == old
+    assert accepted(lab, old)
+    assert accepted(lab, next_token)
+    assert "WARN token change" in lab.run("status").stdout
+
+    # Running it again continues the open change and finishes it.
+    again = lab.run("rotate-token", **QUICK)
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert "already open on RU: continuing it" in again.stdout
+    assert (lab.ru_secrets / "db_gateway_token").read_text() == next_token
+    assert not accepted(lab, old)
+    assert accepted(lab, next_token)
+
+
+def test_an_open_change_can_be_given_up_from_the_phone(lab: Rehearsal) -> None:
+    on_the_gateway(lab)
+    old = (lab.ru_secrets / "db_gateway_token").read_text()
+    opened = lab.on_ru(
+        f"bash {lab.env['RU_SRC']}/scripts/db_gateway_install.sh --rotate-token"
+    )
+    assert opened.returncode == 0, opened.stdout + opened.stderr
+    new = (lab.ru_secrets / "db_gateway_token_next").read_text()
+    cancelled = lab.run("rotate-token", "cancel", **QUICK)
+    assert cancelled.returncode == 0, cancelled.stdout + cancelled.stderr
+    assert "CUTOVER_TOKEN_CHANGE_CANCELLED" in cancelled.stdout
+    assert not (lab.ru_secrets / "db_gateway_token_next").exists()
+    assert accepted(lab, old)
+    assert not accepted(lab, new)
+    nothing = lab.run("rotate-token", "cancel", **QUICK)
+    assert nothing.returncode == 1
+    assert "no token change is open" in nothing.stderr
+
+
+def test_a_token_change_needs_the_gateway_and_current_scripts(lab: Rehearsal) -> None:
+    before = lab.run("rotate-token")
+    assert before.returncode == 1
+    assert "does not use the gateway" in before.stderr
+    on_the_gateway(lab)
+    script = lab.tmp / "ru" / "src" / "scripts" / "db_gateway_install.sh"
+    script.write_text(script.read_text().replace("--rotate-token", "--other"))
+    old_scripts = lab.run("rotate-token")
+    assert old_scripts.returncode == 1
+    assert "db_cutover.sh update" in old_scripts.stderr
+    assert lab.run("rotate-token", "sometimes").returncode == 1
+    assert not (lab.ru_secrets / "db_gateway_token_next").exists()

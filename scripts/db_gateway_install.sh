@@ -14,6 +14,15 @@
 #   bash db_gateway_install.sh --connection-log on|off
 #                                         the connection records switch, next to the
 #                                         data. On only with the policy that names it
+#   bash db_gateway_install.sh --rotate-token
+#                                         step 1 of a token change: make a new token
+#                                         (never shown) and accept it next to the old
+#   bash db_gateway_install.sh --finish-token-rotation
+#                                         step 3: drop the old token, once the bot is
+#                                         seen working with the new one
+#   bash db_gateway_install.sh --cancel-token-rotation
+#                                         give the new token up and keep the old one
+#   (step 2 is on the other server: docs/RU_DATABASE_CUTOVER.md, "Смена токена")
 #
 # Run it from the folder the files were copied to (it installs the code that
 # lies next to it). No Docker: a Python environment and a systemd unit.
@@ -32,6 +41,8 @@ DATA="$PREFIX/var/lib/vpn-db"
 DB_FILE="$DATA/bot.db"
 ENV_FILE="$ETC/gateway.env"
 TOKEN_FILE="$SECRETS/db_gateway_token"
+NEXT_FILE="$SECRETS/db_gateway_token_next"       # exists only during a token change
+PREVIOUS_FILE="$SECRETS/db_gateway_token.finishing"
 KEY_FILE="$SECRETS/db_key"
 UNIT="node-db-gateway.service"
 UNIT_DIR="$PREFIX/etc/systemd/system"
@@ -47,6 +58,11 @@ say() { printf '%s\n' "$*"; }
 stop() {
   printf 'DB_GATEWAY_STOPPED: %s\n' "$*" >&2
   exit 1
+}
+# Not yet, but nothing is wrong: try again in a minute. db_cutover.sh waits on 3.
+later() {
+  printf 'DB_GATEWAY_TOKEN_NOT_YET: %s\n' "$*" >&2
+  exit 3
 }
 need() { command -v "$1" >/dev/null 2>&1 || stop "missing command: $1"; }
 as_root() { [[ "$(id -u)" == 0 ]] || stop "run as root"; }
@@ -87,6 +103,11 @@ report() {
   say "  python environment $VENV: $(mark "$(have "$VENV/bin/python")")"
   say "  settings $ENV_FILE: $(mark "$(have "$ENV_FILE")")"
   say "  access token: $(mark "$(have "$TOKEN_FILE")")"
+  if [[ -e "$NEXT_FILE" ]]; then
+    say "  token change: OPEN, two tokens are accepted (--finish-token-rotation or --cancel-token-rotation)"
+  else
+    say "  token change: none open"
+  fi
   say "  database key: $(mark "$(have "$KEY_FILE")")"
   if [[ -s "$DB_FILE" ]]; then
     say "  database file: present, $(du -h "$DB_FILE" | cut -f1)"
@@ -259,6 +280,9 @@ status() {
   else
     say "WARN gateway: running but not answering on $LISTEN_HOST:$LISTEN_PORT"
   fi
+  if [[ -e "$NEXT_FILE" ]]; then
+    say "WARN token change: open, the gateway accepts two tokens (--finish-token-rotation, or --cancel-token-rotation)"
+  fi
   [[ -f "$ENV_FILE" ]] && say "OK connection records: $(connection_log_now)"
   if [[ ! -s "$ARCHIVE_ENV" ]]; then
     say "WARN retention archive: the owner's public key is not set (--archive-key age1...)"
@@ -305,6 +329,162 @@ connection_log() {
   say "DB_GATEWAY_CONNECTION_LOG $want"
 }
 
+wait_health() {
+  local n
+  for n in 1 2 3 4 5 6 7 8 9 10; do
+    [[ "$(health)" == ok ]] && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# How the tokens are used, from /v1/info asked with the token in the file $1:
+#   <tokens accepted> <seconds up> <calls, old> <idle, old> <calls, new> <idle, new>
+# "-" means none. Only work counts as use: this question does not. The token is
+# read from the file by the helper: it is on no command line and no screen.
+token_facts() {
+  "$VENV/bin/python" - "$LISTEN_HOST" "$LISTEN_PORT" "$1" <<'PY' 2>/dev/null || true
+import json
+import sys
+import urllib.request
+
+host, port, path = sys.argv[1:4]
+try:
+    with open(path, encoding="utf-8") as handle:
+        token = handle.read().strip()
+    request = urllib.request.Request(
+        f"http://{host}:{port}/v1/info", headers={"Authorization": f"Bearer {token}"}
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        facts = json.load(response)
+    use = facts.get("token_use") or {}
+
+    def field(name, key):
+        value = (use.get(name) or {}).get(key)
+        return "-" if value is None else str(int(value))
+
+    print(
+        int(facts["tokens_accepted"]),
+        int(facts["uptime_seconds"]),
+        field("current", "calls"),
+        field("current", "idle_seconds"),
+        field("next", "calls"),
+        field("next", "idle_seconds"),
+    )
+except Exception:
+    pass
+PY
+}
+
+# Seconds a token must have been unused before the other one is dropped. The bot
+# asks the gateway every few seconds, so a minute or two of silence means it is
+# really on the other token. Tests shorten it.
+idle_minimum() {
+  local value="${TOKEN_ROTATION_IDLE_SECONDS:-120}"
+  [[ "$value" =~ ^[0-9]{1,4}$ ]] || stop "TOKEN_ROTATION_IDLE_SECONDS must be a number of seconds"
+  printf '%s' "$value"
+}
+
+destroy() { shred -u "$1" 2>/dev/null || rm -f "$1"; }
+
+rotate_token() {
+  as_root
+  [[ -x "$VENV/bin/python" && -f "$UNIT_DIR/$UNIT" ]] || stop "not installed yet: run --apply first"
+  [[ -s "$TOKEN_FILE" ]] || stop "the access token is missing: run --apply"
+  [[ ! -e "$NEXT_FILE" ]] \
+    || stop "a token change is already open: finish it (--finish-token-rotation) or give it up (--cancel-token-rotation)"
+  [[ "$(systemctl is-active "$UNIT" 2>/dev/null || true)" == active && "$(health)" == ok ]] \
+    || stop "the gateway is not running and answering: start it first (--start)"
+  [[ -n "$(token_facts "$TOKEN_FILE")" ]] \
+    || stop "the running gateway does not report its tokens: update it first (--apply), then try again"
+  (umask 077 && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$NEXT_FILE.new")
+  if [[ "$(wc -c <"$NEXT_FILE.new")" != 64 ]]; then
+    destroy "$NEXT_FILE.new"
+    stop "could not create the new token"
+  fi
+  chown "root:$SERVICE_USER" "$NEXT_FILE.new"
+  chmod 0440 "$NEXT_FILE.new"
+  mv "$NEXT_FILE.new" "$NEXT_FILE"
+  # It reads the file at start: a restart of a second or two, like --apply.
+  local line tokens
+  if systemctl restart "$UNIT" && wait_health; then
+    line="$(token_facts "$TOKEN_FILE")"
+    tokens="${line%% *}"
+    if [[ "$tokens" == 2 && -n "$(token_facts "$NEXT_FILE")" ]]; then
+      say "DB_GATEWAY_ROTATION_OPEN: the gateway accepts the old and the new token."
+      say "The new token is in $NEXT_FILE and is never shown."
+      say "Next, on the other server: take it from there through the phone into"
+      say "  update_bot.sh --database-gateway http://$LISTEN_HOST:$LISTEN_PORT"
+      say "(docs/RU_DATABASE_CUTOVER.md, \"Смена токена\"), then here: --finish-token-rotation"
+      return
+    fi
+  fi
+  # It did not come up with two tokens: back to one, as it was.
+  destroy "$NEXT_FILE"
+  systemctl restart "$UNIT" || true
+  wait_health || true
+  stop "the gateway did not come up accepting two tokens; the change was given up and the old token still works (journalctl -u $UNIT -n 20)"
+}
+
+finish_token_rotation() {
+  as_root
+  [[ -e "$NEXT_FILE" ]] || stop "no token change is open: start one with --rotate-token"
+  [[ -x "$VENV/bin/python" ]] || stop "not installed yet: run --apply first"
+  local minimum line tokens uptime cur_idle nxt_calls
+  minimum="$(idle_minimum)"
+  line="$(token_facts "$NEXT_FILE")"
+  [[ -n "$line" ]] || stop "the gateway does not answer to the new token: is it running with both tokens? (--status)"
+  read -r tokens uptime _ cur_idle nxt_calls _ <<<"$line"
+  [[ "$tokens" == 2 ]] \
+    || stop "the running gateway accepts $tokens token(s), not two: nothing was changed (--start restarts it)"
+  [[ "$nxt_calls" =~ ^[0-9]+$ && "$nxt_calls" -gt 0 ]] \
+    || later "nobody has used the new token yet: copy it to the other server first (docs/RU_DATABASE_CUTOVER.md, \"Смена токена\"); nothing was changed"
+  ((uptime >= minimum)) \
+    || later "the gateway restarted ${uptime}s ago: wait until it has run for ${minimum}s, so that a client still on the old token would have shown itself; nothing was changed"
+  if [[ "$cur_idle" =~ ^[0-9]+$ ]] && ((cur_idle < minimum)); then
+    later "the old token was used ${cur_idle}s ago: the bot is not on the new token yet; nothing was changed"
+  fi
+  # The new token becomes the token; the old one is kept only until this works.
+  cp -p "$TOKEN_FILE" "$PREVIOUS_FILE"
+  mv "$NEXT_FILE" "$TOKEN_FILE"
+  if systemctl restart "$UNIT" && wait_health; then
+    line="$(token_facts "$TOKEN_FILE")"
+    if [[ "${line%% *}" == 1 ]]; then
+      destroy "$PREVIOUS_FILE"
+      say "DB_GATEWAY_TOKEN_ROTATED: only the new token is accepted now; the old one is destroyed."
+      say "Next: the integrity check on this server will show the changed token file; look, then accept."
+      return
+    fi
+  fi
+  # Back to two tokens, so the bot is not locked out.
+  mv "$TOKEN_FILE" "$NEXT_FILE"
+  mv "$PREVIOUS_FILE" "$TOKEN_FILE"
+  systemctl restart "$UNIT" || true
+  wait_health || true
+  stop "the gateway did not come up on the new token alone; both tokens are accepted again (journalctl -u $UNIT -n 20)"
+}
+
+cancel_token_rotation() {
+  as_root
+  [[ -e "$NEXT_FILE" ]] || stop "no token change is open"
+  local minimum line nxt_idle
+  minimum="$(idle_minimum)"
+  line="$(token_facts "$NEXT_FILE")"
+  if [[ -n "$line" ]]; then
+    read -r _ _ _ _ _ nxt_idle <<<"$line"
+    # Giving the new token up would lock out a bot that already works with it.
+    if [[ "$nxt_idle" =~ ^[0-9]+$ ]] && ((nxt_idle < minimum)); then
+      later "the new token was used ${nxt_idle}s ago: the bot works with it. Finish the change (--finish-token-rotation) instead, or wait and give it up; nothing was changed"
+    fi
+  fi
+  destroy "$NEXT_FILE"
+  if [[ "$(systemctl is-active "$UNIT" 2>/dev/null || true)" == active ]]; then
+    systemctl restart "$UNIT" || stop "the new token is destroyed but the service did not restart"
+    wait_health || stop "the new token is destroyed but the gateway does not answer (journalctl -u $UNIT -n 20)"
+  fi
+  say "DB_GATEWAY_ROTATION_CANCELLED: only the old token is accepted again; the new one is destroyed."
+}
+
 case "${1:-}" in
   "") report ;;
   --apply) apply ;;
@@ -319,5 +499,8 @@ case "${1:-}" in
     [[ $# -eq 2 ]] || stop "usage: db_gateway_install.sh --connection-log on|off"
     connection_log "$2"
     ;;
-  *) stop "usage: db_gateway_install.sh [--apply | --start | --stop | --status | --archive-key KEY | --connection-log on|off]" ;;
+  --rotate-token) rotate_token ;;
+  --finish-token-rotation) finish_token_rotation ;;
+  --cancel-token-rotation) cancel_token_rotation ;;
+  *) stop "usage: db_gateway_install.sh [--apply | --start | --stop | --status | --archive-key KEY | --connection-log on|off | --rotate-token | --finish-token-rotation | --cancel-token-rotation]" ;;
 esac
