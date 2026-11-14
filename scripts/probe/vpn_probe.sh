@@ -136,9 +136,11 @@ network_facts() {
       operator="$(api_call termux-telephony-deviceinfo \
         | sed -n 's/.*"network_operator_name": *"\([^"]*\)".*/\1/p' | head -1 || true)"
     fi
-    # Without the Termux:API app Android still names the SIM's operator (first SIM).
+    # Without the Termux:API app Android still names the SIM's operator: "slot1,slot2",
+    # an empty name for an empty slot. The first name there is, is taken.
     if [[ -z "$operator" ]] && command -v getprop >/dev/null 2>&1; then
-      operator="$(getprop gsm.operator.alpha 2>/dev/null | cut -d, -f1 | head -1 || true)"
+      operator="$(getprop gsm.operator.alpha 2>/dev/null \
+        | tr ',' '\n' | sed '/^[[:space:]]*$/d' | head -1 || true)"
     fi
     operator="${operator:-unknown}"
   fi
