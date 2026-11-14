@@ -73,7 +73,7 @@ check() {
     stop "$cover does not agree on X25519 key exchange: pick another cover name"
   fi
   say "cover $cover: TLS 1.3, HTTP/2 and X25519 answer from this server"
-  [[ "$NETWORK" == grpc || "$NETWORK" == tcp ]] || stop "TRANSPORT_NETWORK is grpc or tcp"
+  [[ "$NETWORK" =~ ^(grpc|tcp|xhttp)$ ]] || stop "TRANSPORT_NETWORK is grpc, tcp or xhttp"
   # Its own REALITY key, made by Xray itself; it goes to the writer through the
   # environment, never on a command line, and is never printed.
   key="$(docker exec "$MARZBAN" xray x25519 2>/dev/null \

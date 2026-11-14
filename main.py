@@ -12,7 +12,12 @@ from collections.abc import Awaitable, Callable
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramNetworkError, TelegramUnauthorizedError
+from aiogram.exceptions import (
+    TelegramNetworkError,
+    TelegramRetryAfter,
+    TelegramServerError,
+    TelegramUnauthorizedError,
+)
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 from aiohttp import web
@@ -301,7 +306,16 @@ async def call_with_retry(
             return True
         except TelegramUnauthorizedError:
             raise
-        except (TelegramNetworkError, OSError) as exc:  # TimeoutError is an OSError
+        # A 5xx from Telegram (TelegramServerError: "Bad Gateway" while their side is
+        # down) or a flood wait is as passing as a network error. Letting it escape
+        # crashed the process, and the site's API, which lives in the same process,
+        # went down with it at every restart.
+        except (
+            TelegramNetworkError,
+            TelegramServerError,
+            TelegramRetryAfter,
+            OSError,  # TimeoutError is an OSError
+        ) as exc:
             logger.warning(
                 "telegram_unreachable",
                 extra={"call": what, "error": type(exc).__name__, "retry_in": delay},

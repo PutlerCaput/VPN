@@ -134,3 +134,31 @@ def test_the_fingerprint_goes_on_every_address() -> None:
     with pytest.raises(ValueError, match="fingerprint is one of"):
         entries.with_fingerprint(HOSTS, "netscape")
     assert "fingerprint=chrome" in "\n".join(entries.describe(HOSTS))
+
+
+def test_a_fragmented_copy_sits_next_to_the_plain_address() -> None:
+    added = entries.with_fragment_copy(
+        HOSTS, "45.138.157.65", 443, "100-200,10-20,tlshello"
+    )
+    plain, copy_ = added[TAG]
+    assert plain == HOSTS[TAG][0]
+    assert copy_["fragment_setting"] == "100-200,10-20,tlshello"
+    assert copy_["remark"] == "CHEBURNET (fragment)"
+    assert (copy_["address"], copy_["port"], copy_["sni"]) == (
+        "45.138.157.65",
+        443,
+        "www.apple.com",
+    )
+    assert "fragment=100-200,10-20,tlshello" in "\n".join(entries.describe(added))
+    # Twice is once; taking it away leaves the plain one.
+    assert (
+        entries.with_fragment_copy(
+            added, "45.138.157.65", 443, "100-200,10-20,tlshello"
+        )
+        == added
+    )
+    assert entries.without_fragment_copy(added, "45.138.157.65", 443) == HOSTS
+    with pytest.raises(ValueError, match="fragment setting"):
+        entries.with_fragment_copy(HOSTS, "45.138.157.65", 443, "lots")
+    with pytest.raises(ValueError, match="no plain address"):
+        entries.with_fragment_copy(HOSTS, "203.0.113.9", 443, "100-200,10-20,tlshello")

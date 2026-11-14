@@ -2,7 +2,8 @@
 """Writes a candidate Xray config with one more VLESS + REALITY inbound.
 
     python3 xray_add_inbound.py CONFIG CANDIDATE --cover NAME --port PORT
-        [--network grpc|tcp] [--tag VLESS-GRPC-REALITY] [--base "VLESS TCP REALITY"]
+        [--network grpc|tcp|xhttp] [--tag VLESS-GRPC-REALITY]
+        [--base "VLESS TCP REALITY"]
 
 The new inbound gets its own cover name, port, short id and, when the
 REALITY_PRIVATE_KEY environment variable holds one (vless_transport.sh makes it
@@ -31,6 +32,9 @@ TAG_RE = re.compile(r"^[A-Za-z0-9_-]{3,40}$")
 
 
 KEY_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
+# xhttp: Marzban v0.8.4 writes it into v2ray links (v2rayNG and other Xray-based
+# apps); its sing-box and Clash subscriptions leave such entries out.
+NETWORKS = ("grpc", "tcp", "xhttp")
 
 
 def add_inbound(
@@ -43,8 +47,8 @@ def add_inbound(
     network: str = "grpc",
     private_key: str | None = None,
 ) -> dict[str, Any]:
-    if network not in ("grpc", "tcp"):
-        raise ValueError("the network is grpc or tcp")
+    if network not in NETWORKS:
+        raise ValueError("the network is grpc, tcp or xhttp")
     if private_key is not None and not KEY_RE.fullmatch(private_key):
         raise ValueError("REALITY_PRIVATE_KEY is not an x25519 key from xray x25519")
     if not NAME_RE.fullmatch(cover):
@@ -81,6 +85,11 @@ def add_inbound(
     }
     if network == "grpc":
         stream_settings["grpcSettings"] = {"serviceName": secrets.token_hex(6)}
+    if network == "xhttp":
+        stream_settings["xhttpSettings"] = {
+            "path": f"/{secrets.token_hex(6)}",
+            "mode": "auto",
+        }
     inbound: dict[str, Any] = {
         "tag": tag,
         # Listens where the base inbound listens (it has no default of its own).
@@ -107,7 +116,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--tag", default="VLESS-GRPC-REALITY")
     parser.add_argument("--base", default="VLESS TCP REALITY")
-    parser.add_argument("--network", default="grpc", choices=("grpc", "tcp"))
+    parser.add_argument("--network", default="grpc", choices=NETWORKS)
     args = parser.parse_args(argv)
     try:
         config = json.loads(Path(args.config).read_text())
