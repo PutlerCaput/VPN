@@ -696,7 +696,12 @@ def test_the_loop_keeps_its_output_file_small(phone: Phone) -> None:
     (phone.home / "run.out").write_text("x" * 250_000)
     loop = start_loop(phone, "1")
     try:
-        phone.wait_for_runs(1)
+        # The log row is written before the run prints its line to run.out; a stop
+        # in between ends that run before it prints. Wait for the line itself.
+        deadline = time.monotonic() + 30
+        while "PROBE_RUN" not in (phone.home / "run.out").read_text():
+            assert time.monotonic() < deadline, "no run printed within 30 s"
+            time.sleep(0.1)
         phone.run("loop-stop")
         loop.communicate(timeout=30)
     finally:
