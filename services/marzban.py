@@ -278,6 +278,18 @@ class MarzbanClient:
         )
         return self._check(response, "get_user")
 
+    async def get_hosts(self) -> dict[str, Any]:
+        """The addresses Marzban writes into subscriptions, by inbound tag."""
+        response = await self._request("GET", "/api/hosts", operation="get_hosts")
+        return self._check(response, "get_hosts")
+
+    async def put_hosts(self, hosts: dict[str, Any]) -> dict[str, Any]:
+        """Replaces the whole host table (Marzban takes it as one document)."""
+        response = await self._request(
+            "PUT", "/api/hosts", operation="put_hosts", json_body=hosts
+        )
+        return self._check(response, "put_hosts")
+
     async def get_vless_link(self, username: str) -> str:
         data = await self.get_user(username)
         return self.extract_vless_link(data)
