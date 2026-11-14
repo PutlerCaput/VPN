@@ -49,7 +49,7 @@ def test_node_username() -> None:
     assert not is_valid_node_username("n" + "a" * 19)
     assert not is_valid_node_username("admin")
     assert not is_valid_node_username("u12345/../x")
-    with pytest.raises(ValueError, match="positive"):
+    with pytest.raises(ValueError, match="zero"):
         pseudonymous_node_username("s" * 64, 0)
 
 

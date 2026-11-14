@@ -29,7 +29,14 @@ from api.middleware import (
     json_error,
     unauthorized,
 )
-from api.schemas import LogoutIn, PaymentCreateIn, PaymentInBotIn, RefreshIn
+from api.schemas import (
+    EmailRequestIn,
+    EmailVerifyIn,
+    LogoutIn,
+    PaymentCreateIn,
+    PaymentInBotIn,
+    RefreshIn,
+)
 from config import (
     TIER_PRICES_RUB,
     TIER_PRICES_USDT,
@@ -41,6 +48,8 @@ from handlers.legal import offer_text, privacy_text
 from handlers.payments import bot_methods, channel_text
 from keyboards.main_menu import channel_kb
 from services.billing import BillingError
+from services.email_login import is_site_account, mask_email, normalize_email
+from services.mailer import MailError
 from services.marzban import MarzbanError
 from services.provisioning import ProvisioningError
 from services.security import sanitize_username
@@ -127,6 +136,114 @@ async def auth_telegram(request: web.Request) -> web.Response:
     return web.json_response(pair.as_dict())
 
 
+# ----------------------------------------------------------- auth by email
+def _email_login(request: web.Request) -> Any:
+    login = request.app[SERVICES_KEY].email_login
+    return login if login is not None and login.enabled else None
+
+
+def _code_allowed(request: web.Request, email: str) -> bool:
+    limits = request.app[LIMITS_KEY]
+    ip = request.get(CLIENT_IP_KEY) or "unknown"
+    by_ip = limits["email_code_ip"].hit(ip)
+    by_address = limits["email_code_address"].hit(email)
+    return bool(by_ip and by_address)
+
+
+@routes.post("/auth/email/request")
+async def auth_email_request(request: web.Request) -> web.Response:
+    """Mails a login code. The answer never tells whether the address is known."""
+    login = _email_login(request)
+    if login is None:
+        return json_error(503, "email_login_unavailable")
+    try:
+        body = EmailRequestIn.model_validate(await request.json())
+    except (ValueError, ValidationError):
+        return json_error(400, "invalid_email")
+    email = normalize_email(body.email)
+    if email is None:
+        return json_error(400, "invalid_email")
+    if not _code_allowed(request, email):
+        return json_error(429, "rate_limited", {"Retry-After": "600"})
+    try:
+        await login.send_code(email, "login")
+    except MailError:
+        return json_error(502, "mail_unavailable")
+    # Also when a code went out less than a minute ago: the earlier one is valid.
+    return web.json_response({"sent": True}, status=202)
+
+
+@routes.post("/auth/email/verify")
+async def auth_email_verify(request: web.Request) -> web.Response:
+    login = _email_login(request)
+    if login is None:
+        return json_error(503, "email_login_unavailable")
+    try:
+        body = EmailVerifyIn.model_validate(await request.json())
+    except (ValueError, ValidationError):
+        return _auth_failed(request, "parse")
+    email = normalize_email(body.email)
+    if email is None:
+        return _auth_failed(request, "parse")
+    outcome = await login.check(email, body.code, "login")
+    if outcome["result"] != "ok":
+        return _auth_failed(request, f"email_code_{outcome['result']}")
+    services = request.app[SERVICES_KEY]
+    telegram_id = await services.db.account_for_email(email)
+    pair = await request.app[TOKENS_KEY].issue(telegram_id)
+    return web.json_response(pair.as_dict())
+
+
+@routes.post("/me/email/request")
+async def me_email_request(request: web.Request) -> web.Response:
+    """A signed-in user ties an address to the account, to sign in by it later."""
+    login = _email_login(request)
+    if login is None:
+        return json_error(503, "email_login_unavailable")
+    telegram_id = request[TELEGRAM_ID_KEY]
+    services = request.app[SERVICES_KEY]
+    try:
+        body = EmailRequestIn.model_validate(await request.json())
+    except (ValueError, ValidationError):
+        return json_error(400, "invalid_email")
+    email = normalize_email(body.email)
+    if email is None:
+        return json_error(400, "invalid_email")
+    if await services.db.email_of(telegram_id) is not None:
+        return json_error(409, "email_already_linked")
+    if not _code_allowed(request, email):
+        return json_error(429, "rate_limited", {"Retry-After": "600"})
+    # An address that belongs to another account gets no code, and the answer is
+    # the same: it must not tell who is registered.
+    if not await services.db.email_taken(email):
+        try:
+            await login.send_code(email, "link", telegram_id)
+        except MailError:
+            return json_error(502, "mail_unavailable")
+    return web.json_response({"sent": True}, status=202)
+
+
+@routes.post("/me/email/verify")
+async def me_email_verify(request: web.Request) -> web.Response:
+    login = _email_login(request)
+    if login is None:
+        return json_error(503, "email_login_unavailable")
+    telegram_id = request[TELEGRAM_ID_KEY]
+    try:
+        body = EmailVerifyIn.model_validate(await request.json())
+    except (ValueError, ValidationError):
+        return json_error(400, "invalid_code")
+    email = normalize_email(body.email)
+    if email is None:
+        return json_error(400, "invalid_code")
+    outcome = await login.check(email, body.code, "link")
+    if outcome["result"] != "ok" or outcome["telegram_id"] != telegram_id:
+        return json_error(400, "invalid_code")
+    if not await request.app[SERVICES_KEY].db.link_email(email, telegram_id):
+        return json_error(409, "email_already_linked")
+    return web.json_response({"email": mask_email(email)})
+
+
 @routes.post("/auth/refresh")
 async def auth_refresh(request: web.Request) -> web.Response:
     try:
@@ -167,9 +284,14 @@ async def me(request: web.Request) -> web.Response:
     services = request.app[SERVICES_KEY]
     user = request[USER_KEY]
     telegram_id = request[TELEGRAM_ID_KEY]
+    email = await services.db.email_of(telegram_id)
     return web.json_response(
         {
             "telegram_id": telegram_id,
+            # "site": made by email on the site, nothing of Telegram behind it.
+            "account": "site" if is_site_account(telegram_id) else "telegram",
+            "email": mask_email(email) if email else None,
+            "email_login": _email_login(request) is not None,
             "username": user["username"],
             "first_name": user["first_name"],
             "status": user["status"],
@@ -184,6 +306,7 @@ async def me(request: web.Request) -> web.Response:
             "referral_link": (
                 f"{services.settings.referral_link_base}{telegram_id}"
                 if services.settings.referral_acquisition_enabled
+                and not is_site_account(telegram_id)
                 else ""
             ),
             "bot_username": services.settings.bot_username,
@@ -365,6 +488,9 @@ async def payments_in_bot(request: web.Request) -> web.Response:
     methods = bot_methods(services)
     if not methods:
         return json_error(503, "payments_unavailable")
+    if is_site_account(telegram_id):
+        # No Telegram chat behind a site account: it pays on the site.
+        return json_error(409, "bot_unreachable")
     limiter = request.app[LIMITS_KEY]["bot_message_user"]
     if not limiter.hit(str(telegram_id)):
         retry = str(max(1, int(limiter.retry_after(str(telegram_id))) + 1))
@@ -420,6 +546,7 @@ async def referral(request: web.Request) -> web.Response:
             "link": (
                 f"{services.settings.referral_link_base}{telegram_id}"
                 if services.settings.referral_acquisition_enabled
+                and not is_site_account(telegram_id)
                 else ""
             ),
             "invited_count": await services.db.count_referrals(telegram_id),

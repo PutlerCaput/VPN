@@ -31,6 +31,12 @@ export interface Me {
   referral_link: string;
   referral_enabled: boolean;
   bot_username: string;
+  /** "site": made by email on the site, nothing of Telegram behind it. */
+  account: "site" | "telegram";
+  /** Masked address tied to the account, or null. */
+  email: string | null;
+  /** The server can mail login codes. */
+  email_login: boolean;
 }
 
 export interface Subscription {
@@ -205,6 +211,14 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const endpoints = {
   loginWithWidget: (data: Record<string, string | number>) =>
     api<TokenPair>("/auth/telegram", { method: "POST", body: JSON.stringify(data) }),
+  requestEmailCode: (email: string) =>
+    api<{ sent: boolean }>("/auth/email/request", { method: "POST", body: JSON.stringify({ email }) }),
+  loginWithEmailCode: (email: string, code: string) =>
+    api<TokenPair>("/auth/email/verify", { method: "POST", body: JSON.stringify({ email, code }) }),
+  requestEmailLink: (email: string) =>
+    api<{ sent: boolean }>("/me/email/request", { method: "POST", body: JSON.stringify({ email }) }),
+  confirmEmailLink: (email: string, code: string) =>
+    api<{ email: string }>("/me/email/verify", { method: "POST", body: JSON.stringify({ email, code }) }),
   logout: (refreshToken: string | null) =>
     api<void>("/auth/logout", { method: "POST", body: JSON.stringify({ refresh_token: refreshToken }) }),
   me: () => api<Me>("/me"),

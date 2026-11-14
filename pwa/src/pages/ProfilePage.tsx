@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { endpoints, formatAmount, formatDate, type Me } from "../api/client";
+import { EmailCodeForm } from "../auth/EmailCodeForm";
 import { currentSubscription, disablePush, enablePush, pushSupported } from "../push";
 import { useAppStore } from "../store";
 
@@ -29,16 +30,39 @@ export function ProfilePage({ me }: { me: Me }) {
       <h1>Профиль</h1>
       <section className="card">
         <dl className="facts">
-          <dt>Telegram ID</dt>
-          <dd>
-            <code>{me.telegram_id}</code>
-          </dd>
-          <dt>Username</dt>
-          <dd>{me.username ? `@${me.username}` : "—"}</dd>
+          {me.account === "telegram" && (
+            <>
+              <dt>Telegram ID</dt>
+              <dd>
+                <code>{me.telegram_id}</code>
+              </dd>
+              <dt>Username</dt>
+              <dd>{me.username ? `@${me.username}` : "—"}</dd>
+            </>
+          )}
+          <dt>Почта для входа</dt>
+          <dd>{me.email ?? "не привязана"}</dd>
           <dt>Приглашено</dt>
           <dd>{me.referral_count}</dd>
         </dl>
       </section>
+
+      {me.account === "telegram" && !me.email && me.email_login && (
+        <section className="card">
+          <h2>Вход по почте</h2>
+          <p className="small muted">
+            Привяжите адрес, чтобы входить на сайт и продлевать доступ, когда Telegram не открывается.
+          </p>
+          <EmailCodeForm
+            submitLabel="Привязать"
+            request={endpoints.requestEmailLink}
+            confirm={async (email, code) => {
+              await endpoints.confirmEmailLink(email, code);
+              await queryClient.invalidateQueries({ queryKey: ["me"] });
+            }}
+          />
+        </section>
+      )}
 
       {pushSupported() && (
         <section className="card">

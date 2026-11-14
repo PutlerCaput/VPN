@@ -17,6 +17,15 @@ class RefreshIn(StrictModel):
     refresh_token: str = Field(min_length=20, max_length=2048)
 
 
+class EmailRequestIn(StrictModel):
+    email: str = Field(min_length=3, max_length=254)
+
+
+class EmailVerifyIn(StrictModel):
+    email: str = Field(min_length=3, max_length=254)
+    code: str = Field(min_length=6, max_length=6)
+
+
 class LogoutIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
     refresh_token: str | None = Field(default=None, max_length=2048)
