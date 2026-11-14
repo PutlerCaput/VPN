@@ -338,7 +338,7 @@ summary() {
     }
     END {
       printf "vpn-probe: last %d h; only runs where the control hosts answered\n", hours
-      printf "%-22s %-34s %5s %5s %5s %7s  %s\n", "net/operator", "target", "ok", "fail", "ok%", "avg_ms", "last failure"
+      printf "%-22s %-38s %5s %5s %5s %7s  %s\n", "net/operator", "target", "ok", "fail", "ok%", "avg_ms", "last failure"
       n = 0
       for (item in targets) order[++n] = item
       for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++) if (order[j] < order[i]) { t = order[i]; order[i] = order[j]; order[j] = t }
@@ -347,7 +347,7 @@ summary() {
         split(key, part, SUBSEP)
         total = ok[key] + bad[key]
         avg = ok[key] ? int(sum[key] / ok[key]) : 0
-        printf "%-22s %-34s %5d %5d %4d%% %7d  %s\n", part[1], part[2], ok[key], bad[key], (100 * ok[key]) / total, avg, last[key]
+        printf "%-22s %-38s %5d %5d %4d%% %7d  %s\n", part[1], part[2], ok[key], bad[key], (100 * ok[key]) / total, avg, last[key]
       }
       skipped_runs = 0
       for (s in skipped) skipped_runs++
@@ -363,11 +363,11 @@ last_run() {
     NR == 1 { next }
     { rows[NR] = $0; ts[NR] = $1; if ($1 > latest) latest = $1 }
     END {
-      printf "%-34s %-8s %-9s %5s %7s %7s %7s\n", "target", "status", "reason", "code", "tcp_ms", "tls_ms", "total"
+      printf "%-38s %-8s %-9s %5s %7s %7s %7s\n", "target", "status", "reason", "code", "tcp_ms", "tls_ms", "total"
       for (i = 2; i <= NR; i++) {
         if (ts[i] != latest) continue
         split(rows[i], f, "\t")
-        printf "%-34s %-8s %-9s %5s %7s %7s %7s\n", f[4], f[6], f[7], f[8], f[9], f[10], f[11]
+        printf "%-38s %-8s %-9s %5s %7s %7s %7s\n", f[4], f[6], f[7], f[8], f[9], f[10], f[11]
         net = f[2] "/" f[3]; valid = f[12]
       }
       printf "net %s, run at %s, controls %s\n", net, latest, (valid == 1 ? "answered" : "DOWN")
