@@ -39,6 +39,7 @@ PROBE_CONTROLS="https://ya.ru/ http://connectivitycheck.gstatic.com/generate_204
 # widget loads from telegram.org and signs in at oauth.telegram.org.
 PROBE_TELEGRAM="https://api.telegram.org/ https://t.me/ https://telegram.org/ https://oauth.telegram.org/"
 API_TIMEOUT="${PROBE_API_TIMEOUT:-8}"
+JOB_ID="${PROBE_JOB_ID:-4712}"   # the Android job install_probe.sh schedules
 LOOP_UNIT="${PROBE_LOOP_UNIT:-60}"   # seconds in a "minute": tests make it 1
 PROBE_NET=""
 PROBE_OPERATOR=""
@@ -107,6 +108,13 @@ api_call() {
   else
     "$@" 2>/dev/null || true
   fi
+}
+
+# True when the Android job scheduler already runs this probe. A loop next to it would
+# measure twice, and every failure would count twice towards an alert.
+scheduler_has_the_job() {
+  command -v termux-job-scheduler >/dev/null 2>&1 || return 1
+  api_call termux-job-scheduler --pending | grep -q "$JOB_ID"
 }
 
 # What kind of network the phone is on right now, and whose: "<net> <operator>".
@@ -425,6 +433,9 @@ loop() {
     if is_our_loop "$pid"; then
       stop "a loop is already running (pid $pid); stop it first: bash $SELF loop-stop"
     fi
+  fi
+  if scheduler_has_the_job; then
+    stop "the Android scheduler already runs the probe (job $JOB_ID), and a loop next to it would measure twice. Keep one: install_probe.sh --loop cancels the job, or  termux-job-scheduler --cancel --job-id $JOB_ID"
   fi
   printf '%s\n' "$$" >"$PROBE_HOME/loop.pid"
   trap loop_cleanup EXIT

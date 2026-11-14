@@ -853,6 +853,9 @@ def test_the_installer_installs_for_real(box: Phone) -> None:
         done.stdout
     )
     assert "everything answers" in done.stdout
+    # A job in the list is not yet a run: the installer says how to see one.
+    assert "in 35 minutes" in done.stdout
+    assert "vpn_probe.sh status" in done.stdout
     # What the first run saw is shown, target by target.
     assert "== What it saw" in done.stdout
     assert "target" in done.stdout
@@ -952,8 +955,10 @@ def test_the_installer_starts_a_loop_when_asked_and_uninstall_stops_it(
     assert "PROBE_INSTALLED: measuring every 1 min in a loop" in done.stdout
     assert "nohup bash" in done.stdout
     assert "PROBE_INSTALLED_NOT" not in done.stdout
-    # The job scheduler is not used at all in this mode.
-    assert not (box.tmp / "scheduler.log").exists()
+    # The job scheduler is only asked what it holds: nothing is scheduled, nothing
+    # needs cancelling.
+    asked = (box.tmp / "scheduler.log").read_text().split("\n")
+    assert {line for line in asked if line} == {"--pending"}
     first = int((box.home / "loop.pid").read_text())
     box.wait_for_runs(2)
     assert "PROBE_PERIOD=1" in (box.home / "probe.conf").read_text()
@@ -982,6 +987,48 @@ def test_the_installer_starts_a_loop_when_asked_and_uninstall_stops_it(
     assert box.runs_logged() == runs
     assert (box.home / "probe.log").exists()
     assert (box.home / "probe.conf").exists()
+
+
+def test_a_loop_is_refused_while_the_android_job_runs_the_probe(box: Phone) -> None:
+    install(box, "--site", "https://app.test")
+    assert "4712" in (box.tmp / "pending.txt").read_text()
+    # Two runners would measure twice and count every failure twice.
+    refused = box.run("loop", "1")
+    assert refused.returncode == 1
+    assert "already runs the probe (job 4712)" in refused.stderr
+    assert "--cancel --job-id 4712" in refused.stderr
+    assert not (box.home / "loop.pid").exists()
+
+
+def test_installing_the_loop_cancels_the_android_job_and_the_job_stops_a_loop(
+    box: Phone,
+) -> None:
+    install(box, "--site", "https://app.test")
+    assert "4712" in (box.tmp / "pending.txt").read_text()
+    # The loop replaces the job ...
+    looped = install(
+        box,
+        "--site",
+        "https://app.test",
+        "--period",
+        "1",
+        "--loop",
+        live=True,
+        PROBE_LOOP_UNIT="1",
+    )
+    assert looped.returncode == 0, looped.stdout + looped.stderr
+    assert "The Android job 4712 was cancelled" in looped.stdout
+    assert "--cancel --job-id 4712" in (box.tmp / "scheduler.log").read_text()
+    assert not (box.tmp / "pending.txt").exists()
+    loop_pid = int((box.home / "loop.pid").read_text())
+    box.wait_for_runs(2)
+    # ... and the job replaces the loop.
+    scheduled = install(box, "--site", "https://app.test")
+    assert scheduled.returncode == 0, scheduled.stdout + scheduled.stderr
+    assert "PROBE_INSTALLED: measuring every 15 min (job 4712" in scheduled.stdout
+    assert wait_until_gone(loop_pid)
+    assert not (box.home / "loop.pid").exists()
+    assert "4712" in (box.tmp / "pending.txt").read_text()
 
 
 def test_a_short_period_is_only_for_the_loop(box: Phone) -> None:

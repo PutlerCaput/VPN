@@ -18,6 +18,7 @@ set -euo pipefail
 
 export PROBE_HOME="${PROBE_HOME:-$HOME/vpn-probe}"
 JOB_ID="${PROBE_JOB_ID:-4712}"
+export PROBE_JOB_ID="$JOB_ID"
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 
 say() { printf '%s\n' "$*"; }
@@ -134,6 +135,13 @@ bash "$PROBE_HOME/vpn_probe.sh" last || true
 say ""
 
 if ((use_loop)); then
+  # One runner only: a job left in the Android schedule would measure beside the loop.
+  if command -v termux-job-scheduler >/dev/null 2>&1; then
+    if grep -q "$JOB_ID" <<<"$(bounded termux-job-scheduler --pending)"; then
+      bounded termux-job-scheduler --cancel --job-id "$JOB_ID" >/dev/null
+      say "The Android job $JOB_ID was cancelled: from now on the loop measures, and only it."
+    fi
+  fi
   nohup bash "$PROBE_HOME/vpn_probe.sh" loop "$period" >>"$PROBE_HOME/run.out" 2>&1 &
   disown 2>/dev/null || true
   for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -154,6 +162,8 @@ elif command -v termux-job-scheduler >/dev/null 2>&1; then
   pending="$(bounded termux-job-scheduler --pending)"
   if grep -q "$JOB_ID" <<<"$pending"; then
     say "PROBE_INSTALLED: measuring every $period min (job $JOB_ID is in the schedule). Look:  bash $PROBE_HOME/vpn_probe.sh summary"
+    say "A job in the list is not yet a run: in $((period + 5)) minutes  bash $PROBE_HOME/vpn_probe.sh status  must show a newer run."
+    say "If it does not, run this again with  --loop  added."
   elif grep -qiE 'google play|not installed|not available' <<<"$asked
 $pending"; then
     say "PROBE_INSTALLED_NOT_SCHEDULED: the Termux:API app is not available on this phone (the Google Play build of Termux has none)."
