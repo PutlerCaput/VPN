@@ -13,12 +13,18 @@ set -euo pipefail
 
 CONTAINER="${AWG_CONTAINER:-cyberdefency-awg}"
 ZONE="/var/lib/awg/dns/blocklist.conf"
+# Sized for the 2 GB server: about 880 thousand domains take roughly 380 MB in
+# unbound. The threat-intelligence list (tif, 1.46 million domains, about 950 MB
+# together with the rest) does not fit next to the bot and is not used.
 LISTS=(
-  "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt"
   "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/nsfw-onlydomains.txt"
   "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/gambling-onlydomains.txt"
   "https://phishing.army/download/phishing_army_blocklist.txt"
 )
+# Refuse to build when less than this is available: unbound plus the block zone
+# must leave room for the bot, the web app and the VPN.
+MIN_AVAILABLE_MB="${MIN_AVAILABLE_MB:-500}"
+MEMINFO="${MEMINFO:-/proc/meminfo}"
 
 say() { printf '%s\n' "$*"; }
 stop() {
@@ -33,6 +39,13 @@ if [[ "${1:-}" == "--status" ]]; then
 fi
 
 docker inspect "$CONTAINER" >/dev/null 2>&1 || stop "no container $CONTAINER"
+
+available_mb="$(awk '/^MemAvailable:/ {print int($2 / 1024)}' "$MEMINFO")"
+[[ "$available_mb" =~ ^[0-9]+$ ]] || stop "cannot read available memory from $MEMINFO"
+if ((available_mb < MIN_AVAILABLE_MB)); then
+  stop "only ${available_mb} MB available, need ${MIN_AVAILABLE_MB} MB; the previous block zone stays"
+fi
+say "memory available: ${available_mb} MB"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
