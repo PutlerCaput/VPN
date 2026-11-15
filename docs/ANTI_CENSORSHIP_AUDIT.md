@@ -164,6 +164,12 @@ sysctl --system | tail -3
 sysctl net.ipv4.tcp_congestion_control   # должно быть bbr
 ```
 
+На DE и на RU то же самое делает `bash scripts/net_tuning.sh`: пишет этот файл,
+загружает модуль `tcp_bbr` и записывает его в `/etc/modules-load.d/bbr.conf`,
+выполняет `sysctl --system` и ставит корневую qdisc `fq` на интерфейс маршрута
+по умолчанию (`tc qdisc replace`). Повторный запуск безопасен.
+`bash scripts/net_tuning.sh --check` только печатает текущие значения.
+
 ```bash
 # RU. Посредник меняет путь: MSS по MTU, чтобы не было «зависаний» больших пакетов.
 iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
