@@ -373,6 +373,15 @@ class Agent:
                     ["-A", "INPUT", "-i", iface, "-p", proto, "--dport", "53",
                      "-j", "ACCEPT"]
                 )  # fmt: skip
+            # A client whose DNS is a public resolver (an old config, or a phone
+            # that overrides it) would otherwise lose name resolution entirely:
+            # plain DNS is redirected to the filter instead of being dropped.
+            for proto in ("udp", "tcp"):
+                rules.append(
+                    ["-t", "nat", "-A", "PREROUTING", "-i", iface, "-p", proto,
+                     "--dport", "53", "-j", "DNAT", "--to-destination",
+                     f"{self.server_ip}:53"]
+                )  # fmt: skip
         rules += [
             ["-A", "INPUT", "-i", iface, "-j", "DROP"],
             ["-A", "FORWARD", "-i", iface, "-o", iface, "-j", "DROP"],

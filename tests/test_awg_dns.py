@@ -164,6 +164,17 @@ def test_filter_lets_clients_reach_only_the_resolver(tmp_path: Path) -> None:
     assert "-A INPUT -i awg0 -p tcp --dport 53 -j ACCEPT" in rules
 
 
+def test_filter_redirects_plain_dns_to_the_resolver(tmp_path: Path) -> None:
+    agent = make_agent(tmp_path, True)
+    agent._firewall("awg0")
+    rules = iptables_rules(agent)
+    for proto in ("udp", "tcp"):
+        assert (
+            f"-t nat -A PREROUTING -i awg0 -p {proto} --dport 53 "
+            "-j DNAT --to-destination 10.67.0.1:53"
+        ) in rules
+
+
 def test_filter_refuses_other_resolvers_before_the_internet_accept(
     tmp_path: Path,
 ) -> None:
