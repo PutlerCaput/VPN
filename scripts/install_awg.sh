@@ -54,6 +54,11 @@ BOT_NETWORK="${NETWORKS%% *}"
 [[ -n "$BOT_NETWORK" && "$BOT_NETWORK" != host && "$BOT_NETWORK" != none ]] \
   || fail "bot network '$BOT_NETWORK' is not a Docker bridge network; set up by hand"
 
+# A reinstall keeps the endpoint chosen before (for example the RU relay set by
+# awg_endpoint.sh); only a first install falls back to this server's address.
+if [[ -z "${AWG_ENDPOINT_HOST:-}" && -f "$AWG_DIR/.env" ]]; then
+  AWG_ENDPOINT_HOST="$(sed -n 's/^AWG_ENDPOINT_HOST=//p' "$AWG_DIR/.env" | head -1)"
+fi
 if [[ -z "${AWG_ENDPOINT_HOST:-}" ]]; then
   AWG_ENDPOINT_HOST="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}')"
 fi
@@ -84,6 +89,9 @@ fi
 
 install -d -m 700 "$AWG_DIR" "$AWG_DIR/secrets"
 cp "$SOURCE/deploy/awg/Dockerfile" "$SOURCE/deploy/awg/agent.py" "$SOURCE/deploy/awg/compose.yaml" "$AWG_DIR/"
+# The image also builds the DNS filter's block-zone tool (deploy/awg/dns).
+rm -rf "$AWG_DIR/dns"
+cp -r "$SOURCE/deploy/awg/dns" "$AWG_DIR/dns"
 TOKEN_FILE="$AWG_DIR/secrets/awg_agent_token.txt"
 if [[ ! -s "$TOKEN_FILE" ]]; then
   (umask 077 && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$TOKEN_FILE")
