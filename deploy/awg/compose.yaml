@@ -8,6 +8,8 @@ services:
     image: cyberdefency-awg:latest
     container_name: cyberdefency-awg
     restart: unless-stopped
+    # An oversized DNS zone restarts only this container, not the whole host.
+    mem_limit: 768m
     cap_add:
       - NET_ADMIN
     security_opt:

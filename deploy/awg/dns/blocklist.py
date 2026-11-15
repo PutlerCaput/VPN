@@ -23,7 +23,8 @@ from collections.abc import Iterable
 from pathlib import Path
 
 MIN_DOMAINS = 1_000
-MAX_DOMAINS = 2_500_000
+# Measured: 880k domains ~403 MB in unbound, 1.2M ~545 MB.
+MAX_DOMAINS = 1_000_000
 LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 DOMAIN_RE = re.compile(rf"^(?:{LABEL}\.)+[a-z0-9-]{{2,63}}$")
 ALWAYS_ALLOWED = frozenset({"localhost", "local"})
