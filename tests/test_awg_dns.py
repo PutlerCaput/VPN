@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -70,6 +72,11 @@ def test_too_few_domains_is_refused() -> None:
         blocklist.check_count(blocklist.MIN_DOMAINS - 1)
 
 
+def test_domain_cap_matches_the_zone_guard() -> None:
+    assert blocklist.MAX_DOMAINS == 1_000_000
+    assert agent_module.MAX_ZONE_ENTRIES == blocklist.MAX_DOMAINS
+
+
 def test_a_failed_build_keeps_the_previous_file(tmp_path: Path) -> None:
     out = tmp_path / "blocklist.conf"
     out.write_text("previous\n", encoding="utf-8")
@@ -103,6 +110,13 @@ def test_resolver_answers_tunnel_clients_only() -> None:
     assert 'include: "/var/lib/awg/dns/blocklist.conf"' in conf
     assert "forward-tls-upstream: yes" in conf
     assert "@853#cloudflare-dns.com" in conf
+    assert 'username: ""' in conf
+    assert 'chroot: ""' in conf
+    assert 'directory: "/var/lib/awg/dns"' in conf
+    assert 'pidfile: "/var/lib/awg/dns/unbound.pid"' in conf
+    assert "num-threads: 1" in conf
+    assert "msg-cache-size: 8m" in conf
+    assert "rrset-cache-size: 16m" in conf
 
 
 # ------------------------------------------------------------ the agent
@@ -202,3 +216,147 @@ def test_start_resolver_writes_config_and_starts_unbound(
     # A second call while it runs does not start another copy.
     agent.start_resolver()
     assert len(started) == 1
+
+
+def _zone_bytes(count: int) -> bytes:
+    lines = [b"# zone\n"]
+    lines.extend(
+        f'local-zone: "n{i}.example" always_nxdomain\n'.encode() for i in range(count)
+    )
+    return b"".join(lines)
+
+
+def _install_popen(monkeypatch: pytest.MonkeyPatch, processes: list[Any]) -> None:
+    class FakeProcess:
+        def __init__(self) -> None:
+            self.alive = True
+
+        def poll(self) -> int | None:
+            return None if self.alive else 1
+
+    def fake_popen(args: list[str], **_: Any) -> FakeProcess:
+        proc = FakeProcess()
+        processes.append(proc)
+        return proc
+
+    monkeypatch.setattr(agent_module.subprocess, "Popen", fake_popen)
+
+
+def test_oversized_zone_is_set_aside_and_filter_starts_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(agent_module, "MAX_ZONE_ENTRIES", 3)
+    agent = make_agent(tmp_path, True)
+    zone = tmp_path / "state" / "dns" / "blocklist.conf"
+    original = _zone_bytes(4)
+    zone.parent.mkdir(parents=True)
+    zone.write_bytes(original)
+    processes: list[Any] = []
+    _install_popen(monkeypatch, processes)
+    with caplog.at_level(logging.WARNING, logger="awg-agent"):
+        agent.start_resolver()
+    aside = zone.with_name("blocklist.conf.too-large")
+    assert aside.read_bytes() == original
+    assert "local-zone" not in zone.read_text(encoding="utf-8")
+    assert zone.read_text(encoding="utf-8") == agent_module.BLOCK_ZONE_HEADER
+    assert len(processes) == 1
+    assert "rebuild with scripts/awg_dns_update.sh" in caplog.text
+    assert "4" in caplog.text
+    assert "3" in caplog.text
+
+
+def test_zone_within_limit_is_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_module, "MAX_ZONE_ENTRIES", 3)
+    agent = make_agent(tmp_path, True)
+    zone = tmp_path / "state" / "dns" / "blocklist.conf"
+    original = _zone_bytes(3)
+    zone.parent.mkdir(parents=True)
+    zone.write_bytes(original)
+    processes: list[Any] = []
+    _install_popen(monkeypatch, processes)
+    agent.start_resolver()
+    assert zone.read_bytes() == original
+    assert not zone.with_name("blocklist.conf.too-large").exists()
+    assert len(processes) == 1
+
+
+def test_watchdog_restarts_a_dead_resolver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_module, "RESOLVER_CHECK_SECONDS", 0.05)
+    processes: list[Any] = []
+    _install_popen(monkeypatch, processes)
+    agent = make_agent(tmp_path, True)
+    agent.start_resolver()
+    assert len(processes) == 1
+    processes[0].alive = False
+    agent.start_resolver_watchdog()
+    try:
+        deadline = time.monotonic() + 2.0
+        while len(processes) < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert len(processes) == 2
+        assert agent._resolver_restarts == 1
+        assert agent.resolver_running()
+    finally:
+        agent._resolver_stop.set()
+
+
+def test_reload_of_a_dead_resolver_starts_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started: list[list[str]] = []
+    signalled: list[int] = []
+
+    class Dead:
+        def poll(self) -> int:
+            return 1
+
+        def send_signal(self, sig: int) -> None:
+            signalled.append(sig)
+
+    class Alive:
+        def poll(self) -> None:
+            return None
+
+    def fake_popen(args: list[str], **_: Any) -> Alive:
+        started.append(list(args))
+        return Alive()
+
+    monkeypatch.setattr(agent_module.subprocess, "Popen", fake_popen)
+    agent = make_agent(tmp_path, True)
+    agent._resolver = Dead()
+    agent.reload_resolver()
+    assert len(started) == 1
+    assert started[0][1:3] == ["-d", "-c"]
+    assert signalled == []
+    assert agent.resolver_running()
+
+
+def test_watchdog_does_nothing_without_the_filter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_module, "RESOLVER_CHECK_SECONDS", 0.05)
+    started: list[list[str]] = []
+
+    class Dead:
+        def poll(self) -> int:
+            return 1
+
+    def fake_popen(args: list[str], **_: Any) -> Dead:
+        started.append(list(args))
+        return Dead()
+
+    monkeypatch.setattr(agent_module.subprocess, "Popen", fake_popen)
+    agent = make_agent(tmp_path, False)
+    agent._resolver = Dead()
+    try:
+        agent.check_resolver()
+        agent.start_resolver_watchdog()
+        time.sleep(0.2)
+        assert started == []
+        assert agent._resolver_restarts == 0
+    finally:
+        agent._resolver_stop.set()

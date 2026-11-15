@@ -220,6 +220,20 @@ def test_firewall_isolates_tunnel_clients(agent: Any) -> None:
     assert any("MASQUERADE" in rule for rule in rules)
 
 
+def test_resolver_conf_pins_sandbox_and_cache_sizes() -> None:
+    conf = agent_module.render_resolver_conf(
+        "10.67.0.1", "10.67.0.0/24", Path("/var/lib/awg/dns/blocklist.conf")
+    )
+    assert 'username: ""' in conf
+    assert 'chroot: ""' in conf
+    assert 'directory: "/var/lib/awg/dns"' in conf
+    assert 'pidfile: "/var/lib/awg/dns/unbound.pid"' in conf
+    assert "num-threads: 1" in conf
+    assert "msg-cache-size: 8m" in conf
+    assert "rrset-cache-size: 16m" in conf
+    assert "The container is the sandbox; do not depend on distro defaults." in conf
+
+
 def test_http_api_requires_the_token(agent: Any) -> None:
     server = ThreadingHTTPServer(("127.0.0.1", 0), agent_module.make_handler(agent))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -239,7 +253,14 @@ def test_http_api_requires_the_token(agent: Any) -> None:
             return exc.code, json.loads(exc.read())
 
     try:
-        assert call("/healthz", token=None) == (200, {"ok": True})
+        assert call("/healthz", token=None) == (200, {"ok": True, "dns": False})
+
+        class Alive:
+            def poll(self) -> None:
+                return None
+
+        agent._resolver = Alive()
+        assert call("/healthz", token=None) == (200, {"ok": True, "dns": True})
         assert call("/v1/info", token=None)[0] == 401
         assert call("/v1/info", token="wrong")[0] == 401
         status, info = call("/v1/info")

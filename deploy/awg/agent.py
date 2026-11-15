@@ -6,7 +6,7 @@ container is never touched.
 
 HTTP API (bearer token, only on the Docker network shared with the bot):
 
-  GET  /healthz            liveness, no data
+  GET  /healthz            liveness; dns is true when the filtering resolver is up
   GET  /v1/info            server public key, endpoint, port, MTU, DNS and
                            obfuscation parameters clients need
   GET  /v1/peers           peers with address, enabled flag and counters
@@ -51,6 +51,9 @@ AWG_GO = os.environ.get("AWG_GO_BIN", "/usr/bin/amneziawg-go")
 IP = os.environ.get("IP_BIN", "/sbin/ip")
 IPTABLES = os.environ.get("IPTABLES_BIN", "/sbin/iptables")
 UNBOUND = os.environ.get("UNBOUND_BIN", "/usr/sbin/unbound")
+# Same value as MAX_DOMAINS in dns/blocklist.py.
+MAX_ZONE_ENTRIES = 1_000_000
+RESOLVER_CHECK_SECONDS = 15.0
 # Upstreams of the filtering resolver: DNS-over-TLS, so the provider cannot read
 # the names clients look up on their way out.
 UPSTREAMS = (
@@ -208,6 +211,7 @@ def render_resolver_conf(server_ip: str, subnet: str, blocklist: Path) -> str:
     The block zone is an include file, so a rebuilt list needs only a reload.
     """
     upstreams = "".join(f"    forward-addr: {addr}\n" for addr in UPSTREAMS)
+    zone_dir = blocklist.parent
     return (
         "server:\n"
         f"    interface: {server_ip}\n"
@@ -215,6 +219,14 @@ def render_resolver_conf(server_ip: str, subnet: str, blocklist: Path) -> str:
         f"    access-control: {subnet} allow\n"
         "    access-control: 127.0.0.0/8 allow\n"
         "    do-daemonize: no\n"
+        "    # The container is the sandbox; do not depend on distro defaults.\n"
+        '    username: ""\n'
+        '    chroot: ""\n'
+        f'    directory: "{zone_dir}"\n'
+        f'    pidfile: "{zone_dir}/unbound.pid"\n'
+        "    num-threads: 1\n"
+        "    msg-cache-size: 8m\n"
+        "    rrset-cache-size: 16m\n"
         "    hide-identity: yes\n"
         "    hide-version: yes\n"
         "    qname-minimisation: yes\n"
@@ -240,6 +252,10 @@ class Agent:
         # With the filter, clients ask the resolver on the tunnel address only.
         self.client_dns = str(self.server_ip) if config.dns_filter else config.dns
         self._resolver: subprocess.Popen[bytes] | None = None
+        self._resolver_lock = threading.Lock()
+        self._resolver_restarts = 0
+        # Set on the way down so the watchdog does not start unbound again.
+        self._resolver_stop = threading.Event()
         self.state = self._load_or_create()
 
     # ----------------------------------------------------------- state
@@ -341,6 +357,7 @@ class Agent:
         self._firewall(iface)
         if self.config.dns_filter:
             self.start_resolver()
+            self.start_resolver_watchdog()
 
     def _firewall(self, iface: str) -> None:
         """Clients reach the internet only: not this host, private nets or peers.
@@ -393,7 +410,9 @@ class Agent:
             self.run([IPTABLES, *rule], None)
 
     def down(self) -> None:
-        self.stop_resolver()
+        self._resolver_stop.set()
+        with self._resolver_lock:
+            self.stop_resolver()
         with contextlib.suppress(RuntimeError):
             self.run([IP, "link", "del", "dev", self.config.interface], None)
 
@@ -402,28 +421,87 @@ class Agent:
     def _dns_dir(self) -> Path:
         return self.config.state_dir / "dns"
 
-    def start_resolver(self) -> None:
-        """Start unbound on the tunnel address with the current block zone."""
+    @staticmethod
+    def _zone_entries(path: Path) -> int:
+        """Count local-zone lines by streaming the file."""
+        count = 0
+        with path.open("rb") as handle:
+            for line in handle:
+                if line.startswith(b"local-zone"):
+                    count += 1
+        return count
+
+    def _safe_blocklist(self) -> Path:
+        """Zone to load, or an empty file when the zone is over the cap."""
         self._dns_dir.mkdir(parents=True, exist_ok=True)
         blocklist = self._dns_dir / "blocklist.conf"
+        if blocklist.is_file():
+            entries = self._zone_entries(blocklist)
+            if entries > MAX_ZONE_ENTRIES:
+                os.replace(blocklist, blocklist.with_name("blocklist.conf.too-large"))
+                logger.warning(
+                    "dns block zone has %s entries, above the %s limit; "
+                    "moved to blocklist.conf.too-large, "
+                    "rebuild with scripts/awg_dns_update.sh",
+                    entries,
+                    MAX_ZONE_ENTRIES,
+                )
         if not blocklist.is_file():
             # Nothing blocked until the first list is built; the file is still valid.
             blocklist.write_text(BLOCK_ZONE_HEADER, encoding="utf-8")
-        conf = self._dns_dir / "unbound.conf"
-        conf.write_text(
-            render_resolver_conf(str(self.server_ip), self.config.subnet, blocklist),
-            encoding="utf-8",
-        )
-        if self._resolver is not None and self._resolver.poll() is None:
+        return blocklist
+
+    def start_resolver(self) -> None:
+        """Start unbound on the tunnel address with the current block zone."""
+        with self._resolver_lock:
+            if self._resolver_stop.is_set() or self.resolver_running():
+                return
+            blocklist = self._safe_blocklist()
+            conf = self._dns_dir / "unbound.conf"
+            conf.write_text(
+                render_resolver_conf(
+                    str(self.server_ip), self.config.subnet, blocklist
+                ),
+                encoding="utf-8",
+            )
+            self._resolver = subprocess.Popen(  # noqa: S603  # nosec B603 -- fixed argv
+                [UNBOUND, "-d", "-c", str(conf)]
+            )
+            logger.info("dns resolver started on %s", self.server_ip)
+
+    def resolver_running(self) -> bool:
+        return self._resolver is not None and self._resolver.poll() is None
+
+    def check_resolver(self) -> None:
+        """Restart unbound after it exits. No-op when the filter is off."""
+        if not self.config.dns_filter or self._resolver_stop.is_set():
             return
-        self._resolver = subprocess.Popen(  # noqa: S603  # nosec B603 -- fixed argv
-            [UNBOUND, "-d", "-c", str(conf)]
-        )
-        logger.info("dns resolver started on %s", self.server_ip)
+        proc = self._resolver
+        code = None if proc is None else proc.poll()
+        if proc is not None and code is None:
+            return
+        logger.warning("dns resolver is not running (returncode=%s)", code)
+        self._resolver_restarts += 1
+        self.start_resolver()
+
+    def start_resolver_watchdog(self) -> None:
+        """Every RESOLVER_CHECK_SECONDS, restart unbound if it has exited."""
+        if not self.config.dns_filter:
+            return
+        threading.Thread(
+            target=self._resolver_watchdog, name="awg-dns-watchdog", daemon=True
+        ).start()
+
+    def _resolver_watchdog(self) -> None:
+        while not self._resolver_stop.wait(RESOLVER_CHECK_SECONDS):
+            self.check_resolver()
 
     def reload_resolver(self) -> None:
         """Pick up a rebuilt block zone; unbound re-reads its files on SIGHUP."""
-        if self._resolver is not None and self._resolver.poll() is None:
+        if not self.resolver_running():
+            self.start_resolver()
+            return
+        if self._resolver is not None:
             self._resolver.send_signal(signal.SIGHUP)
             logger.info("dns resolver reloaded")
 
@@ -565,7 +643,8 @@ def make_handler(agent: Agent) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             if self.path == "/healthz":
-                self._send(HTTPStatus.OK, {"ok": True})
+                dns_up = agent.config.dns_filter and agent.resolver_running()
+                self._send(HTTPStatus.OK, {"ok": True, "dns": dns_up})
             elif not self._authorized():
                 self._send(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             elif self.path == "/v1/info":
