@@ -125,7 +125,10 @@ REALITY заканчивается в DE), порт входа на DE откр�
      bash /root/vpn-src/scripts/vless_transport.sh --apply ИМЯ 2098
    ```
 
-3. RU. Новый порт пробрасывается на этот вход (2083 — пример свободного порта):
+3. RU. Порт 2083 пробрасывается на этот вход. На действующем сервере это уже
+   входит в `scripts/ru_vless_relay.sh` (вместе с 443/2087/8443 и зажимом MSS);
+   после переустановки их возвращает `--apply` того скрипта, раздел «Проброс VLESS
+   на RU». Вручную те же два правила выглядят так:
 
    ```bash
    iptables -t nat -A PREROUTING -p tcp --dport 2083 -j DNAT --to-destination DE_SERVER_IP:2098
@@ -142,7 +145,8 @@ REALITY заканчивается в DE), порт входа на DE откр�
    ```
 
 Откат: `TRANSPORT_TAG=VLESS-TCP-REALITY-RU ALLOW_FROM=RU_SERVER_IP bash … --rollback` и удаление
-двух правил iptables на RU (`-D` вместо `-A`).
+двух правил iptables на RU (`-D` вместо `-A`). Целиком проброс VLESS снимает
+`scripts/ru_vless_relay.sh --remove`.
 
 ## Шаг 4: вход XHTTP (по желанию)
 
@@ -179,6 +183,8 @@ docker exec -i node-rental-bot-1 python3 - --fingerprint chrome < /root/vpn-src/
 - Маскировку старого входа (`www.apple.com`) сменить тем же способом позже: это затрагивает всех
   клиентов, сначала стоит увидеть, как работают новые.
 - AmneziaWG через RU: проброс UDP на RU к `DE:39051` (порт 443/udp на DE занят сайтом: HTTP/3).
+- Проброс VLESS на RU после переустановки: `scripts/ru_vless_relay.sh` (раздел ниже).
+  На RU также `scripts/net_tuning.sh` (BBR и fq).
 
 Ни один вход не гарантирует доступности: что работает у какого оператора, показывают замеры.
 
@@ -206,3 +212,36 @@ docker exec -i node-rental-bot-1 python3 - --fingerprint chrome < /root/vpn-src/
 
 `de-ru` — вход на DE через RU (ProxyJump), когда прямой SSH с телефона не проходит.
 `install_awg.sh` при переустановке сохраняет выбранный адрес и копирует `deploy/awg/dns`.
+
+## Проброс VLESS на RU (15 ноября 2026)
+
+RU пересылает TCP на DE и ничего не расшифровывает: REALITY заканчивается в DE.
+Так правила стоят на сервере сейчас. После переустановки RU их возвращает одна
+команда, `scripts/ru_vless_relay.sh`:
+
+- nat PREROUTING: TCP 443, 2087 и 8443 → `89.125.210.172:2096`; TCP 2083 → `:2098`
+- nat POSTROUTING: MASQUERADE для TCP 2096 и 2098 на `89.125.210.172`
+- mangle FORWARD: `TCPMSS --clamp-mss-to-pmtu` на SYN, чтобы большие пакеты не
+  зависали в мобильных сетях
+
+Политика FORWARD на RU — ACCEPT, отдельных правил filter FORWARD скрипт не
+добавляет. Нужен `net.ipv4.ip_forward=1`. Входящий файрвол (`ru_firewall.sh`) не
+меняется. Секретов в выводе нет. Правила сохраняются (`netfilter-persistent save`).
+Повторный `--apply` ничего не добавляет. Убрать проброс: `--remove`.
+
+Скрипт берётся с DE, где лежит подписанный выпуск:
+
+```
+ssh de-ru 'cat /root/vpn-src/scripts/ru_vless_relay.sh' | ssh root@45.138.157.65 'bash -s -- --check'
+ssh de-ru 'cat /root/vpn-src/scripts/ru_vless_relay.sh' | ssh root@45.138.157.65 'bash -s -- --apply'
+```
+
+Ожидается `RU_VLESS_RELAY_OK`.
+
+На RU, как и на DE, включаются BBR и fq — `scripts/net_tuning.sh`:
+
+```
+ssh de-ru 'cat /root/vpn-src/scripts/net_tuning.sh' | ssh root@45.138.157.65 'bash -s -- --apply'
+```
+
+`bash scripts/net_tuning.sh --check` только печатает текущие значения.
