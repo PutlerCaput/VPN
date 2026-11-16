@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -101,42 +102,70 @@ def test_topic_buttons_offer_every_menu_topic_and_a_person() -> None:
     assert "faq:support" not in callbacks
 
 
-async def test_question_gets_the_matching_answer_with_topic_buttons() -> None:
+async def test_question_gets_the_matching_answer_with_topic_buttons(
+    services: Any,
+) -> None:
     message = MagicMock(spec=Message)
     message.text = "сколько стоит подписка"
     message.answer = AsyncMock()
-    await faq_question(message)
+    await faq_question(message, services)
     message.answer.assert_awaited_once()
     assert message.answer.await_args.args[0] == TOPICS_BY_SLUG["tariff"].answer
     assert "reply_markup" in message.answer.await_args.kwargs
 
 
-async def test_unmatched_question_gets_the_topic_menu_not_a_guess() -> None:
+async def test_unmatched_question_gets_the_topic_menu_not_a_guess(
+    services: Any,
+) -> None:
     message = MagicMock(spec=Message)
     message.text = "привет"
     message.answer = AsyncMock()
-    await faq_question(message)
+    await faq_question(message, services)
     assert message.answer.await_args.args[0] == NOT_FOUND_TEXT
 
 
-async def test_topic_button_opens_its_answer() -> None:
+async def test_topic_button_opens_its_answer(services: Any) -> None:
     message = MagicMock(spec=Message)
     message.answer = AsyncMock()
     callback = MagicMock(spec=CallbackQuery)
     callback.data = "faq:refund"
     callback.message = message
     callback.answer = AsyncMock()
-    await faq_topic(callback)
+    await faq_topic(callback, services)
     assert message.answer.await_args.args[0] == TOPICS_BY_SLUG["refund"].answer
 
 
-async def test_unknown_topic_button_asks_to_start_again() -> None:
+async def test_unknown_topic_button_asks_to_start_again(services: Any) -> None:
     callback = MagicMock(spec=CallbackQuery)
     callback.data = "faq:missing"
     callback.message = None
     callback.answer = AsyncMock()
-    await faq_topic(callback)
+    await faq_topic(callback, services)
     callback.answer.assert_awaited_once_with("Выберите тему заново.")
+
+
+async def test_about_sends_the_brand_animation(services: Any) -> None:
+    from types import SimpleNamespace
+
+    import services.brand_animation as brand
+
+    brand.clear_file_id_cache()
+    try:
+        message = MagicMock(spec=Message)
+        message.text = "что за сервис"
+        message.answer = AsyncMock()
+        message.answer_animation = AsyncMock(
+            return_value=SimpleNamespace(animation=SimpleNamespace(file_id="about-id"))
+        )
+        await faq_question(message, services)
+        message.answer_animation.assert_awaited_once()
+        assert (
+            message.answer_animation.await_args.kwargs["caption"]
+            == TOPICS_BY_SLUG["about"].answer
+        )
+        message.answer.assert_not_awaited()
+    finally:
+        brand.clear_file_id_cache()
 
 
 def test_faq_comes_after_the_support_flow() -> None:

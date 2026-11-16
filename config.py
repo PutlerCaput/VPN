@@ -214,6 +214,8 @@ class Settings(BaseSettings):
     telegram_webhook_secret: SecretStr | None = None
     # Domain registered via @BotFather /setdomain for the Login Widget.
     telegram_bot_domain: str = "node.example.com"
+    # Brand animation (knight + fox) on /start, trial/payment success and «О сервисе».
+    brand_animation_enabled: bool = True
 
     # --- HTTP ---------------------------------------------------------------
     # Required because the Telegram Mini App needs the real, public HTTPS URL.

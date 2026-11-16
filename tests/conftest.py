@@ -225,7 +225,9 @@ class FakeNotifier:
         self.messages: list[tuple[int, str]] = []
         self.pushes: list[tuple[int, str]] = []
 
-    async def telegram(self, telegram_id: int, text: str) -> bool:
+    async def telegram(
+        self, telegram_id: int, text: str, *, animation: bool = False
+    ) -> bool:
         self.messages.append((telegram_id, text))
         return True
 
@@ -237,6 +239,7 @@ class FakeNotifier:
         push_title: str | None = None,
         push_body: str | None = None,
         url: str = "/",
+        animation: bool = False,
     ) -> bool:
         self.messages.append((telegram_id, text))
         if push_title:

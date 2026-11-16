@@ -488,6 +488,7 @@ class ProvisioningService:
             "нажмите «📱 Подключить устройство».",
             push_title="Оплата получена",
             push_body=f"Узел активен до {format_date(expires)}",
+            animation=True,
         )
         await self.apply_referral_bonus(telegram_id)
         return True

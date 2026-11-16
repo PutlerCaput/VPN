@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
-import logging
-from pathlib import Path
 from typing import Any
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import CommandObject, CommandStart
-from aiogram.types import CallbackQuery, FSInputFile, Message
+from aiogram.types import CallbackQuery, Message
 
 from config import TIER_PRICES_RUB, TIERS, all_periods
 from handlers.common import DISCLAIMER, is_trial, send_config, status_text
 from handlers.payments import show_channels
 from keyboards.main_menu import accept_offer_kb, app_kb, main_menu_kb
 from middlewares.banned import BANNED_TEXT
+from services.brand_animation import send_branded
 from services.container import Services
 from services.security import html_escape, sanitize_username
 
-logger = logging.getLogger(__name__)
 router = Router(name="start")
 
 _TIER = TIERS["standard"]
@@ -48,35 +45,6 @@ TRIALS_PAUSED_TEXT = (
     "к месячному лимиту трафика. Подписка работает как обычно — оформить её "
     "можно в разделе «💳 Оплата»."
 )
-
-WELCOME_IMAGE = (
-    Path(__file__).resolve().parent.parent
-    / "branding"
-    / "telegram"
-    / "welcome-1280x720.jpg"
-)
-# Telegram's file_id after the first upload, so the image is sent, not re-uploaded.
-_welcome_file: dict[str, str] = {}
-
-
-async def send_welcome_image(message: Message) -> None:
-    """The logo before the first greeting. A missing file or an upload error
-    never blocks the start."""
-    photo: str | FSInputFile
-    if "file_id" in _welcome_file:
-        photo = _welcome_file["file_id"]
-    elif WELCOME_IMAGE.is_file():
-        photo = FSInputFile(WELCOME_IMAGE)
-    else:
-        return
-    try:
-        sent = await message.answer_photo(photo)
-    except TelegramAPIError:
-        logger.warning("welcome_image_failed")
-        return
-    sizes = getattr(sent, "photo", None)
-    if sizes and isinstance(sizes[-1].file_id, str):
-        _welcome_file.setdefault("file_id", sizes[-1].file_id)
 
 
 def welcome_message(first_name: str, *, returning: bool = False) -> str:
@@ -146,18 +114,23 @@ async def cmd_start(
         await message.answer(BANNED_TEXT)
         return
 
+    animation = services.settings.brand_animation_enabled
     if not await db.has_accepted_offer(tg.id):
-        await send_welcome_image(message)
-        await message.answer(
+        await send_branded(
             f"{welcome_message(tg.first_name)}\n\n{OFFER_PROMPT}",
+            enabled=animation,
             reply_markup=accept_offer_kb(services.settings.offer_url),
+            message=message,
+            still_fallback=True,
         )
         return
 
-    await message.answer(
+    await send_branded(
         f"{welcome_message(tg.first_name, returning=True)}\n\n"
         f"{status_text(db_user, trial=await is_trial(db, db_user))}",
+        enabled=animation,
         reply_markup=main_menu_kb(),
+        message=message,
     )
     await message.answer(
         "Управлять узлом удобнее в приложении:",
@@ -206,12 +179,14 @@ async def cb_accept_offer(callback: CallbackQuery, services: Services) -> None:
         )
         return
     trial_gb = services.settings.trial_traffic_gb
-    await message.answer(
+    await send_branded(
         "🎉 <b>Готово! 24 часа бесплатной защиты уже идут.</b>"
         + (f" Лимит трафика на пробный период: {trial_gb} ГБ." if trial_gb else "")
         + "\n\nНиже — ваша личная конфигурация. Выберите устройство, и бот покажет, "
         "куда её вставить: обычно это занимает пару минут.",
+        enabled=services.settings.brand_animation_enabled,
         reply_markup=main_menu_kb(),
+        message=message,
     )
     if result.config_link:
         await send_config(

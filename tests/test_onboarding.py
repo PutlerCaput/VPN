@@ -28,7 +28,7 @@ def message_for(owner: int, *, chat_type: str = "private") -> Message:
         chat=Chat(id=owner, type=chat_type),
         from_user=User(id=999, is_bot=True, first_name="Bot"),
     )
-    for name in ("answer", "answer_photo", "copy_to"):
+    for name in ("answer", "answer_photo", "answer_animation", "copy_to"):
         object.__setattr__(message, name, AsyncMock())
     return message
 

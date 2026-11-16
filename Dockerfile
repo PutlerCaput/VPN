@@ -32,6 +32,7 @@ COPY --chown=1000:1000 scripts/db_maintenance.py ./scripts/db_maintenance.py
 COPY --chown=1000:1000 scripts/send_backup.py ./scripts/send_backup.py
 COPY --chown=1000:1000 scripts/migrate_marzban_users.py ./scripts/migrate_marzban_users.py
 COPY --chown=1000:1000 branding/telegram/welcome-1280x720.jpg ./branding/telegram/welcome-1280x720.jpg
+COPY --chown=1000:1000 branding/telegram/brand-animation.mp4 ./branding/telegram/brand-animation.mp4
 RUN mkdir -p /app/data /app/logs && chown 1000:1000 /app/data /app/logs
 USER 1000:1000
 EXPOSE 8080
