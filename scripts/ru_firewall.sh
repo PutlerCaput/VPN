@@ -26,6 +26,11 @@ DB_TUNNEL_PORT="${DB_TUNNEL_PORT:-51820}"
 DB_TUNNEL_IF="${DB_TUNNEL_IF:-wg-db}"
 DB_GATEWAY_PEER="${DB_GATEWAY_PEER:-10.204.0.2}"
 DB_GATEWAY_PORT="${DB_GATEWAY_PORT:-8444}"
+# The VPN tunnel (wg-vpn, 16.11.2026): client TCP from RU reaches DE through it
+# (scripts/ru_vless_relay.sh). Only the DE server may open it. VPN_TUNNEL_PEER=
+# (empty) leaves the rule out.
+VPN_TUNNEL_PEER="${VPN_TUNNEL_PEER-89.125.210.172}"
+VPN_TUNNEL_PORT="${VPN_TUNNEL_PORT:-51821}"
 ETC_DIR="${ETC_DIR:-/etc}"
 RULES="${RULES:-$ETC_DIR/iptables/rules.v4}"
 STATE_DIR="${STATE_DIR:-$ETC_DIR/iptables}"
@@ -54,7 +59,8 @@ valid_settings() {
   # These go into iptables arguments: digits, dots and interface characters only.
   [[ -z "$DB_TUNNEL_PEER" || "$DB_TUNNEL_PEER" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || stop "DB_TUNNEL_PEER is not an IPv4 address"
   [[ "$DB_GATEWAY_PEER" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || stop "DB_GATEWAY_PEER is not an IPv4 address"
-  [[ "$DB_TUNNEL_PORT" =~ ^[0-9]{1,5}$ && "$DB_GATEWAY_PORT" =~ ^[0-9]{1,5}$ ]] || stop "ports must be numbers"
+  [[ -z "$VPN_TUNNEL_PEER" || "$VPN_TUNNEL_PEER" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || stop "VPN_TUNNEL_PEER is not an IPv4 address"
+  [[ "$DB_TUNNEL_PORT" =~ ^[0-9]{1,5}$ && "$DB_GATEWAY_PORT" =~ ^[0-9]{1,5}$ && "$VPN_TUNNEL_PORT" =~ ^[0-9]{1,5}$ ]] || stop "ports must be numbers"
   [[ "$DB_TUNNEL_IF" =~ ^[a-zA-Z0-9_-]{1,15}$ ]] || stop "DB_TUNNEL_IF is not an interface name"
 }
 policy_now() { $IPTABLES -S INPUT 2>/dev/null | awk '$1 == "-P" { print $3; exit }'; }
@@ -78,6 +84,9 @@ set_input_chain() {
     $IPTABLES -A INPUT -i "$DB_TUNNEL_IF" -p tcp -s "$DB_GATEWAY_PEER" --dport "$DB_GATEWAY_PORT" \
       -m conntrack --ctstate NEW -j ACCEPT || return 1
   fi
+  if [[ -n "$VPN_TUNNEL_PEER" ]]; then
+    $IPTABLES -A INPUT -p udp -s "$VPN_TUNNEL_PEER" --dport "$VPN_TUNNEL_PORT" -j ACCEPT || return 1
+  fi
   $IPTABLES -P INPUT DROP
 }
 
@@ -94,6 +103,9 @@ report() {
   if [[ -n "$DB_TUNNEL_PEER" ]]; then
     say "                     Database tunnel: udp $DB_TUNNEL_PORT only from $DB_TUNNEL_PEER;"
     say "                     tcp $DB_GATEWAY_PORT only on $DB_TUNNEL_IF from $DB_GATEWAY_PEER."
+  fi
+  if [[ -n "$VPN_TUNNEL_PEER" ]]; then
+    say "                     VPN tunnel: udp $VPN_TUNNEL_PORT only from $VPN_TUNNEL_PEER."
   fi
   say "  then a timer restores the snapshot after $((REVERT_AFTER / 60)) min unless you --confirm."
   say "RU_FIREWALL_REPORT_DONE"
