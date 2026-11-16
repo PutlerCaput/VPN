@@ -61,6 +61,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
             write_exe(tmp_path / "iptables-save", f"#!/bin/sh\ncat {state}\n")
         ),
         "BACKUP_DIR": str(tmp_path / "backup"),
+        "IP_BIN": str(write_exe(tmp_path / "ip", "#!/bin/sh\nexit 0\n")),
     }
 
 
@@ -79,24 +80,25 @@ def rules(env: dict[str, str]) -> list[str]:
 
 
 DE = "89.125.210.172"
+TUN = "10.205.0.2"  # DE inside the wg-vpn tunnel
 EXPECTED = [
-    f"nat|PREROUTING|-p tcp --dport 443 -j DNAT --to-destination {DE}:2443",
-    f"nat|PREROUTING|-p tcp --dport 2087 -j DNAT --to-destination {DE}:2443",
-    f"nat|PREROUTING|-p tcp --dport 8443 -j DNAT --to-destination {DE}:2443",
-    f"nat|PREROUTING|-p tcp --dport 2083 -j DNAT --to-destination {DE}:2443",
-    f"nat|PREROUTING|-p tcp --dport 2085 -j DNAT --to-destination {DE}:2443",
-    f"nat|POSTROUTING|-d {DE} -p tcp --dport 2443 -j MASQUERADE",
+    f"nat|PREROUTING|-p tcp --dport 443 -j DNAT --to-destination {TUN}:2443",
+    f"nat|PREROUTING|-p tcp --dport 2087 -j DNAT --to-destination {TUN}:2443",
+    f"nat|PREROUTING|-p tcp --dport 8443 -j DNAT --to-destination {TUN}:2443",
+    f"nat|PREROUTING|-p tcp --dport 2083 -j DNAT --to-destination {TUN}:2443",
+    f"nat|PREROUTING|-p tcp --dport 2085 -j DNAT --to-destination {TUN}:2443",
+    f"nat|POSTROUTING|-d {TUN} -o wg-vpn -p tcp --dport 2443 -j MASQUERADE",
     "mangle|FORWARD|-p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu",
     f"nat|PREROUTING|-p udp --dport 36099 -j DNAT --to-destination {DE}:36099",
     f"nat|POSTROUTING|-d {DE} -p udp --dport 36099 -j MASQUERADE",
 ]
 ADDED = [
-    f"-t nat -A PREROUTING -p tcp --dport 443 -j DNAT --to-destination {DE}:2443",
-    f"-t nat -A PREROUTING -p tcp --dport 2087 -j DNAT --to-destination {DE}:2443",
-    f"-t nat -A PREROUTING -p tcp --dport 8443 -j DNAT --to-destination {DE}:2443",
-    f"-t nat -A PREROUTING -p tcp --dport 2083 -j DNAT --to-destination {DE}:2443",
-    f"-t nat -A PREROUTING -p tcp --dport 2085 -j DNAT --to-destination {DE}:2443",
-    f"-t nat -A POSTROUTING -d {DE} -p tcp --dport 2443 -j MASQUERADE",
+    f"-t nat -A PREROUTING -p tcp --dport 443 -j DNAT --to-destination {TUN}:2443",
+    f"-t nat -A PREROUTING -p tcp --dport 2087 -j DNAT --to-destination {TUN}:2443",
+    f"-t nat -A PREROUTING -p tcp --dport 8443 -j DNAT --to-destination {TUN}:2443",
+    f"-t nat -A PREROUTING -p tcp --dport 2083 -j DNAT --to-destination {TUN}:2443",
+    f"-t nat -A PREROUTING -p tcp --dport 2085 -j DNAT --to-destination {TUN}:2443",
+    f"-t nat -A POSTROUTING -d {TUN} -o wg-vpn -p tcp --dport 2443 -j MASQUERADE",
     "-t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu",
     f"-t nat -A PREROUTING -p udp --dport 36099 -j DNAT --to-destination {DE}:36099",
     f"-t nat -A POSTROUTING -d {DE} -p udp --dport 36099 -j MASQUERADE",
@@ -110,6 +112,15 @@ OBSOLETE = [
     f"nat|POSTROUTING|-d {DE} -p tcp --dport 2096 -j MASQUERADE",
     f"nat|POSTROUTING|-d {DE} -o eth0 -p tcp --dport 2096 -j MASQUERADE",
     f"nat|POSTROUTING|-d {DE} -p tcp --dport 2098 -j MASQUERADE",
+]
+# Direct TCP forwards over the open internet, live on RU before wg-vpn (16.11.2026).
+DIRECT = [
+    f"nat|PREROUTING|-p tcp --dport 443 -j DNAT --to-destination {DE}:2443",
+    f"nat|PREROUTING|-p tcp --dport 2087 -j DNAT --to-destination {DE}:2443",
+    f"nat|PREROUTING|-p tcp --dport 8443 -j DNAT --to-destination {DE}:2443",
+    f"nat|PREROUTING|-p tcp --dport 2083 -j DNAT --to-destination {DE}:2443",
+    f"nat|PREROUTING|-p tcp --dport 2085 -j DNAT --to-destination {DE}:2443",
+    f"nat|POSTROUTING|-d {DE} -p tcp --dport 2443 -j MASQUERADE",
 ]
 # AmneziaWG goes through RU too; this script must never touch it.
 AWG = [
@@ -213,8 +224,10 @@ def test_another_de_address_and_a_bad_one(tmp_path: Path) -> None:
     env["DE_IP"] = "203.0.113.10"
     result = run(env, "--apply")
     assert result.returncode == 0, result.stderr
-    assert all("203.0.113.10" in rule for rule in rules(env) if "nat|" in rule)
-    assert sum("203.0.113.10:2443" in rule for rule in rules(env)) == 5
+    udp = [rule for rule in rules(env) if "nat|" in rule and "-p udp" in rule]
+    assert udp
+    assert all("203.0.113.10" in rule for rule in udp)
+    assert sum(f"{TUN}:2443" in rule for rule in rules(env)) == 5
     env["DE_IP"] = "not-an-ip"
     bad = run(env, "--check")
     assert bad.returncode == 1
@@ -336,3 +349,55 @@ def test_other_hysteria2_port(tmp_path: Path) -> None:
     dnat = f"nat|PREROUTING|-p udp --dport 40001 -j DNAT --to-destination {DE}:40001"
     assert dnat in rules(env)
     assert "UDP 40001" in result.stdout
+
+
+def test_apply_moves_direct_forwards_into_the_tunnel(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    kept = [rule for rule in EXPECTED if rule.startswith("mangle|") or "udp" in rule]
+    Path(env["FAKE_STATE"]).write_text(
+        json.dumps(DIRECT + AWG + kept), encoding="utf-8"
+    )
+    result = run(env, "--apply")
+    assert result.returncode == 0, result.stderr
+    assert sorted(rules(env)) == sorted(AWG + EXPECTED)
+    assert "6 rules added, 6 obsolete removed" in result.stdout
+    assert "via wg-vpn" in result.stdout
+    log = Path(env["FAKE_LOG"]).read_text(encoding="utf-8").splitlines()
+    first_delete = next(i for i, line in enumerate(log) if " -D " in line)
+    last_add = max(i for i, line in enumerate(log) if " -A " in line)
+    assert last_add < first_delete, "tunnel forwards go in before the direct ones go"
+    changes = [line for line in log if " -D " in line or " -A " in line]
+    untouched = ("39051", "44877", "36099")
+    assert not any(port in line for line in changes for port in untouched)
+
+
+def test_apply_stops_without_the_tunnel_interface(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    Path(env["FAKE_STATE"]).write_text(json.dumps(DIRECT + AWG), encoding="utf-8")
+    env["IP_BIN"] = str(write_exe(tmp_path / "ip_none", "#!/bin/sh\nexit 1\n"))
+    result = run(env, "--apply")
+    assert result.returncode == 1
+    assert "wg-vpn" in result.stderr
+    assert sorted(rules(env)) == sorted(DIRECT + AWG)
+    assert backups(tmp_path) == []
+    assert not (tmp_path / "saved").is_file()
+
+
+def test_tunnel_address_settings(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    env["DE_TUNNEL_IP"] = "10.9.9.2"
+    env["TUNNEL_IF"] = "wg-x"
+    result = run(env, "--apply")
+    assert result.returncode == 0, result.stderr
+    masq = "nat|POSTROUTING|-d 10.9.9.2 -o wg-x -p tcp --dport 2443 -j MASQUERADE"
+    assert masq in rules(env)
+    for name, value, needle in (
+        ("DE_TUNNEL_IP", DE, "DE_TUNNEL_IP"),
+        ("DE_TUNNEL_IP", "nope", "DE_TUNNEL_IP"),
+        ("TUNNEL_IF", "bad if;", "TUNNEL_IF"),
+    ):
+        bad_env = _env(tmp_path)
+        bad_env[name] = value
+        bad = run(bad_env, "--check")
+        assert bad.returncode == 1, (name, value)
+        assert needle in bad.stderr

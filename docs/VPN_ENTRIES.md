@@ -4,8 +4,9 @@
 
 > **16 ноября 2026: Marzban удалён, VLESS работает на Hiddify Manager (DE:2443).** Входы
 > Marzban на DE:2096–2099 и шаги ниже, где они настраиваются, — история. Сейчас RU
-> пробрасывает TCP 443, 2087, 8443, 2083 и 2085 на `89.125.210.172:2443`; см. раздел
-> «Проброс VLESS на RU». AmneziaWG (UDP 39051 и 44877) не менялся.
+> пробрасывает TCP 443, 2087, 8443, 2083 и 2085 на `10.205.0.2:2443` (DE внутри
+> туннеля `wg-vpn`, с 16.11.2026), UDP 36099 — на `89.125.210.172:36099`; см. разделы
+> «Проброс VLESS на RU» и «Туннель wg-vpn». AmneziaWG (UDP 39051 и 44877) не менялся.
 
 ## Как было
 
@@ -223,8 +224,9 @@ RU пересылает TCP на DE и ничего не расшифровыв�
 Hiddify Manager. Так правила стоят на сервере сейчас. После переустановки RU их
 возвращает одна команда, `scripts/ru_vless_relay.sh`:
 
-- nat PREROUTING: TCP 443, 2087, 8443, 2083 и 2085 → `89.125.210.172:2443` (Hiddify)
-- nat POSTROUTING: MASQUERADE для TCP 2443 на `89.125.210.172`
+- nat PREROUTING: TCP 443, 2087, 8443, 2083 и 2085 → `10.205.0.2:2443` (Hiddify на DE,
+  через туннель `wg-vpn`, раздел ниже)
+- nat POSTROUTING: MASQUERADE для TCP 2443 на `10.205.0.2`, выход `wg-vpn`
 - mangle FORWARD: `TCPMSS --clamp-mss-to-pmtu` на SYN, чтобы большие пакеты не
   зависали в мобильных сетях
 - nat PREROUTING: UDP 36099 → `89.125.210.172:36099` (Hiddify: Hysteria2 с
@@ -232,11 +234,16 @@ Hiddify Manager. Так правила стоят на сервере сейча
   где режут TCP/TLS, но пропускают UDP (16.11.2026). Порт можно сменить через
   `HY2_PORT`; порты AmneziaWG (39051, 44877) скрипт не примет.
 
-Старые правила Marzban (→ `:2096` и `:2098` и их MASQUERADE) `--apply` убирает сам,
+Старые правила Marzban (→ `:2096` и `:2098` и их MASQUERADE) и прямые TCP-пробросы на
+`89.125.210.172:2443` по открытому интернету `--apply` убирает сам,
 уже после того, как новые на месте, так что проброс не пропадает ни на секунду.
 `--check` показывает их строками `obsolete:`. Перед любым изменением скрипт сохраняет
 текущие правила (`iptables-save`) в `/etc/iptables/rules.v4.before-ru-vless-relay-<время>`;
 вернуть: `iptables-restore < этот_файл` и `netfilter-persistent save`.
+
+`--apply` требует поднятый интерфейс `wg-vpn`: без него TCP-вход вёл бы в никуда,
+поэтому скрипт останавливается и ничего не меняет. Адрес и интерфейс можно сменить
+через `DE_TUNNEL_IP` и `TUNNEL_IF`.
 
 Правила AmneziaWG (UDP 39051 и 44877) скрипт не трогает ни в `--apply`, ни в `--remove`.
 Политика FORWARD на RU — ACCEPT, отдельных правил filter FORWARD скрипт не
@@ -252,6 +259,42 @@ ssh de-ru 'cat /root/vpn-src/scripts/ru_vless_relay.sh' | ssh root@45.138.157.65
 ```
 
 Ожидается `RU_VLESS_RELAY_OK`.
+
+## Туннель wg-vpn RU↔DE (16 ноября 2026)
+
+На открытом участке RU → DE много подключений VLESS Reality обрывается: замер с RU
+напрямую на DE:2443 — 20 из 48 удачных. Те же 6 вариантов через туннель — 48 из 48.
+Поэтому TCP-вход RU ходит на DE внутри отдельного WireGuard-туннеля, не через `wg-db`:
+
+| | RU | DE |
+|---|---|---|
+| Интерфейс | `wg-vpn`, `10.205.0.1/30` | `wg-vpn`, `10.205.0.2/30` |
+| Порт | UDP 51821 (слушает) | UDP 51822, соединяется с RU:51821, keepalive 25 с |
+| Файлы | `/etc/wireguard/wg-vpn.conf`, `wg-vpn.key`, `wg-vpn.pub` | то же |
+| Служба | `wg-quick@wg-vpn` (enabled) | то же |
+
+MTU 1420; MSS на пересылаемых SYN уже ограничивает правило `TCPMSS --clamp-mss-to-pmtu`.
+Ключ в конфиге не лежит: `PostUp = wg set %i private-key /etc/wireguard/wg-vpn.key`.
+На RU входящий UDP 51821 открыт только с DE (`ru_firewall.sh`, `VPN_TUNNEL_PEER`,
+`VPN_TUNNEL_PORT`). На DE политика INPUT — ACCEPT, отдельного правила не нужно.
+Hysteria2 (UDP 36099) и AmneziaWG идут мимо туннеля, как раньше.
+
+Поднять заново после переустановки (на каждом сервере свой ключ, ключи не печатать):
+
+```
+umask 077; cd /etc/wireguard; wg genkey > wg-vpn.key; wg pubkey < wg-vpn.key > wg-vpn.pub
+# wg-vpn.conf: Address, ListenPort, MTU 1420, PostUp как выше; [Peer] PublicKey другой
+# стороны, AllowedIPs = адрес другой стороны /32; на DE ещё Endpoint = 45.138.157.65:51821
+# и PersistentKeepalive = 25
+systemctl enable --now wg-quick@wg-vpn
+```
+
+Потом на RU — `ru_vless_relay.sh --apply`. Проверка: `wg show wg-vpn latest-handshakes`
+и `ping 10.205.0.1` с DE.
+
+Откат на прямой проброс: `iptables-restore < /etc/iptables/rules.v4.pre-tcp-via-wgvpn-*`
+и `netfilter-persistent save` на RU (или выпуск скрипта до этого изменения), затем
+`systemctl disable --now wg-quick@wg-vpn` на обоих серверах.
 
 На RU, как и на DE, включаются BBR и fq — `scripts/net_tuning.sh`:
 

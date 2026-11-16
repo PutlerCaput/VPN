@@ -7,20 +7,25 @@
 #     | ssh root@45.138.157.65 'bash -s -- --check'
 #
 #   --check    what is there now; changes nothing
-#   --apply    put the forwarding in place, drop the old Marzban forwards,
-#              save the rules
-#   --remove   take the forwarding (and any old Marzban forward) away and save
+#   --apply    put the forwarding in place, drop the obsolete forwards (Marzban,
+#              direct DE:2443), save the rules
+#   --remove   take the forwarding (and any obsolete forward) away and save
 #
 # The rules are the ones live on RU since the move to Hiddify Manager
 # (16 November 2026, docs/VPN_ENTRIES.md):
-#   TCP 443, 2087, 8443, 2083, 2085 -> DE:2443 (Hiddify: VLESS Reality, XHTTP)
-#   MASQUERADE for DE:2443
+#   TCP 443, 2087, 8443, 2083, 2085 -> DE 10.205.0.2:2443 through the wg-vpn
+#   WireGuard tunnel (Hiddify: VLESS Reality, XHTTP). On the open internet the
+#   RU -> DE hop drops many Reality connections; inside the tunnel it does not.
+#   MASQUERADE for 10.205.0.2:2443 out of wg-vpn
 #   UDP 36099 -> DE:36099 (Hiddify: Hysteria2 with Salamander obfuscation),
 #   for mobile networks that cut TCP/TLS but pass UDP; MASQUERADE for it
 #   MSS clamp on forwarded SYN packets, so large packets do not stall on
 #   mobile networks
-# The Marzban forwards (-> DE:2096 and DE:2098) are obsolete: --apply removes
-# them after the new rules are in, so there is no moment without a forward.
+# The Marzban forwards (-> DE:2096 and DE:2098) and the direct TCP forwards to
+# DE:2443 over the open internet are obsolete: --apply removes them after the
+# new rules are in, so there is no moment without a forward. --apply needs the
+# wg-vpn interface up (wg-quick@wg-vpn, docs/VPN_ENTRIES.md); without it the
+# TCP entry would go nowhere, so the script stops and changes nothing.
 # AmneziaWG (UDP 39051 and 44877) is a separate set of rules and is never
 # touched here. FORWARD policy on RU is ACCEPT, so no filter FORWARD rules are
 # added. The INPUT firewall of ru_firewall.sh is not touched. Before any change
@@ -33,6 +38,9 @@ shopt -s inherit_errexit
 DE_IP="${DE_IP:-89.125.210.172}"
 DE_PORT="${DE_PORT:-2443}"
 HY2_PORT="${HY2_PORT:-36099}"
+DE_TUNNEL_IP="${DE_TUNNEL_IP:-10.205.0.2}"
+TUNNEL_IF="${TUNNEL_IF:-wg-vpn}"
+IP_BIN="${IP_BIN:-ip}"
 IPT="${IPTABLES_BIN:-iptables}"
 IPT_SAVE="${IPTABLES_SAVE_BIN:-iptables-save}"
 SYSCTL="${SYSCTL_BIN:-sysctl}"
@@ -48,6 +56,11 @@ stop() {
 MODE="${1:-}"
 [[ $# -le 1 ]] || stop "usage: --check | --apply | --remove"
 [[ "$DE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || stop "DE_IP is not an IPv4 address"
+[[ "$DE_TUNNEL_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || stop "DE_TUNNEL_IP is not an IPv4 address"
+# The direct forwards to DE_IP are removed as obsolete; the same address for the
+# tunnel would remove the new rules right after adding them.
+[[ "$DE_TUNNEL_IP" != "$DE_IP" ]] || stop "DE_TUNNEL_IP must be DE's address inside $TUNNEL_IF, not DE_IP"
+[[ "$TUNNEL_IF" =~ ^[a-zA-Z0-9_-]{1,15}$ ]] || stop "TUNNEL_IF is not an interface name"
 if ! [[ "$DE_PORT" =~ ^[0-9]+$ ]] || ((10#$DE_PORT < 1 || 10#$DE_PORT > 65535)); then
   stop "DE_PORT is not a TCP port"
 fi
@@ -65,12 +78,12 @@ HY2_PORT="$((10#$HY2_PORT))"
 
 # table, chain, how to add (A = append, I = insert first), rule
 RULES=(
-  "nat|PREROUTING|A|-p tcp --dport 443 -j DNAT --to-destination $DE_IP:$DE_PORT"
-  "nat|PREROUTING|A|-p tcp --dport 2087 -j DNAT --to-destination $DE_IP:$DE_PORT"
-  "nat|PREROUTING|A|-p tcp --dport 8443 -j DNAT --to-destination $DE_IP:$DE_PORT"
-  "nat|PREROUTING|A|-p tcp --dport 2083 -j DNAT --to-destination $DE_IP:$DE_PORT"
-  "nat|PREROUTING|A|-p tcp --dport 2085 -j DNAT --to-destination $DE_IP:$DE_PORT"
-  "nat|POSTROUTING|A|-d $DE_IP -p tcp --dport $DE_PORT -j MASQUERADE"
+  "nat|PREROUTING|A|-p tcp --dport 443 -j DNAT --to-destination $DE_TUNNEL_IP:$DE_PORT"
+  "nat|PREROUTING|A|-p tcp --dport 2087 -j DNAT --to-destination $DE_TUNNEL_IP:$DE_PORT"
+  "nat|PREROUTING|A|-p tcp --dport 8443 -j DNAT --to-destination $DE_TUNNEL_IP:$DE_PORT"
+  "nat|PREROUTING|A|-p tcp --dport 2083 -j DNAT --to-destination $DE_TUNNEL_IP:$DE_PORT"
+  "nat|PREROUTING|A|-p tcp --dport 2085 -j DNAT --to-destination $DE_TUNNEL_IP:$DE_PORT"
+  "nat|POSTROUTING|A|-d $DE_TUNNEL_IP -o $TUNNEL_IF -p tcp --dport $DE_PORT -j MASQUERADE"
   "mangle|FORWARD|A|-p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
   "nat|PREROUTING|A|-p udp --dport $HY2_PORT -j DNAT --to-destination $DE_IP:$HY2_PORT"
   "nat|POSTROUTING|A|-d $DE_IP -p udp --dport $HY2_PORT -j MASQUERADE"
@@ -86,6 +99,13 @@ OBSOLETE=(
   "nat|POSTROUTING|-d $DE_IP -p tcp --dport 2096 -j MASQUERADE"
   "nat|POSTROUTING|-d $DE_IP -o eth0 -p tcp --dport 2096 -j MASQUERADE"
   "nat|POSTROUTING|-d $DE_IP -p tcp --dport 2098 -j MASQUERADE"
+  # Direct TCP forwards over the open internet (16.11.2026, before wg-vpn).
+  "nat|PREROUTING|-p tcp --dport 443 -j DNAT --to-destination $DE_IP:$DE_PORT"
+  "nat|PREROUTING|-p tcp --dport 2087 -j DNAT --to-destination $DE_IP:$DE_PORT"
+  "nat|PREROUTING|-p tcp --dport 8443 -j DNAT --to-destination $DE_IP:$DE_PORT"
+  "nat|PREROUTING|-p tcp --dport 2083 -j DNAT --to-destination $DE_IP:$DE_PORT"
+  "nat|PREROUTING|-p tcp --dport 2085 -j DNAT --to-destination $DE_IP:$DE_PORT"
+  "nat|POSTROUTING|-d $DE_IP -p tcp --dport $DE_PORT -j MASQUERADE"
 )
 
 has_rule() {
@@ -172,6 +192,8 @@ case "$MODE" in
   --apply)
     [[ "$("$SYSCTL" -n net.ipv4.ip_forward 2>/dev/null)" == 1 ]] \
       || stop "net.ipv4.ip_forward is not 1 on this server"
+    "$IP_BIN" link show dev "$TUNNEL_IF" >/dev/null 2>&1 \
+      || stop "no $TUNNEL_IF interface: start the tunnel first (systemctl enable --now wg-quick@$TUNNEL_IF); nothing changed"
     added=0
     dropped=0
     if (($(missing_count) > 0 || $(obsolete_count) > 0)); then
@@ -191,11 +213,11 @@ case "$MODE" in
         added=$((added + 1))
       done
       dropped="$(drop_obsolete)" \
-        || stop "an old Marzban rule could not be removed; nothing saved. Undo: iptables-restore < the backup above"
+        || stop "an obsolete rule could not be removed; nothing saved. Undo: iptables-restore < the backup above"
     fi
     "$SAVE" save >/dev/null 2>&1 || stop "rules are active but not saved: run $SAVE save"
     show
-    say "RU_VLESS_RELAY_OK: TCP 443/2087/8443/2083/2085 -> $DE_IP:$DE_PORT, UDP $HY2_PORT -> $DE_IP:$HY2_PORT ($added rules added, $dropped obsolete removed, saved)"
+    say "RU_VLESS_RELAY_OK: TCP 443/2087/8443/2083/2085 -> $DE_TUNNEL_IP:$DE_PORT via $TUNNEL_IF, UDP $HY2_PORT -> $DE_IP:$HY2_PORT ($added rules added, $dropped obsolete removed, saved)"
     ;;
   --remove)
     removed=0
@@ -211,7 +233,7 @@ case "$MODE" in
         done
       done
       dropped="$(drop_obsolete)" \
-        || stop "an old Marzban rule could not be removed; nothing saved. Undo: iptables-restore < the backup above"
+        || stop "an obsolete rule could not be removed; nothing saved. Undo: iptables-restore < the backup above"
       removed=$((removed + dropped))
     fi
     "$SAVE" save >/dev/null 2>&1 || stop "rules are removed but not saved: run $SAVE save"

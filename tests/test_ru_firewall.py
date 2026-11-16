@@ -129,9 +129,20 @@ def test_the_database_tunnel_is_admitted_from_de_only(box: Box) -> None:
 
 
 def test_the_tunnel_rules_can_be_left_out(box: Box) -> None:
-    box.run("--apply", DB_TUNNEL_PEER="")
+    box.run("--apply", DB_TUNNEL_PEER="", VPN_TUNNEL_PEER="")
     assert not any("udp" in rule or "wg-db" in rule for rule in box.rules_set())
-    assert "Database tunnel" not in box.run(DB_TUNNEL_PEER="").stdout
+    report = box.run(DB_TUNNEL_PEER="", VPN_TUNNEL_PEER="").stdout
+    assert "Database tunnel" not in report
+    assert "VPN tunnel" not in report
+
+
+def test_the_vpn_tunnel_is_admitted_from_de_only(box: Box) -> None:
+    assert "VPN tunnel: udp 51821 only from 89.125.210.172" in box.run().stdout
+    box.run("--apply")
+    rules = box.rules_set()
+    assert "-A INPUT -p udp -s 89.125.210.172 --dport 51821 -j ACCEPT" in rules
+    assert not any("--dport 51821" in rule and "-s " not in rule for rule in rules)
+    assert rules[-1] == "-P INPUT DROP"
 
 
 @pytest.mark.parametrize(
@@ -143,6 +154,8 @@ def test_the_tunnel_rules_can_be_left_out(box: Box) -> None:
         {"DB_TUNNEL_IF": "wg db"},
         {"DB_GATEWAY_PORT": "8444a"},
         {"DB_TUNNEL_PORT": "$(id)"},
+        {"VPN_TUNNEL_PEER": "1.2.3.4 -j ACCEPT"},
+        {"VPN_TUNNEL_PORT": "51821;id"},
     ],
 )
 def test_settings_that_are_not_plain_values_are_refused(
