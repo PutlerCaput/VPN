@@ -48,6 +48,10 @@ MODE="${1:-}"
 if ! [[ "$DE_PORT" =~ ^[0-9]+$ ]] || ((10#$DE_PORT < 1 || 10#$DE_PORT > 65535)); then
   stop "DE_PORT is not a TCP port"
 fi
+# 2096 and 2098 are the old Marzban ports: their rules are in OBSOLETE below and
+# would be removed again right after being added.
+[[ "$((10#$DE_PORT))" != 2096 && "$((10#$DE_PORT))" != 2098 ]] \
+  || stop "DE_PORT $DE_PORT is an old Marzban port; the Hiddify entry is 2443"
 
 # table, chain, how to add (A = append, I = insert first), rule
 RULES=(

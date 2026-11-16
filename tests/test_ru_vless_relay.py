@@ -293,7 +293,7 @@ def test_apply_stops_when_the_backup_fails(tmp_path: Path) -> None:
 
 def test_bad_de_port(tmp_path: Path) -> None:
     env = _env(tmp_path)
-    for bad in ("0", "70000", "abc", "08x"):
+    for bad in ("0", "70000", "abc", "08x", "2096", "2098"):
         env["DE_PORT"] = bad
         result = run(env, "--check")
         assert result.returncode == 1, bad
