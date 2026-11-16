@@ -2,7 +2,7 @@ import { ru } from "../i18n/ru";
 import styles from "../styles/Payment.module.css";
 import ui from "../styles/components.module.css";
 
-/** Facts about this service next to what to check at any provider. Names no competitor. */
+/** Verifiable facts about this service. Names no competitor and makes no claim we cannot check. */
 export function WhyUs() {
   return (
     <section className={ui.card} aria-labelledby="why-title">
@@ -11,12 +11,7 @@ export function WhyUs() {
       {ru.why.rows.map((row) => (
         <div key={row.topic} className={styles.why}>
           <strong>{row.topic}</strong>
-          <p>
-            <span className={styles.whyLabel}>{ru.why.colWe}:</span> {row.we}
-          </p>
-          <p className={styles.disclaimer}>
-            <span className={styles.whyLabel}>{ru.why.colCheck}:</span> {row.check}
-          </p>
+          <p>{row.text}</p>
         </div>
       ))}
     </section>

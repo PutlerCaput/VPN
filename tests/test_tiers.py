@@ -47,8 +47,8 @@ def test_price_matrix_matches_the_tariff_sheet() -> None:
 
 def test_standard_tier_has_a_shared_monthly_quota() -> None:
     standard = TIERS["standard"]
-    assert standard.traffic_gb == 200
-    assert standard.traffic_bytes == 200 * 1024**3
+    assert standard.traffic_gb == 100
+    assert standard.traffic_bytes == 100 * 1024**3
     assert standard.traffic_reset == "month"
     # The original tiers stay unlimited, so their offer terms do not change.
     assert all(TIERS[key].traffic_gb == 0 for key in ("basic", "complete", "prime"))
@@ -140,7 +140,7 @@ async def test_hiddify_payload_stores_uuid_quota_and_device_note() -> None:
     assert body["usage_limit_GB"] == 10_000.0  # unlimited sentinel
     assert body["mode"] == "no_reset"
     assert seen[1][1]["comment"] == "tier=standard devices=2"
-    assert seen[1][1]["usage_limit_GB"] == 200
+    assert seen[1][1]["usage_limit_GB"] == 100
     assert seen[1][1]["mode"] == "monthly"
     assert seen[2][1]["usage_limit_GB"] == 3
     assert seen[2][1]["mode"] == "no_reset"

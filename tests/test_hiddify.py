@@ -53,7 +53,7 @@ async def test_create_user_posts_uuid_and_stores_subscription_url() -> None:
     assert seen[0].url.path == f"/{ADMIN}/api/v2/admin/user/"
     payload = json.loads(seen[0].content)
     assert payload["uuid"] == USER
-    assert payload["usage_limit_GB"] == 200
+    assert payload["usage_limit_GB"] == 100
     assert payload["mode"] == "monthly"
     assert created["uuid"] == USER
     assert created["username"] == USER
