@@ -171,10 +171,11 @@ case "$MODE" in
           "$IPT" -t "$table" -I "$chain" 1 $spec
         else
           "$IPT" -t "$table" -A "$chain" $spec
-        fi
+        fi || stop "a rule could not be added; nothing saved. Undo: iptables-restore < the backup above"
         added=$((added + 1))
       done
-      dropped="$(drop_obsolete)"
+      dropped="$(drop_obsolete)" \
+        || stop "an old Marzban rule could not be removed; nothing saved. Undo: iptables-restore < the backup above"
     fi
     "$SAVE" save >/dev/null 2>&1 || stop "rules are active but not saved: run $SAVE save"
     show
@@ -188,12 +189,13 @@ case "$MODE" in
         IFS='|' read -r table chain how spec <<<"$entry"
         while has_rule "$table" "$chain" "$spec"; do
           # shellcheck disable=SC2086
-          "$IPT" -t "$table" -D "$chain" $spec
+          "$IPT" -t "$table" -D "$chain" $spec \
+            || stop "a rule could not be removed; nothing saved. Undo: iptables-restore < the backup above"
           removed=$((removed + 1))
         done
       done
-      # A plain assignment, so a failed delete stops the script (set -e).
-      dropped="$(drop_obsolete)"
+      dropped="$(drop_obsolete)" \
+        || stop "an old Marzban rule could not be removed; nothing saved. Undo: iptables-restore < the backup above"
       removed=$((removed + dropped))
     fi
     "$SAVE" save >/dev/null 2>&1 || stop "rules are removed but not saved: run $SAVE save"

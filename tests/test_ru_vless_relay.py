@@ -307,6 +307,7 @@ def test_a_failed_delete_stops_before_saving(tmp_path: Path) -> None:
     for mode in ("--apply", "--remove"):
         result = run(env, mode)
         assert result.returncode != 0, mode
+        assert "could not be removed" in result.stderr, mode
         assert "RU_VLESS_RELAY_OK" not in result.stdout
         assert "RU_VLESS_RELAY_REMOVED" not in result.stdout
         assert not (tmp_path / "saved").is_file(), mode
