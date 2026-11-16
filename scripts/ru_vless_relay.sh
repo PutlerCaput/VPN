@@ -26,6 +26,7 @@
 # After a reinstall, --apply is the one command that restores this. On RU also
 # run scripts/net_tuning.sh (BBR and fq).
 set -euo pipefail
+shopt -s inherit_errexit
 
 DE_IP="${DE_IP:-89.125.210.172}"
 DE_PORT="${DE_PORT:-2443}"
@@ -136,8 +137,10 @@ drop_obsolete() {
   for entry in "${OBSOLETE[@]}"; do
     IFS='|' read -r table chain spec <<<"$entry"
     while has_rule "$table" "$chain" "$spec"; do
+      # Runs inside $(...), where set -e does not apply: a failed delete must
+      # end the loop explicitly, or it would spin on the same rule forever.
       # shellcheck disable=SC2086
-      "$IPT" -t "$table" -D "$chain" $spec
+      "$IPT" -t "$table" -D "$chain" $spec || return 1
       n=$((n + 1))
     done
   done
@@ -189,7 +192,9 @@ case "$MODE" in
           removed=$((removed + 1))
         done
       done
-      removed=$((removed + $(drop_obsolete)))
+      # A plain assignment, so a failed delete stops the script (set -e).
+      dropped="$(drop_obsolete)"
+      removed=$((removed + dropped))
     fi
     "$SAVE" save >/dev/null 2>&1 || stop "rules are removed but not saved: run $SAVE save"
     say "RU_VLESS_RELAY_REMOVED: $removed rules removed, saved"

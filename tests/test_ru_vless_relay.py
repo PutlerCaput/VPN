@@ -29,6 +29,8 @@ if op == "-C":
 if op in ("-A", "-I"):
     rules.append(key)
 elif op == "-D":
+    if os.environ.get("FAKE_FAIL_DELETE"):
+        sys.exit(1)
     rules.remove(key)
 with open(state_path, "w") as handle:
     json.dump(rules, handle)
@@ -296,3 +298,15 @@ def test_bad_de_port(tmp_path: Path) -> None:
         result = run(env, "--check")
         assert result.returncode == 1, bad
         assert "DE_PORT" in result.stderr
+
+
+def test_a_failed_delete_stops_before_saving(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    Path(env["FAKE_STATE"]).write_text(json.dumps(OBSOLETE + AWG), encoding="utf-8")
+    env["FAKE_FAIL_DELETE"] = "1"
+    for mode in ("--apply", "--remove"):
+        result = run(env, mode)
+        assert result.returncode != 0, mode
+        assert "RU_VLESS_RELAY_OK" not in result.stdout
+        assert "RU_VLESS_RELAY_REMOVED" not in result.stdout
+        assert not (tmp_path / "saved").is_file(), mode
