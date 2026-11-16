@@ -431,3 +431,24 @@ async def test_revoke_subscription_rotates_uuid(
     assert new in hiddify.users
     assert ("revoke", old) in hiddify.calls
     assert after["expires_at"] == before["expires_at"]
+
+
+async def test_payment_replaces_a_marzban_era_node_username(
+    db: Database, provisioning: Any
+) -> None:
+    """A legacy Marzban username is not a Hiddify UUID: payment still provisions."""
+    await _register(db, 200099)
+    await provisioning.accept_offer_and_start_trial(200099)
+    await db.set_node_username(200099, "tg_200099")
+    await db.create_payment(
+        payment_id="c" * 32,
+        telegram_id=200099,
+        amount=29900,
+        currency="RUB",
+        months=1,
+        method="sbp",
+    )
+    assert await provisioning.process_paid_payment("c" * 32)
+    node = (await db.get_user(200099))["node_username"]
+    assert node != "tg_200099"
+    assert str(uuidlib.UUID(node)) == node

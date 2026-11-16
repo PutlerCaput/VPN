@@ -445,7 +445,7 @@ async def test_shared_quota_lowers_panel_and_cuts_awg(
     node = user["node_username"]
     device = await awg.add_device(640005)
     pk = str(device["public_key"])
-    limit = 200 * GIB
+    limit = 100 * GIB
 
     def panel(used: int, lifetime: int | None = None) -> None:
         lifetime = lifetime if lifetime is not None else used
@@ -479,7 +479,7 @@ async def test_shared_quota_lowers_panel_and_cuts_awg(
     panel(10 * GIB)
     await awg.reconcile()
     assert (await services.db.get_awg_usage(640005))["bytes"] == 200 * GIB
-    assert fake_agent.state[pk]["enabled"] is False  # 10 + 200 >= 200 GB
+    assert fake_agent.state[pk]["enabled"] is False  # 10 + 200 >= 100 GB
 
     # Hiddify reset its counter: a new window, AmneziaWG works again.
     panel(0, lifetime=10 * GIB)

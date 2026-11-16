@@ -55,11 +55,11 @@ async def test_paid_period_sets_the_tier_quota_and_bonus_keeps_it(
     assert await services.provisioning.process_paid_payment(payment.payment_id)
     panel = hiddify.users[user["node_username"]]
     assert (panel["data_limit"], panel["data_limit_reset_strategy"]) == (
-        200 * GIB,
+        100 * GIB,
         "month",
     )
     await services.provisioning.add_bonus_days(610003, 3, "test")
-    assert panel["data_limit"] == 200 * GIB
+    assert panel["data_limit"] == 100 * GIB
     # Buying an original unlimited tier lifts the limit again.
     legacy = await services.billing.create(610003, 1, "sbp", "basic")
     assert await services.provisioning.process_paid_payment(legacy.payment_id)
@@ -164,7 +164,7 @@ def test_traffic_line_and_status() -> None:
         "node_username": "u610008",
     }
     text = status_text(user, limited)
-    assert "Стандарт (до 2 устройств, 200 ГБ на 30 дней)" in text
+    assert "Стандарт (до 2 устройств, 100 ГБ на 30 дней)" in text
     assert "Трафик" in text
 
 
@@ -216,7 +216,7 @@ async def test_api_reports_traffic_and_new_periods(services: Any, hiddify: Any) 
         tariffs = await (await client.get("/api/v1/tariffs", headers=headers)).json()
         standard = tariffs["tiers"][0]
         assert standard["key"] == "standard"
-        assert standard["traffic_gb"] == 200
+        assert standard["traffic_gb"] == 100
         assert [p["months"] for p in standard["prices"]] == [1, 2, 3, 4, 5, 6]
         assert standard["prices"][0]["stars"] == 187
 
@@ -246,7 +246,7 @@ async def test_trial_profile_shows_trial_not_paid_quota(services: Any) -> None:
     assert await is_trial(services.db, user)
     text = status_text(user, trial=True)
     assert "пробный период (Стандарт, до 2 устройств)" in text
-    assert "200 ГБ" not in text
+    assert "100 ГБ" not in text
     payment = await services.billing.create(610012, 1, "sbp", "standard")
     await services.provisioning.process_paid_payment(payment.payment_id)
     paid = await services.db.get_user(610012)
@@ -267,4 +267,4 @@ async def test_traffic_status_is_cached_and_refreshed_after_payment(
     fresh = await services.provisioning.traffic_status(user)
     assert fresh is not None
     assert fresh.used_bytes == 2 * GIB
-    assert fresh.limit_bytes == 200 * GIB
+    assert fresh.limit_bytes == 100 * GIB

@@ -88,7 +88,7 @@ def test_invoice_texts_fit_telegram_limits() -> None:
         assert 1 <= len(title) <= 32
         assert 1 <= len(description) <= 255
         assert label
-    assert "200 ГБ" in invoice_texts("standard", 1)[1]
+    assert "100 ГБ" in invoice_texts("standard", 1)[1]
     assert "до 2 устройств" in invoice_texts("standard", 1)[1]
 
 
@@ -208,7 +208,7 @@ async def test_success_credits_once_with_the_tier_quota(
     assert abs(int(after["expires_at"]) - expected) <= 2
     assert after["tier"] == "standard"
     panel = hiddify.users[after["node_username"]]
-    assert panel["data_limit"] == 200 * 1024**3
+    assert panel["data_limit"] == 100 * 1024**3
     assert panel["data_limit_reset_strategy"] == "month"
 
     # The same update delivered again never adds a second period.

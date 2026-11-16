@@ -65,6 +65,13 @@ class TrialResult:
     expires_at: int | None = None
 
 
+def _is_uuid(value: str) -> bool:
+    try:
+        return str(uuid.UUID(value)) == value.lower()
+    except ValueError:
+        return False
+
+
 def _ts() -> int:
     return int(time.time())
 
@@ -117,11 +124,15 @@ class ProvisioningService:
     async def _ensure_node(self, user: dict[str, Any]) -> str:
         """Reuse a stored UUID, or generate one and persist it before the API call."""
         node = user.get("node_username")
-        if node:
+        if node and _is_uuid(str(node)):
             return str(node)
-        node = self._new_node(int(user["telegram_id"]))
-        await self.db.set_node_username(int(user["telegram_id"]), node)
-        return node
+        if node:
+            # A Marzban-era username (not a UUID) has no Hiddify account: give the
+            # user a fresh UUID so a payment still provisions instead of failing.
+            logger.warning("legacy_node_username_replaced")
+        fresh: str = self._new_node(int(user["telegram_id"]))
+        await self.db.set_node_username(int(user["telegram_id"]), fresh)
+        return fresh
 
     async def _disable_and_confirm(self, node_username: str) -> None:
         result = await self.hiddify.disable_user(node_username)

@@ -30,7 +30,8 @@ SECRETS_DIR = Path(os.environ.get("SECRETS_DIR", "/run/secrets"))
 
 # Tariffs: tier -> months -> price. RUB for SBP (integer roubles), USDT as Decimal.
 # USDT prices follow the RUB ratio of the basic tier, rounded to 0.50.
-# "standard" is the 2026-11 model (1-6 months, two devices, traffic quota).
+# "standard" is the 2026-11 model (1-6 months, two devices, 100 GB quota sized
+# for the single 1 vCPU / 2 GB server in Helsinki, see docs/TARIFF_CAPACITY.md).
 # It is sold only when ENABLED_TIERS lists it, so an existing deployment keeps
 # its current terms until the owner switches deliberately.
 TIER_PRICES_RUB: dict[str, dict[int, int]] = {
@@ -109,12 +110,13 @@ TIERS: dict[str, Tier] = {
         features=(
             "Шифрование подключения в публичном Wi-Fi: кафе, отели, аэропорты",
             "2 устройства по одной подписке, например телефон и ноутбук",
-            "200 ГБ трафика на каждые 30 дней, общий для всех устройств",
-            "Защита от вредоносных и фишинговых сайтов на стороне сервера",
-            "Фильтр сайтов 18+ и азартных игр",
-            "Протокол VLESS + XTLS-Reality",
+            "100 ГБ трафика на каждые 30 дней, общий для всех устройств",
+            "Сервер в Финляндии (Хельсинки)",
+            "Протоколы VLESS + Reality и AmneziaWG на выбор",
+            "Фильтр вредоносных, фишинговых сайтов и 18+ при подключении "
+            "через AmneziaWG",
         ),
-        traffic_gb=200,
+        traffic_gb=100,
         traffic_reset="month",
     ),
     "basic": Tier(
@@ -125,7 +127,7 @@ TIERS: dict[str, Tier] = {
         features=(
             "Протокол VLESS + XTLS-Reality (flow xtls-rprx-vision)",
             "До 5 устройств",
-            "Блокировка вредоносных и фишинговых ресурсов, ресурсов 18+ и азартных игр",
+            "Фильтр вредоносных и фишинговых ресурсов, 18+ и азартных игр (AmneziaWG)",
         ),
     ),
     "complete": Tier(
@@ -136,7 +138,7 @@ TIERS: dict[str, Tier] = {
         features=(
             "Протокол VLESS + XTLS-Reality (flow xtls-rprx-vision)",
             "До 10 устройств",
-            "Блокировка вредоносных и фишинговых ресурсов, ресурсов 18+ и азартных игр",
+            "Фильтр вредоносных и фишинговых ресурсов, 18+ и азартных игр (AmneziaWG)",
             "Приоритетная поддержка",
         ),
     ),
@@ -148,7 +150,7 @@ TIERS: dict[str, Tier] = {
         features=(
             "Протокол VLESS + XTLS-Reality (flow xtls-rprx-vision)",
             "До 15 устройств",
-            "Блокировка вредоносных и фишинговых ресурсов, ресурсов 18+ и азартных игр",
+            "Фильтр вредоносных и фишинговых ресурсов, 18+ и азартных игр (AmneziaWG)",
             "Приоритетная поддержка",
         ),
     ),
