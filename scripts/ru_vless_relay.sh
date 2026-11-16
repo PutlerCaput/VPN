@@ -15,6 +15,8 @@
 # (16 November 2026, docs/VPN_ENTRIES.md):
 #   TCP 443, 2087, 8443, 2083, 2085 -> DE:2443 (Hiddify: VLESS Reality, XHTTP)
 #   MASQUERADE for DE:2443
+#   UDP 36099 -> DE:36099 (Hiddify: Hysteria2 with Salamander obfuscation),
+#   for mobile networks that cut TCP/TLS but pass UDP; MASQUERADE for it
 #   MSS clamp on forwarded SYN packets, so large packets do not stall on
 #   mobile networks
 # The Marzban forwards (-> DE:2096 and DE:2098) are obsolete: --apply removes
@@ -30,6 +32,7 @@ shopt -s inherit_errexit
 
 DE_IP="${DE_IP:-89.125.210.172}"
 DE_PORT="${DE_PORT:-2443}"
+HY2_PORT="${HY2_PORT:-36099}"
 IPT="${IPTABLES_BIN:-iptables}"
 IPT_SAVE="${IPTABLES_SAVE_BIN:-iptables-save}"
 SYSCTL="${SYSCTL_BIN:-sysctl}"
@@ -48,6 +51,13 @@ MODE="${1:-}"
 if ! [[ "$DE_PORT" =~ ^[0-9]+$ ]] || ((10#$DE_PORT < 1 || 10#$DE_PORT > 65535)); then
   stop "DE_PORT is not a TCP port"
 fi
+if ! [[ "$HY2_PORT" =~ ^[0-9]+$ ]] || ((10#$HY2_PORT < 1 || 10#$HY2_PORT > 65535)); then
+  stop "HY2_PORT is not a UDP port"
+fi
+# AmneziaWG owns UDP 39051 and 44877 on RU; a second DNAT there would steal it.
+[[ "$((10#$HY2_PORT))" != 39051 && "$((10#$HY2_PORT))" != 44877 ]] \
+  || stop "HY2_PORT $HY2_PORT belongs to AmneziaWG"
+HY2_PORT="$((10#$HY2_PORT))"
 # 2096 and 2098 are the old Marzban ports: their rules are in OBSOLETE below and
 # would be removed again right after being added.
 [[ "$((10#$DE_PORT))" != 2096 && "$((10#$DE_PORT))" != 2098 ]] \
@@ -62,6 +72,8 @@ RULES=(
   "nat|PREROUTING|A|-p tcp --dport 2085 -j DNAT --to-destination $DE_IP:$DE_PORT"
   "nat|POSTROUTING|A|-d $DE_IP -p tcp --dport $DE_PORT -j MASQUERADE"
   "mangle|FORWARD|A|-p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
+  "nat|PREROUTING|A|-p udp --dport $HY2_PORT -j DNAT --to-destination $DE_IP:$HY2_PORT"
+  "nat|POSTROUTING|A|-d $DE_IP -p udp --dport $HY2_PORT -j MASQUERADE"
 )
 
 # Marzban (removed on 16 November 2026) listened on DE:2096 and DE:2098. While
@@ -183,7 +195,7 @@ case "$MODE" in
     fi
     "$SAVE" save >/dev/null 2>&1 || stop "rules are active but not saved: run $SAVE save"
     show
-    say "RU_VLESS_RELAY_OK: TCP 443/2087/8443/2083/2085 -> $DE_IP:$DE_PORT ($added rules added, $dropped obsolete removed, saved)"
+    say "RU_VLESS_RELAY_OK: TCP 443/2087/8443/2083/2085 -> $DE_IP:$DE_PORT, UDP $HY2_PORT -> $DE_IP:$HY2_PORT ($added rules added, $dropped obsolete removed, saved)"
     ;;
   --remove)
     removed=0

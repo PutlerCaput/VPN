@@ -87,6 +87,8 @@ EXPECTED = [
     f"nat|PREROUTING|-p tcp --dport 2085 -j DNAT --to-destination {DE}:2443",
     f"nat|POSTROUTING|-d {DE} -p tcp --dport 2443 -j MASQUERADE",
     "mangle|FORWARD|-p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu",
+    f"nat|PREROUTING|-p udp --dport 36099 -j DNAT --to-destination {DE}:36099",
+    f"nat|POSTROUTING|-d {DE} -p udp --dport 36099 -j MASQUERADE",
 ]
 ADDED = [
     f"-t nat -A PREROUTING -p tcp --dport 443 -j DNAT --to-destination {DE}:2443",
@@ -96,6 +98,8 @@ ADDED = [
     f"-t nat -A PREROUTING -p tcp --dport 2085 -j DNAT --to-destination {DE}:2443",
     f"-t nat -A POSTROUTING -d {DE} -p tcp --dport 2443 -j MASQUERADE",
     "-t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu",
+    f"-t nat -A PREROUTING -p udp --dport 36099 -j DNAT --to-destination {DE}:36099",
+    f"-t nat -A POSTROUTING -d {DE} -p udp --dport 36099 -j MASQUERADE",
 ]
 # The Marzban forwards live on RU before the move to Hiddify (16.11.2026).
 OBSOLETE = [
@@ -120,13 +124,13 @@ def backups(tmp_path: Path) -> list[Path]:
     return sorted((tmp_path / "backup").glob("rules.v4.before-ru-vless-relay-*"))
 
 
-def test_apply_adds_the_seven_rules_and_saves(tmp_path: Path) -> None:
+def test_apply_adds_the_nine_rules_and_saves(tmp_path: Path) -> None:
     env = _env(tmp_path)
     result = run(env, "--apply")
     assert result.returncode == 0, result.stderr
     assert rules(env) == EXPECTED
     assert "RU_VLESS_RELAY_OK" in result.stdout
-    assert "7 rules added" in result.stdout
+    assert "9 rules added" in result.stdout
     log = Path(env["FAKE_LOG"]).read_text(encoding="utf-8")
     for needle in ADDED:
         assert needle in log
@@ -189,7 +193,7 @@ def test_remove_takes_every_rule_away(tmp_path: Path) -> None:
     result = run(env, "--remove")
     assert result.returncode == 0, result.stderr
     assert rules(env) == []
-    assert "7 rules removed" in result.stdout
+    assert "9 rules removed" in result.stdout
     assert "RU_VLESS_RELAY_REMOVED" in result.stdout
 
 
@@ -201,7 +205,7 @@ def test_remove_clears_duplicate_copies(tmp_path: Path) -> None:
     result = run(env, "--remove")
     assert result.returncode == 0, result.stderr
     assert rules(env) == []
-    assert "14 rules removed" in result.stdout
+    assert "18 rules removed" in result.stdout
 
 
 def test_another_de_address_and_a_bad_one(tmp_path: Path) -> None:
@@ -229,19 +233,20 @@ def test_usage(tmp_path: Path) -> None:
 
 def test_apply_replaces_marzban_forwards_keeps_amneziawg(tmp_path: Path) -> None:
     env = _env(tmp_path)
-    mss = EXPECTED[-1]
+    mss = next(rule for rule in EXPECTED if rule.startswith("mangle|"))
     Path(env["FAKE_STATE"]).write_text(
         json.dumps(OBSOLETE + AWG + [mss]), encoding="utf-8"
     )
     result = run(env, "--apply")
     assert result.returncode == 0, result.stderr
     assert sorted(rules(env)) == sorted(AWG + EXPECTED)
-    assert "6 rules added, 7 obsolete removed" in result.stdout
+    assert "8 rules added, 7 obsolete removed" in result.stdout
     log = Path(env["FAKE_LOG"]).read_text(encoding="utf-8").splitlines()
     first_delete = next(i for i, line in enumerate(log) if " -D " in line)
     last_add = max(i for i, line in enumerate(log) if " -A " in line)
     assert last_add < first_delete, "new forwards go in before the old ones go"
-    assert not any("udp" in line for line in log if " -D " in line or " -A " in line)
+    changes = [line for line in log if " -D " in line or " -A " in line]
+    assert not any("39051" in line or "44877" in line for line in changes)
     backup = backups(tmp_path)
     assert len(backup) == 1
     assert "2096" in backup[0].read_text(encoding="utf-8")
@@ -277,7 +282,7 @@ def test_remove_also_drops_obsolete_and_keeps_amneziawg(tmp_path: Path) -> None:
     result = run(env, "--remove")
     assert result.returncode == 0, result.stderr
     assert sorted(rules(env)) == sorted(AWG)
-    assert "14 rules removed" in result.stdout
+    assert "16 rules removed" in result.stdout
     assert len(backups(tmp_path)) == 1
 
 
@@ -311,3 +316,23 @@ def test_a_failed_delete_stops_before_saving(tmp_path: Path) -> None:
         assert "RU_VLESS_RELAY_OK" not in result.stdout
         assert "RU_VLESS_RELAY_REMOVED" not in result.stdout
         assert not (tmp_path / "saved").is_file(), mode
+
+
+def test_bad_hysteria2_port(tmp_path: Path) -> None:
+    for bad in ("0", "70000", "x", "39051", "44877"):
+        env = _env(tmp_path)
+        env["HY2_PORT"] = bad
+        result = run(env, "--apply")
+        assert result.returncode == 1
+        assert "HY2_PORT" in result.stderr
+        assert rules(env) == []
+
+
+def test_other_hysteria2_port(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    env["HY2_PORT"] = "40001"
+    result = run(env, "--apply")
+    assert result.returncode == 0, result.stderr
+    dnat = f"nat|PREROUTING|-p udp --dport 40001 -j DNAT --to-destination {DE}:40001"
+    assert dnat in rules(env)
+    assert "UDP 40001" in result.stdout
