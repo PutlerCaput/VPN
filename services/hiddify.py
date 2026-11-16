@@ -386,9 +386,7 @@ class HiddifyClient:
         if data_limit_reset_strategy is not None:
             if data_limit_reset_strategy not in TRAFFIC_RESET_STRATEGIES:
                 raise ValueError("unknown data_limit_reset_strategy")
-            body["mode"] = _TO_HIDDIFY_MODE.get(
-                data_limit_reset_strategy, "no_reset"
-            )
+            body["mode"] = _TO_HIDDIFY_MODE.get(data_limit_reset_strategy, "no_reset")
         response = await self._request(
             "PATCH",
             self._admin("user", username),

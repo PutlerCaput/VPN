@@ -114,7 +114,7 @@ class ProvisioningService:
         del telegram_id
         return str(uuid.uuid4())
 
-    async def _ensure_node(self, user: dict) -> str:
+    async def _ensure_node(self, user: dict[str, Any]) -> str:
         """Reuse a stored UUID, or generate one and persist it before the API call."""
         node = user.get("node_username")
         if node:

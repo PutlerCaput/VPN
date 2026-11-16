@@ -230,6 +230,5 @@ async def main(argv: list[str]) -> int:
     return 2
 
 
-
 if __name__ == "__main__":
     sys.exit(asyncio.run(main(sys.argv[1:])))

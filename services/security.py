@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
-import uuid
 import time
+import uuid
 from collections import deque
 
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{1,32}$")

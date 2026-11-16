@@ -134,7 +134,6 @@ async def test_hiddify_payload_stores_uuid_quota_and_device_note() -> None:
         data_limit_reset_strategy="no_reset",
     )
     await client.close()
-    assert all(request.headers.get("hiddify-api-key") is not None or True for request in [])
     body = seen[0][1]
     assert body["uuid"] == prime
     assert body["comment"] == "tier=prime devices=15"

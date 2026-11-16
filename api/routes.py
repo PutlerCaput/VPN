@@ -49,8 +49,8 @@ from handlers.payments import bot_methods, channel_text
 from keyboards.main_menu import channel_kb
 from services.billing import BillingError
 from services.email_login import is_site_account, mask_email, normalize_email
-from services.mailer import MailError
 from services.hiddify import HiddifyError
+from services.mailer import MailError
 from services.provisioning import ProvisioningError
 from services.security import sanitize_username
 from services.yookassa import is_valid_email

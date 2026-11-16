@@ -6,7 +6,6 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 
 from services.hiddify import HiddifyClient

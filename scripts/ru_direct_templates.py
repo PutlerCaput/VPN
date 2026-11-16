@@ -116,7 +116,7 @@ def singbox_template(default: dict[str, Any]) -> dict[str, Any]:
 
 
 def check_config(template: dict[str, Any]) -> dict[str, Any]:
-    """The template as Hiddify Manager serves it, with a stand-in server, for xray -test."""
+    """The template as Hiddify Manager serves it, with a stand-in server."""
     config = copy.deepcopy(template)
     config.pop("remarks", None)
     server = {

@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 
 from services.hiddify import HiddifyClient
@@ -220,6 +219,7 @@ def test_hiddify_client_has_no_per_user_inbound_assignment() -> None:
     assert not hasattr(HiddifyClient, "set_vless_inbounds")
     assert not hasattr(HiddifyClient, "extra_inbound_tags")
 
+
 # ----------------------------------------------------------- the shell switch
 DOCKER = r"""#!/bin/bash
 echo "docker $*" >> "$T/calls.log"
@@ -256,6 +256,7 @@ OPENSSL = (
 CURL = '#!/bin/bash\necho "curl $*" >> "$T/calls.log"\ncat "$T/tls_answer"\n'
 UFW = '#!/bin/bash\necho "ufw $*" >> "$T/calls.log"\n'
 UPDATE_BOT = '#!/bin/bash\necho "update_bot $*" >> "$T/calls.log"\n'
+
 
 def switch(
     tmp_path: Path, *args: str, **extra: str
