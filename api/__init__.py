@@ -19,8 +19,9 @@ from api.middleware import (
     cors_middleware_factory,
 )
 from api.push import routes as push_routes
-from api.routes import REPLAY_KEY, routes
+from api.routes import REPLAY_KEY, SUB_FANOUT_KEY, routes
 from services.container import Services
+from services.sharding import FanoutGuard
 
 
 def create_api_app(services: Services) -> web.Application:
@@ -37,9 +38,10 @@ def create_api_app(services: Services) -> web.Application:
         settings.jwt_access_ttl_seconds,
         settings.jwt_refresh_ttl_seconds,
     )
-    limits = build_limiters()
+    limits = build_limiters(settings)
     api[LIMITS_KEY] = limits
     services.limiters.extend(limits.values())
+    api[SUB_FANOUT_KEY] = FanoutGuard(settings.sub_sources_per_user_day, 86400)
     guard = ReplayGuard()
     api[REPLAY_KEY] = guard
 

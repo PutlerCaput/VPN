@@ -330,3 +330,89 @@ ssh de-ru 'cat /root/vpn-src/scripts/net_tuning.sh' | ssh root@45.138.157.65 'ba
 ```
 
 `bash scripts/net_tuning.sh --check` только печатает текущие значения.
+
+## Второй вход в РФ (RU-2)
+
+Подготовлено 17 ноября 2026, **не применено** (сервера RU-2 ещё нет). Зачем —
+`docs/ARCHITECTURE.md`, раздел 3: блокировка одного адреса или хостера не отключает
+никого. RU-2 берётся у **другого** российского хостера. Ниже `RU2` — его публичный адрес.
+Ключи генерируются на каждом сервере и не печатаются.
+
+**1. Туннель `wg-vpn2` RU-2 ⇄ DE** (как `wg-vpn`, раздел «Туннель wg-vpn», со своими
+адресами и портами):
+
+| | RU-2 | DE |
+|---|---|---|
+| Интерфейс | `wg-vpn` (имя на RU-2 своё), `10.206.0.1/30` | `wg-vpn2`, `10.206.0.2/30` |
+| Порт | UDP 51821 (слушает) | UDP 51823, Endpoint `RU2:51821`, keepalive 25 с |
+| MTU | 1420 | 1420 |
+
+```
+# на обоих: umask 077; cd /etc/wireguard; wg genkey > <if>.key; wg pubkey < <if>.key > <if>.pub
+# конфиг как у wg-vpn, PostUp = wg set %i private-key /etc/wireguard/<if>.key
+systemctl enable --now wg-quick@wg-vpn     # на RU-2
+systemctl enable --now wg-quick@wg-vpn2    # на DE
+ping -c3 10.206.0.1                        # с DE
+```
+
+**2. Пробросы на RU-2** — тот же скрипт, что на RU-1, без правок кода; отличаются только
+переменные:
+
+```
+ssh de-ru 'cat /root/vpn-src/scripts/net_tuning.sh' | ssh root@RU2 'bash -s -- --apply'
+ssh de-ru 'cat /root/vpn-src/scripts/ru_vless_relay.sh' | ssh root@RU2 'DE_TUNNEL_IP=10.206.0.2 TUNNEL_IF=wg-vpn bash -s -- --check'
+ssh de-ru 'cat /root/vpn-src/scripts/ru_vless_relay.sh' | ssh root@RU2 'DE_TUNNEL_IP=10.206.0.2 TUNNEL_IF=wg-vpn bash -s -- --apply'
+ssh de-ru 'cat /root/vpn-src/scripts/ru_firewall.sh' | ssh root@RU2 'DB_TUNNEL_PEER= bash -s -- --apply'
+```
+
+Ожидается `RU_VLESS_RELAY_OK`: TCP 443/2087/8443/2083/2085 → `10.206.0.2:2443` через
+туннель, UDP 36099 и 443 → `DE:36099` (Hysteria2). `DB_TUNNEL_PEER=` (пусто): базы на RU-2
+нет. Через 10 минут после `ru_firewall.sh --apply` — `--confirm` из нового SSH-входа.
+AmneziaWG через RU-2 — по желанию, `scripts/ru_awg_relay.sh` (раздел «AmneziaWG через RU»).
+
+**3. На DE** при закрытом ufw (`scripts/de_lockdown.sh`) добавить RU-2:
+`RU_PEER="45.138.157.65 RU2" TUNNEL_IF="wg-vpn wg-vpn2" bash de_lockdown.sh` (отчёт), затем
+`--apply`. Пока ufw выключен (INPUT ACCEPT), ничего не нужно.
+
+**4. В подписку** — существующим `scripts/vpn_entries.py`. Сначала опись: какие теги и
+порты есть у RU-1, их же добавить для RU-2:
+
+```bash
+docker exec -i node-rental-bot-1 python3 - < /root/vpn-src/scripts/vpn_entries.py
+docker exec -i node-rental-bot-1 python3 - --add RU2:443 < /root/vpn-src/scripts/vpn_entries.py
+docker exec -i node-rental-bot-1 python3 - --tag <тег gRPC> --add RU2:2087 < /root/vpn-src/scripts/vpn_entries.py
+```
+
+Скрипт копирует маскировку, отпечаток и остальное у первого адреса тега. Hysteria2 через
+RU-2: адрес `RU2:36099` добавляется так же, если в описи у Hysteria2 есть адрес RU-1.
+Откат: `--remove RU2:443` (и остальные), `ru_vless_relay.sh --remove` на RU-2,
+`systemctl disable --now wg-quick@wg-vpn2` на DE.
+
+**5. С шардированием** (`docs/ARCHITECTURE.md`, раздел 4) RU-1 и RU-2 — разные сегменты:
+
+```
+ENTRY_SEGMENTS={"ru-a":["45.138.157.65"],"ru-b":["RU2"]}
+ENTRY_SHARED_HOSTS=["89.125.210.172"]
+```
+
+Без шардирования каждый пользователь получает оба адреса.
+
+## Отпечаток chrome и gRPC + REALITY в Hiddify 14
+
+Подписку формирует Hiddify Manager, поэтому это настройки панели, а не бота.
+
+1. **Отпечаток.** Каждому адресу входа — `chrome`:
+   `docker exec -i node-rental-bot-1 python3 - --fingerprint chrome < /root/vpn-src/scripts/vpn_entries.py`.
+   В интерфейсе панели то же — настройка uTLS (TLS fingerprint) = `chrome`. Отпечаток в
+   отфильтрованной подписке бот может проставить и сам: `SUBSCRIPTION_FINGERPRINT=chrome`
+   (работает только с `ENTRY_SHARDING_ENABLED=true`).
+2. **gRPC + REALITY.** В настройках протоколов панели включить REALITY и gRPC для него
+   (транспорт gRPC у входа REALITY). Через RU gRPC идёт тем же TCP-пробросом в туннеле
+   (`ru_vless_relay.sh` трогать не нужно): все порты RU ведут на DE:2443. Отдельный вход
+   gRPC на своём порту — `scripts/vless_transport.sh` (шаг 2 выше).
+3. **Проверка** без вывода секретов: опись `vpn_entries.py` (поле `fingerprint=chrome` у
+   каждого адреса); в приложении после обновления подписки есть профили gRPC, в ссылке
+   VLESS — `fp=chrome`.
+
+После «Применить» в панели Hiddify снова включает ночное автообновление: проверить и
+выключить, как раньше.

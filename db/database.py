@@ -322,6 +322,21 @@ CREATE TABLE IF NOT EXISTS email_codes (
 );
 """
 
+# Entry sharding (services/sharding.py): the segment of entry nodes a user's
+# subscription shows. 'auto' rows pin the deterministic choice so that a change
+# of the segment list or the key does not move everybody; 'admin' rows are a
+# manual override and are never reassigned automatically. Only the segment name
+# is stored: no address, no IP of the user.
+ENTRY_SEGMENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS entry_segments (
+    telegram_id INTEGER PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+    segment TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('auto', 'admin')),
+    assigned_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entry_segments_segment ON entry_segments(segment);
+"""
+
 # Columns added after the first release: (table, column, definition).
 MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("users", "receipt_email", "TEXT"),
@@ -413,6 +428,7 @@ class Database:
         await self.conn.execute("PRAGMA busy_timeout=5000")
         await self.conn.executescript(SCHEMA)
         await self.conn.executescript(EMAIL_SCHEMA)
+        await self.conn.executescript(ENTRY_SEGMENTS_SCHEMA)
         for table, column, definition in MIGRATIONS:
             async with self.conn.execute(f"PRAGMA table_info({table})") as cur:
                 columns = {row[1] for row in await cur.fetchall()}
@@ -607,6 +623,52 @@ class Database:
         return await self._fetchone(
             "SELECT * FROM users WHERE node_username = ?",
             (node_username,),
+        )
+
+    # ---------------------------------------------------------- entry shards
+    async def get_entry_segment(self, telegram_id: int) -> dict[str, Any] | None:
+        return await self._fetchone(
+            "SELECT telegram_id, segment, source, assigned_at FROM entry_segments "
+            "WHERE telegram_id = ?",
+            (telegram_id,),
+        )
+
+    async def set_entry_segment(
+        self, telegram_id: int, segment: str, source: str = "auto"
+    ) -> bool:
+        """Pins a segment. An 'auto' write never replaces an 'admin' one."""
+        if source not in ("auto", "admin"):
+            raise ValueError("source is 'auto' or 'admin'")
+        if source == "admin":
+            sql = (
+                "INSERT INTO entry_segments "
+                "(telegram_id, segment, source, assigned_at) "
+                "VALUES (?, ?, 'admin', ?) ON CONFLICT(telegram_id) DO UPDATE SET "
+                "segment = excluded.segment, source = 'admin', "
+                "assigned_at = excluded.assigned_at"
+            )
+        else:
+            sql = (
+                "INSERT INTO entry_segments "
+                "(telegram_id, segment, source, assigned_at) "
+                "VALUES (?, ?, 'auto', ?) ON CONFLICT(telegram_id) DO UPDATE SET "
+                "segment = excluded.segment, assigned_at = excluded.assigned_at "
+                "WHERE entry_segments.source = 'auto'"
+            )
+        return await self._execute(sql, (telegram_id, segment, now())) == 1
+
+    async def clear_entry_segment(self, telegram_id: int) -> bool:
+        return (
+            await self._execute(
+                "DELETE FROM entry_segments WHERE telegram_id = ?", (telegram_id,)
+            )
+            == 1
+        )
+
+    async def entry_segment_counts(self) -> list[dict[str, Any]]:
+        return await self._fetchall(
+            "SELECT segment, source, COUNT(*) AS users FROM entry_segments "
+            "GROUP BY segment, source ORDER BY segment, source"
         )
 
     async def create_user(

@@ -81,6 +81,8 @@ bash /root/vpn-src/scripts/vless_transport.sh --check ИМЯ
 
 ### 4.3. Защита от сканеров
 
+Готовый сценарий с откатом — `scripts/de_lockdown.sh` и [PANEL_LOCKDOWN.md](PANEL_LOCKDOWN.md); общая схема — [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ```bash
 # DE. Панель Hiddify Manager — только с адресов владельца/через SSH-туннель, не всему интернету.
 ufw delete allow 8443/tcp

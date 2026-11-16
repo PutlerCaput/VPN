@@ -42,6 +42,9 @@ PUBLIC_PATHS = frozenset(
         "/push/vapid-key",
     }
 )
+# Subscription downloads by VPN apps (entry sharding): no Bearer token, the
+# panel UUID in the path is the credential, as on Hiddify's own address.
+SUB_PREFIX = "/sub/"
 AUTH_PATHS = frozenset({"/auth/telegram", "/auth/email/request", "/auth/email/verify"})
 BANNED_ALLOWED = frozenset({"/me", "/auth/logout"})
 
@@ -55,8 +58,16 @@ SECURITY_HEADERS = {
 }
 
 
-def build_limiters() -> dict[str, SlidingWindowLimiter]:
+def build_limiters(settings: Any = None) -> dict[str, SlidingWindowLimiter]:
+    sub_ip = getattr(settings, "sub_rate_per_ip_10min", 30)
+    sub_user = getattr(settings, "sub_rate_per_user_hour", 20)
+    sub_miss = getattr(settings, "sub_misses_per_ip_hour", 10)
     return {
+        # /sub: anti-parsing. Per address, per subscription, and failed guesses
+        # (an unknown UUID) per address, which locks the address out for a while.
+        "sub_ip": SlidingWindowLimiter(sub_ip, 600),
+        "sub_user": SlidingWindowLimiter(sub_user, 3600),
+        "sub_miss_ip": SlidingWindowLimiter(sub_miss, 3600),
         "auth_ip": SlidingWindowLimiter(10, 60),
         "public_ip": SlidingWindowLimiter(30, 60),
         "user": SlidingWindowLimiter(60, 60),
@@ -144,6 +155,12 @@ async def auth_middleware(request: web.Request, handler: Handler) -> web.StreamR
     path = relative_path(request)
     ip = client_ip(request, services.settings.trust_forwarded_for)
     request[CLIENT_IP_KEY] = ip
+
+    if path.startswith(SUB_PREFIX):
+        # Throttled here and again in the handler (per subscription, misses).
+        if not limits["sub_ip"].hit(ip):
+            return _rate_limited(limits["sub_ip"].retry_after(ip))
+        return await handler(request)
 
     if path in PUBLIC_PATHS:
         limiter = limits["auth_ip"] if path in AUTH_PATHS else limits["public_ip"]
