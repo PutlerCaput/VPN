@@ -71,11 +71,13 @@ SUB_FANOUT_KEY = web.AppKey("sub_fanout", FanoutGuard)
 # (Clash YAML and the like): a plain link list every app also understands.
 LINKS_USER_AGENT = "v2rayNG/1.9.0"
 # Headers of the panel's answer that apps read (traffic, title, refresh period).
+# Not profile-web-page-url: Hiddify points it at the user's own panel page
+# (panel host, client path, UUID), where the unfiltered subscription and the
+# whole entry pool can be read, which would undo the sharding.
 SUB_PASS_HEADERS = (
     "subscription-userinfo",
     "profile-update-interval",
     "profile-title",
-    "profile-web-page-url",
     "support-url",
     "content-disposition",
 )
@@ -425,8 +427,13 @@ async def sharded_subscription(request: web.Request) -> web.Response:
         return json_error(429, "rate_limited", {"Retry-After": "3600"})
     node = _node_uuid(request.match_info["node"])
     user = await services.db.get_user_by_node(node) if node else None
-    if node is None or user is None or user["status"] != "active":
+    if node is None or user is None:
         misses.hit(ip)
+        return _sub_not_found()
+    if user["status"] != "active":
+        # A real subscription whose rental ended: same answer as an unknown
+        # one, but not a guess. Its app keeps refreshing, and counting that
+        # would lock out everyone behind the same carrier NAT address.
         return _sub_not_found()
     if not limits["sub_user"].hit(node):
         retry = str(max(1, int(limits["sub_user"].retry_after(node)) + 1))

@@ -337,6 +337,7 @@ class Upstream:
             "Subscription-Userinfo": "upload=0; download=0; total=0; expire=0",
             "Profile-Update-Interval": "12",
             "Set-Cookie": "panel=1",
+            "Profile-Web-Page-Url": "https://sub.test/p/" + node + "/",
         }
         return self.status, body, headers
 
@@ -377,6 +378,8 @@ async def test_endpoint_serves_only_the_users_segment(services: Any) -> None:
         assert "fp=firefox" not in text
         assert response.headers["Profile-Update-Interval"] == "12"
         assert "Set-Cookie" not in response.headers
+        # The panel's own user page would show the unfiltered pool.
+        assert "Profile-Web-Page-Url" not in response.headers
     assert upstream.agents == ["HiddifyNext/2"]
     assert (await services.db.get_entry_segment(42))["segment"] == segment
 
@@ -437,6 +440,23 @@ async def test_endpoint_locks_out_guessing_addresses(services: Any) -> None:
             assert (await client.get(f"/sub/{uuid.uuid4()}/")).status == 404
         # Locked out now, even with the right UUID.
         assert (await client.get(f"/sub/{NODE}/")).status == 429
+
+
+async def test_endpoint_inactive_user_is_not_a_guess(services: Any) -> None:
+    services.settings = _sharded_settings(sub_misses_per_ip_hour=2)
+    await _user(services.db, 50, NODE)
+    other = str(uuid.uuid4())
+    await _user(services.db, 51, other)
+    await services.db.set_subscription(
+        51, status="expired", expires_at=1, node_username=other, config_link=None
+    )
+    services.hiddify.fetch_subscription = Upstream({"*": _vless(DE)})
+    async with await _client(services) as client:
+        # An ended rental's app keeps refreshing: 404, never a lockout of the
+        # address (carrier NAT shares it with active users).
+        for _ in range(4):
+            assert (await client.get(f"/sub/{other}/")).status == 404
+        assert (await client.get(f"/sub/{NODE}/")).status == 200
 
 
 async def test_endpoint_per_user_rate_limit(services: Any) -> None:

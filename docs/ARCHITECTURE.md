@@ -194,6 +194,12 @@ Hysteria2, conntrack 65536). Документ описывает, как сер�
 
 1. Подписать выпуск на телефоне (`bash ~/release_sign.sh`), потом обновить **шлюз базы на
    RU** (`db_gateway_install.sh --apply`) и только затем бота (`update_bot.sh`).
+   Это нужно даже при `ENTRY_SHARDING_ENABLED=false`: в `Database` четыре новых метода, и
+   новый бот не подключится к старому шлюзу. Если порядок нарушить (вручную или ежемесячным
+   `node-update.timer`), `update_bot.sh` при `DATABASE_URL` лишь печатает `DB_REMOTE`,
+   пересоздаёт бота, ждёт «healthy» до `HEALTH_TIMEOUT` (150 с) и сам возвращает прежний
+   образ и `.env`: обновление не пройдёт, бот будет недоступен несколько минут. Само
+   слияние PR и подпись ничего на серверах не меняют.
 2. Отпечаток `chrome` и gRPC + REALITY в панели (раздел 7).
 3. `scripts/de_lockdown.sh` (сначала без аргументов — отчёт), затем allowlist панели в
    Caddy (`PANEL_LOCKDOWN.md`).

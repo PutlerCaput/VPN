@@ -20,6 +20,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import os
 import time
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping
@@ -340,7 +341,7 @@ class FanoutGuard:
         self.window = window_seconds
         self.max_keys = max_keys
         self._seen: OrderedDict[str, dict[str, float]] = OrderedDict()
-        self._salt = hashlib.sha256(str(time.time_ns()).encode()).digest()
+        self._salt = os.urandom(32)
 
     def _digest(self, source: str) -> str:
         return hashlib.blake2s(
