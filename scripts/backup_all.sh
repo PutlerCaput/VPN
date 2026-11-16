@@ -7,14 +7,14 @@
 #   bot/bot.db          the bot's database (online copy, still SQLCipher-encrypted;
 #                       fetched from the other server when the bot keeps it there)
 #   bot/.env, secrets/  the bot's settings and keys (the database key among them)
-#   marzban/            Marzban's database, .env, compose file, Caddyfile, Xray config
+#   hiddify/            Hiddify Manager's database, .env, compose file, Caddyfile, Xray config
 # encrypts it to the owner's PUBLIC key with age, keeps the newest copies in
 # /root/server-backups and sends the new one to the owner in Telegram, so a copy
 # lives off this server. The private key is never on the server: without it the
 # archive cannot be opened, here or in Telegram. Settings: /etc/node-backup.env,
 # written by install_backup.sh.
 #
-# Not included: Marzban's geo files (downloaded again), Docker images (rebuilt
+# Not included: Hiddify Manager's geo files (downloaded again), Docker images (rebuilt
 # from the repository) and the AmneziaWG server key (see docs/BACKUPS.md).
 set -euo pipefail
 umask 077
@@ -28,9 +28,9 @@ AGE_RECIPIENT="${AGE_RECIPIENT:-}"
 BACKUP_DIR="${BACKUP_DIR:-/root/server-backups}"
 KEEP_LOCAL="${KEEP_LOCAL:-7}"
 CONTAINER="${CONTAINER:-node-rental-bot-1}"
-MARZBAN_DB="${MARZBAN_DB:-/var/lib/marzban/db.sqlite3}"
-MARZBAN_DIR="${MARZBAN_DIR:-/opt/marzban}"
-XRAY_CONFIG="${XRAY_CONFIG:-/var/lib/marzban/xray_config.json}"
+HIDDIFY_DB="${HIDDIFY_DB:-/var/lib/hiddify/db.sqlite3}"
+HIDDIFY_DIR="${HIDDIFY_DIR:-/opt/hiddify-manager}"
+XRAY_CONFIG="${XRAY_CONFIG:-/var/lib/hiddify/xray_config.json}"
 SEND_TELEGRAM="${SEND_TELEGRAM:-1}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 SRC="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
@@ -56,7 +56,7 @@ WORKDIR="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project
 mkdir -p "$BACKUP_DIR"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"; rm -f "$WORKDIR/data/.nightly-backup.db" "$WORKDIR/data/.outgoing-backup.age"' EXIT
-mkdir -p "$TMP/bot" "$TMP/marzban"
+mkdir -p "$TMP/bot" "$TMP/hiddify"
 
 # ----- the bot: database, settings, keys
 if grep -q '^DATABASE_URL=.' "$WORKDIR/.env" 2>/dev/null; then
@@ -73,9 +73,9 @@ mv "$WORKDIR/data/.nightly-backup.db" "$TMP/bot/bot.db"
 [[ -f "$WORKDIR/.env" ]] && cp -p "$WORKDIR/.env" "$TMP/bot/.env"
 [[ -d "$WORKDIR/secrets" ]] && cp -rp "$WORKDIR/secrets" "$TMP/bot/secrets"
 
-# ----- Marzban: database, settings
-if [[ -f "$MARZBAN_DB" ]]; then
-  python3 - "$MARZBAN_DB" "$TMP/marzban/db.sqlite3" <<'PY' || fail "the Marzban database could not be copied"
+# ----- Hiddify Manager: database, settings
+if [[ -f "$HIDDIFY_DB" ]]; then
+  python3 - "$HIDDIFY_DB" "$TMP/hiddify/db.sqlite3" <<'PY' || fail "the Hiddify Manager database could not be copied"
 import sqlite3
 import sys
 
@@ -94,10 +94,10 @@ if check != "ok":
     sys.exit(f"integrity_check: {check}")
 PY
 else
-  WARNINGS+=("нет базы Marzban ($MARZBAN_DB)")
+  WARNINGS+=("нет базы Hiddify Manager ($HIDDIFY_DB)")
 fi
-for file in "$MARZBAN_DIR/.env" "$MARZBAN_DIR/docker-compose.yml" "$MARZBAN_DIR/Caddyfile" "$XRAY_CONFIG"; do
-  if [[ -f "$file" ]]; then cp -p "$file" "$TMP/marzban/"; else WARNINGS+=("нет файла $file"); fi
+for file in "$HIDDIFY_DIR/.env" "$HIDDIFY_DIR/docker-compose.yml" "$HIDDIFY_DIR/Caddyfile" "$XRAY_CONFIG"; do
+  if [[ -f "$file" ]]; then cp -p "$file" "$TMP/hiddify/"; else WARNINGS+=("нет файла $file"); fi
 done
 
 # ----- what is inside, and what could not be added

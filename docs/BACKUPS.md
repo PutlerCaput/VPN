@@ -18,11 +18,11 @@
 |---|---|
 | `bot/bot.db` | база бота: клиенты, платежи, согласия (копия остаётся зашифрованной SQLCipher) |
 | `bot/.env`, `bot/secrets/` | настройки и ключи бота, в том числе ключ базы |
-| `marzban/db.sqlite3` | база Marzban: учётные записи клиентов и их ссылки |
-| `marzban/.env`, `docker-compose.yml`, `Caddyfile`, `xray_config.json` | настройки панели и сайта |
+| `hiddify/db.sqlite3` | база Hiddify Manager: учётные записи клиентов и их ссылки |
+| `hiddify/.env`, `docker-compose.yml`, `Caddyfile`, `xray_config.json` | настройки панели и сайта |
 | `INFO.txt`, `MANIFEST.sha256` | когда и откуда сделана копия; контрольные суммы файлов |
 
-Не входит: геофайлы Marzban (скачиваются заново), образы Docker (собираются из
+Не входит: геофайлы Hiddify Manager (скачиваются заново), образы Docker (собираются из
 репозитория) и серверный ключ AmneziaWG, который лежит в томе контейнера
 AWG. Пока ключей AWG у клиентов нет, это не мешает. Если начнёте выдавать
 ключи AmneziaWG, добавьте том в копию отдельным шагом (скажите, помогу).
@@ -112,16 +112,16 @@ bash scripts/restore_backup.sh backup-….tar.gz.age age-key.txt
    ```
 
    В конце должно быть `RESTORE_OK` и список файлов: `bot/bot.db`, `bot/.env`,
-   `marzban/db.sqlite3` и остальные.
+   `hiddify/db.sqlite3` и остальные.
 4. Удалите распакованное: `rm -rf ~/restore-test`.
 
 ## Если сервер потерян
 
-1. Поднимите новый сервер, поставьте Docker и Marzban, получите код проекта
+1. Поднимите новый сервер, поставьте Docker и Hiddify Manager, получите код проекта
    (`docs/FINISH_RUNBOOK.md`, шаг 1).
 2. Откройте последнюю копию из Telegram командой выше.
 3. Скопируйте файлы по списку, который напечатает `restore_backup.sh`: сначала
-   бот (`.env`, `secrets/`, `bot.db`), потом Marzban (`db.sqlite3`, настройки).
+   бот (`.env`, `secrets/`, `bot.db`), потом Hiddify Manager (`db.sqlite3`, настройки).
 4. `bash scripts/update_bot.sh --doctor` должен показать `0 problems`.
 
 IP-адрес нового сервера изменится: обновите записи DNS (`app`, `sub`, `panel`) и

@@ -5,13 +5,17 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+import uuid
 import time
 from collections import deque
 
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{1,32}$")
-# Panel names: u<telegram_id> for accounts made before the change, and
-# n + 20 hex characters for new accounts (see pseudonymous_node_username).
-NODE_USERNAME_PATTERN = r"^(?:u\d{5,20}|n[0-9a-f]{20})$"
+# Panel identifiers: a UUID (current Hiddify users), plus legacy names
+# still present in older rows (u<telegram_id>, n + 20 hex characters).
+NODE_USERNAME_PATTERN = (
+    r"^(?:u\d{5,20}|n[0-9a-f]{20}|"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"
+)
 NODE_USERNAME_RE = re.compile(NODE_USERNAME_PATTERN)
 NODE_NAME_CONTEXT = b"node-username/v1"
 PAYMENT_ID_RE = re.compile(r"^[a-f0-9]{32}$")
@@ -41,7 +45,12 @@ def pseudonymous_node_username(secret: str, telegram_id: int) -> str:
 
 
 def is_valid_node_username(value: str) -> bool:
-    return bool(NODE_USERNAME_RE.fullmatch(value))
+    if NODE_USERNAME_RE.fullmatch(value) or NODE_USERNAME_RE.fullmatch(value.lower()):
+        return True
+    try:
+        return str(uuid.UUID(value)) == value.lower()
+    except ValueError:
+        return False
 
 
 def is_valid_payment_id(value: str) -> bool:

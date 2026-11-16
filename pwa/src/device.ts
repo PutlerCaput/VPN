@@ -61,7 +61,7 @@ export const DIRECT_CHECK =
   "Проверка: на странице yandex.ru/internet должен быть ваш обычный адрес, а на ifconfig.me — адрес сервера.";
 
 // Apps that receive the rule with the subscription once the server sends it
-// (ru_direct_auto from /config): Marzban sends v2rayNG full configs with it.
+// (ru_direct_auto from /config): Hiddify Manager sends v2rayNG full configs with it.
 export const AUTO_DIRECT_APPS = ["v2rayng"];
 
 export const AUTO_DIRECT_NOTE =

@@ -13,7 +13,7 @@
 #     update_bot.sh and update_web.sh (each keeps a rollback image), only when a
 #     base image really changed AND the project folder holds exactly the code
 #     that runs now (source_digest.sh). Otherwise nothing restarts.
-# It never touches: Docker itself, Marzban, Xray and its geo files, the AmneziaWG
+# It never touches: Docker itself, Hiddify Manager, Xray and its geo files, the AmneziaWG
 # container, the project's code (no git pull), SSH, the firewall.
 #
 # It starts only when everything is in order, and says why when it does not:

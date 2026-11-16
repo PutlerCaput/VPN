@@ -14,7 +14,7 @@
 #   4. with --apply: recreates only the web container with the same settings
 #      (ACME_EMAIL is read from the running container), waits for "healthy",
 #      runs deploy/web/check-web.sh and restores the old image if anything fails.
-# It never touches the bot, Marzban, AmneziaWG, the host Caddy, secrets or the database.
+# It never touches the bot, Hiddify Manager, AmneziaWG, the host Caddy, secrets or the database.
 
 set -euo pipefail
 

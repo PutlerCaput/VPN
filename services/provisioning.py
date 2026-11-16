@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import time
+import uuid
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -15,10 +16,10 @@ from typing import Any
 from config import DAYS_PER_MONTH, DEFAULT_TIER, GIB, TIERS, Settings, device_note
 from db.database import Database
 from services.audit import audit
-from services.marzban import (
-    MarzbanClient,
-    MarzbanError,
-    MarzbanNotFound,
+from services.hiddify import (
+    HiddifyClient,
+    HiddifyError,
+    HiddifyNotFound,
     traffic_policy,
 )
 from services.metrics import (
@@ -28,7 +29,6 @@ from services.metrics import (
     TRIALS_PROVISIONED,
 )
 from services.notifier import Notifier
-from services.security import pseudonymous_node_username
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class TrafficStatus:
     used_bytes: int
     limit_bytes: int  # 0 = unlimited
     reset_strategy: str
-    limited: bool  # Marzban stopped the node because the quota is used up
+    limited: bool  # the panel stopped the node because the quota is used up
 
 
 @dataclass(slots=True)
@@ -79,12 +79,12 @@ class ProvisioningService:
     def __init__(
         self,
         db: Database,
-        marzban: MarzbanClient,
+        hiddify: HiddifyClient,
         notifier: Notifier,
         settings: Settings,
     ) -> None:
         self.db = db
-        self.marzban = marzban
+        self.hiddify = hiddify
         self.notifier = notifier
         self.settings = settings
         self._locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -101,28 +101,35 @@ class ProvisioningService:
     def _config_from(self, data: dict[str, Any]) -> str:
         """What the user imports: all-locations subscription or a single link."""
         if self.settings.config_delivery == "subscription":
-            url = MarzbanClient.extract_subscription_url(
+            url = HiddifyClient.extract_subscription_url(
                 data, self.settings.subscription_base_url
             )
             if url is not None:
                 return url
             logger.warning("subscription_url_unavailable")
-        return MarzbanClient.extract_vless_link(data)
+        return HiddifyClient.extract_vless_link(data)
 
     def _new_node(self, telegram_id: int) -> str:
-        """Panel name for an account that has none yet. It does not show the
-        Telegram ID, and a retried creation gets the same name."""
-        return pseudonymous_node_username(
-            self.settings.jwt_secret.get_secret_value(), telegram_id
-        )
+        """Fresh panel UUID for an account that has none yet."""
+        del telegram_id
+        return str(uuid.uuid4())
+
+    async def _ensure_node(self, user: dict) -> str:
+        """Reuse a stored UUID, or generate one and persist it before the API call."""
+        node = user.get("node_username")
+        if node:
+            return str(node)
+        node = self._new_node(int(user["telegram_id"]))
+        await self.db.set_node_username(int(user["telegram_id"]), node)
+        return node
 
     async def _disable_and_confirm(self, node_username: str) -> None:
-        result = await self.marzban.disable_user(node_username)
+        result = await self.hiddify.disable_user(node_username)
         if result.get("status") == "disabled":
             return
-        current = await self.marzban.get_user(node_username)
+        current = await self.hiddify.get_user(node_username)
         if current.get("status") != "disabled":
-            raise MarzbanError("Marzban did not confirm disabled status")
+            raise HiddifyError("Hiddify Manager did not confirm disabled status")
 
     # ------------------------------------------------------------------ trial
     async def accept_offer_and_start_trial(self, telegram_id: int) -> TrialResult:
@@ -143,11 +150,11 @@ class ProvisioningService:
                 )
             if self.trial_gate is not None and self.trial_gate():
                 return TrialResult(False, "trials_paused")
-            node = user["node_username"] or self._new_node(telegram_id)
+            node = await self._ensure_node(user)
             expires_at = _ts() + self.settings.trial_seconds
             tier = self.settings.default_tier
             try:
-                created = await self.marzban.create_user(
+                created = await self.hiddify.create_user(
                     node,
                     expire=expires_at,
                     tier=tier,
@@ -155,7 +162,7 @@ class ProvisioningService:
                     data_limit_reset_strategy="no_reset",
                 )
                 link = self._config_from(created)
-            except MarzbanError:
+            except HiddifyError:
                 logger.exception(
                     "trial_provision_failed", extra={"telegram_id": telegram_id}
                 )
@@ -180,7 +187,7 @@ class ProvisioningService:
         user = await self.db.get_user(telegram_id)
         if user is None or user["status"] != "active" or not user["node_username"]:
             raise ProvisioningError("no_active_node")
-        link = self._config_from(await self.marzban.get_user(user["node_username"]))
+        link = self._config_from(await self.hiddify.get_user(user["node_username"]))
         if link != user["config_link"]:
             await self.db.set_config_link(telegram_id, link)
         return link
@@ -195,15 +202,25 @@ class ProvisioningService:
             user = await self.db.get_user(telegram_id)
             if user is None or user["status"] != "active" or not user["node_username"]:
                 raise ProvisioningError("no_active_node")
-            data = await self.marzban.revoke_subscription(user["node_username"])
+            old_uuid = str(user["node_username"])
+            data = await self.hiddify.revoke_subscription(old_uuid)
+            new_uuid = str(data.get("uuid") or "")
+            if not new_uuid or new_uuid == old_uuid:
+                raise HiddifyError("Hiddify Manager did not rotate the user UUID")
             try:
                 link = self._config_from(data)
-            except MarzbanError:
-                link = self._config_from(
-                    await self.marzban.get_user(user["node_username"])
-                )
-            await self.db.set_config_link(telegram_id, link)
-        await audit(self.db, telegram_id, "link_revoked", user["node_username"])
+            except HiddifyError:
+                link = self._config_from(await self.hiddify.get_user(new_uuid))
+            await self.db.set_subscription(
+                telegram_id,
+                status=str(user["status"]),
+                expires_at=int(user["expires_at"] or 0),
+                node_username=new_uuid,
+                config_link=link,
+            )
+            self._traffic_cache.pop(old_uuid, None)
+            self._traffic_cache.pop(new_uuid, None)
+        await audit(self.db, telegram_id, "link_revoked", new_uuid)
         return link
 
     async def traffic_status(self, user: dict[str, Any]) -> TrafficStatus | None:
@@ -218,9 +235,9 @@ class ProvisioningService:
             return cached[1]
         try:
             data = await asyncio.wait_for(
-                self.marzban.get_user(node), timeout=TRAFFIC_TIMEOUT_SECONDS
+                self.hiddify.get_user(node), timeout=TRAFFIC_TIMEOUT_SECONDS
             )
-        except (MarzbanError, TimeoutError):
+        except (HiddifyError, TimeoutError):
             return None
         try:
             used = max(0, int(data.get("used_traffic") or 0))
@@ -260,25 +277,25 @@ class ProvisioningService:
         if user["status"] == "banned":
             raise ProvisioningError("banned")
         tier = tier if tier in TIERS else str(user.get("tier") or DEFAULT_TIER)
-        node = user["node_username"] or self._new_node(telegram_id)
+        node = await self._ensure_node(user)
         base = max(_ts(), int(user["expires_at"] or 0))
         new_expires = base + seconds
         try:
-            await self.marzban.modify_user(
+            await self.hiddify.modify_user(
                 node, expire=new_expires, status="active", note=device_note(tier)
             )
-            data = await self.marzban.get_user(node)
-        except MarzbanNotFound:
-            data = await self.marzban.create_user(node, expire=new_expires, tier=tier)
+            data = await self.hiddify.get_user(node)
+        except HiddifyNotFound:
+            data = await self.hiddify.create_user(node, expire=new_expires, tier=tier)
         link: str | None
         try:
             link = self._config_from(data)
-        except MarzbanError:
+        except HiddifyError:
             link = None
         status = "suspended" if user["status"] == "suspended" else "active"
         if status == "suspended":
             # Keep a soft-suspended node disabled until an admin lifts it.
-            await self.marzban.disable_user(node)
+            await self.hiddify.disable_user(node)
         await self.db.set_subscription(
             telegram_id,
             status=status,
@@ -295,7 +312,7 @@ class ProvisioningService:
         async with self._lock(telegram_id):
             try:
                 expires = await self._extend(telegram_id, days * 86400)
-            except (ProvisioningError, MarzbanError):
+            except (ProvisioningError, HiddifyError):
                 logger.warning(
                     "bonus_skipped",
                     extra={"telegram_id": telegram_id, "reason": reason},
@@ -310,7 +327,7 @@ class ProvisioningService:
         """Apply an absolute expiry target; safe to repeat after a crash.
 
         This method never adds time. Payment and referral
-        retry jobs persist the target before calling Marzban, then repeat this
+        retry jobs persist the target before calling the panel, then repeat this
         exact target until both the panel and the local DB agree.
         Caller must hold the user's lock.
         """
@@ -322,14 +339,14 @@ class ProvisioningService:
         selected_tier = tier if tier in TIERS else str(user.get("tier") or DEFAULT_TIER)
         if selected_tier not in TIERS:
             selected_tier = DEFAULT_TIER
-        node = user["node_username"] or self._new_node(telegram_id)
+        node = await self._ensure_node(user)
         # A paid period sets the tier's quota; bonus days keep the current one.
         limit: int | None = None
         strategy: str | None = None
         if tier in TIERS:
             limit, strategy = traffic_policy(selected_tier)
         try:
-            await self.marzban.modify_user(
+            await self.hiddify.modify_user(
                 node,
                 expire=target_expires_at,
                 status=("disabled" if user["status"] == "suspended" else "active"),
@@ -337,17 +354,17 @@ class ProvisioningService:
                 data_limit=limit,
                 data_limit_reset_strategy=strategy,
             )
-            data = await self.marzban.get_user(node)
-        except MarzbanNotFound:
-            data = await self.marzban.create_user(
+            data = await self.hiddify.get_user(node)
+        except HiddifyNotFound:
+            data = await self.hiddify.create_user(
                 node, expire=target_expires_at, tier=selected_tier
             )
             if user["status"] == "suspended":
                 await self._disable_and_confirm(node)
-                data = await self.marzban.get_user(node)
+                data = await self.hiddify.get_user(node)
         try:
             link = self._config_from(data)
-        except MarzbanError:
+        except HiddifyError:
             link = None
         status = "suspended" if user["status"] == "suspended" else "active"
         await self.db.set_subscription(
@@ -420,7 +437,7 @@ class ProvisioningService:
                     str(payment.get("tier") or ""),
                 )
                 await self.db.complete_payment_activation(payment_id)
-            except (ProvisioningError, MarzbanError) as exc:
+            except (ProvisioningError, HiddifyError) as exc:
                 await self.db.record_payment_activation_error(
                     payment_id, type(exc).__name__
                 )
@@ -478,7 +495,7 @@ class ProvisioningService:
             target = max(_ts(), current - period)
             try:
                 await self._apply_expiration_target(telegram_id, target)
-            except (ProvisioningError, MarzbanError):
+            except (ProvisioningError, HiddifyError):
                 logger.exception(
                     "refund_revoke_failed", extra={"payment_id": payment_id}
                 )
@@ -587,7 +604,7 @@ class ProvisioningService:
                     days=days,
                 )
                 return expires
-            except (ProvisioningError, MarzbanError) as exc:
+            except (ProvisioningError, HiddifyError) as exc:
                 await self.db.record_referral_bonus_error(
                     invitee_id, role, type(exc).__name__
                 )
@@ -630,8 +647,8 @@ class ProvisioningService:
             if fresh["expires_at"] and int(fresh["expires_at"]) > _ts():
                 return
             if fresh["node_username"]:
-                with contextlib.suppress(MarzbanNotFound):
-                    await self.marzban.disable_user(fresh["node_username"])
+                with contextlib.suppress(HiddifyNotFound):
+                    await self.hiddify.disable_user(fresh["node_username"])
             await self.db.set_user_status(telegram_id, "expired")
         await audit(self.db, telegram_id, "expired", fresh["node_username"])
         await self.notifier.notify(
@@ -686,9 +703,9 @@ class ProvisioningService:
             if node:
                 try:
                     await self._disable_and_confirm(node)
-                except MarzbanNotFound:
+                except HiddifyNotFound:
                     pass
-                except MarzbanError as exc:
+                except HiddifyError as exc:
                     await self.db.record_pending_ban_error(
                         telegram_id, type(exc).__name__
                     )
@@ -697,7 +714,7 @@ class ProvisioningService:
                         await self.notifier.telegram(
                             self.settings.admin_telegram_id,
                             f"⚠️ AUTOBAN <code>{telegram_id}</code> не подтверждён "
-                            f"Marzban: узел <code>{node}</code> пока не отключён. "
+                            f"Hiddify: узел <code>{node}</code> пока не отключён. "
                             "Задача сохранена, бот будет повторять попытки.",
                         )
                     return False
@@ -757,7 +774,7 @@ class ProvisioningService:
                 "TRAFFIC_ANOMALY",
                 json.dumps({"gb_per_day": round(gb, 2)}),
             )
-            await self.marzban.disable_user(node_username)
+            await self.hiddify.disable_user(node_username)
             await self.db.set_user_status(telegram_id, "suspended")
         SOFT_SUSPENSIONS.inc()
         await audit(
@@ -789,7 +806,7 @@ class ProvisioningService:
             if int(user["expires_at"] or 0) <= _ts():
                 await self.db.set_user_status(telegram_id, "expired")
                 return True
-            await self.marzban.enable_user(user["node_username"])
+            await self.hiddify.enable_user(user["node_username"])
             await self.db.set_user_status(telegram_id, "active")
         await audit(self.db, telegram_id, "unsuspend", user["node_username"])
         await self.notifier.telegram(telegram_id, "✅ Подключение восстановлено.")

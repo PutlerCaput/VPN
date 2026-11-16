@@ -17,7 +17,7 @@ from config import Settings, format_gb
 from db.database import UNPAID_ORDER_TTL_SECONDS, Database
 from services.awg import AwgService, combined_usage
 from services.health import ServiceHealth
-from services.marzban import MarzbanClient
+from services.hiddify import HiddifyClient
 from services.metrics import ACTIVE_USERS, JOB_FAILURES
 from services.notifier import Notifier
 from services.payment_reconciliation import PaymentReconciler
@@ -48,7 +48,7 @@ GB = 1024**3
 ONLINE_WINDOW_SECONDS = 10 * 60
 SUBSCRIPTION_REMINDER_LEAD_SECONDS = 3 * 24 * 60 * 60
 SUBSCRIPTION_REMINDER_INTERVAL_MINUTES = 15
-# Marzban already stops an expired node at its expire time; this job only
+# The panel already stops an expired node at its expire time; this job only
 # brings the bot's own status and the user notice in line with it.
 EXPIRY_CHECK_INTERVAL_MINUTES = 15
 QUOTA_WARNING_PERCENT = 80
@@ -57,7 +57,7 @@ FLAG_RE = re.compile(r"[A-Z_]{3,}")
 
 
 def extract_flags(note: str | None) -> set[str]:
-    """Abuse flags are written into the Marzban user note by an IDS or an admin."""
+    """Abuse flags are written into the panel user comment by an IDS or an admin."""
     if not note:
         return set()
     return set(FLAG_RE.findall(note)) & SEVERE_KINDS
@@ -83,12 +83,12 @@ class AnomalyMonitor:
     def __init__(
         self,
         db: Database,
-        marzban: MarzbanClient,
+        hiddify: HiddifyClient,
         provisioning: ProvisioningService,
         settings: Settings,
     ) -> None:
         self.db = db
-        self.marzban = marzban
+        self.hiddify = hiddify
         self.provisioning = provisioning
         self.settings = settings
         self._signals: OrderedDict[int, dict[str, float]] = OrderedDict()
@@ -335,7 +335,7 @@ class AnomalyMonitor:
         return delta
 
     async def poll(self) -> None:
-        users = await self.marzban.get_users_usage()
+        users = await self.hiddify.get_users_usage()
         active = 0
         server_delta = 0
         for panel_user in users:
@@ -393,7 +393,7 @@ class Jobs:
             try:
                 await self.provisioning.expire_user(user)
             except Exception:
-                # Any failure, not only Marzban's, must not hold back the users
+                # Any failure, not only the panel's, must not hold back the users
                 # after this one: the next run retries it.
                 logger.exception(
                     "expire_failed", extra={"telegram_id": user["telegram_id"]}

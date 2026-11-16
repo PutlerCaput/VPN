@@ -35,7 +35,7 @@ if [[ ! -s secrets/vapid_private.txt ]]; then
 fi
 
 [[ -s secrets/bot_token.txt ]] || write_secret bot_token "$(ask 'Telegram bot token')"
-[[ -s secrets/marzban_password.txt ]] || write_secret marzban_password "$(ask 'Marzban admin password')"
+[[ -s secrets/hiddify_api_key.txt ]] || write_secret hiddify_api_key "$(ask 'Hiddify Manager API key (admin UUID)')"
 [[ -s secrets/crypto_pay_token.txt ]] || write_secret crypto_pay_token "$(ask 'Crypto Pay API token (empty to disable USDT)')"
 [[ -s secrets/sbp_provider_token.txt ]] || write_secret sbp_provider_token "$(ask 'SBP aggregator HMAC secret (empty unless robokassa/payanyway)')"
 [[ -s secrets/yookassa_secret_key.txt ]] || write_secret yookassa_secret_key "$(ask 'YooKassa secret key (empty if not using YooKassa)')"

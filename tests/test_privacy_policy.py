@@ -74,19 +74,19 @@ async def test_review_mode_does_not_disable_high_confidence_user(services: Any) 
     node = (await services.db.get_user(987655))["node_username"]
     assert not await services.monitor.handle_report(node, {"CYBERCRIME"}, {})
     assert (await services.db.get_user(987655))["status"] == "active"
-    assert services.marzban.users[node]["status"] == "active"
+    assert services.hiddify.users[node]["status"] == "active"
     assert await services.db.list_anomalies(987655) == []
 
 
 async def test_unconfirmed_ban_does_not_create_completed_evidence(
     services: Any,
 ) -> None:
-    from services.marzban import MarzbanError
+    from services.hiddify import HiddifyError
 
     await services.db.create_user(987656, "ordinary", None)
     await services.provisioning.accept_offer_and_start_trial(987656)
     node = (await services.db.get_user(987656))["node_username"]
-    services.marzban.fail_disable_once = MarzbanError("unavailable")
+    services.hiddify.fail_disable_once = HiddifyError("unavailable")
     assert not await services.provisioning.autoban(987656, node, "flags", {})
     assert await services.db.list_anomalies(987656) == []
     assert await services.db.get_pending_ban(987656) is not None
@@ -143,6 +143,6 @@ async def test_signal_memory_expires_without_persisting(
     assert not await services.monitor.handle_report("u987657", {"MALICIOUS_PROBE"}, {})
     assert await services.db.list_anomalies(987657) == []
     fresh = AnomalyMonitor(
-        services.db, services.marzban, services.provisioning, services.settings
+        services.db, services.hiddify, services.provisioning, services.settings
     )
     assert await fresh._recent_signals(987657) == set()

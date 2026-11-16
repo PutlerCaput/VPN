@@ -49,11 +49,11 @@ was run for you.
        cp -rp $DEST/bot/secrets/. <folder>/secrets/
        cp $DEST/bot/bot.db <folder>/data/bot.db && chown 1000:1000 <folder>/data/bot.db
      then start it: docker compose up -d   (docs/FINISH_RUNBOOK.md, step 2)
-  2. Marzban, stopped (marzban down):
-       cp $DEST/marzban/db.sqlite3 /var/lib/marzban/db.sqlite3
-       cp $DEST/marzban/.env $DEST/marzban/docker-compose.yml $DEST/marzban/Caddyfile /opt/marzban/
-       cp $DEST/marzban/xray_config.json /var/lib/marzban/
-     then marzban up
+  2. Hiddify Manager, stopped:
+       cp $DEST/hiddify/db.sqlite3 /opt/hiddify-manager/hiddify.db
+       cp $DEST/hiddify/.env $DEST/hiddify/docker-compose.yml $DEST/hiddify/Caddyfile /opt/hiddify-manager/
+       cp $DEST/hiddify/xray_config.json /opt/hiddify-manager/
+     then start the panel again
   3. Check: bash scripts/update_bot.sh --doctor
 Delete $DEST afterwards: it holds the keys in the clear.
 EOF

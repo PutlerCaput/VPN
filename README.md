@@ -1,13 +1,13 @@
 # Узел: Telegram-бот, PWA и Mini App для аренды технических узлов
 
-Код сервиса аренды персональных узлов VLESS + XTLS-Reality (через панель Marzban) для защищённого подключения в публичных сетях. Этот README описывает возможности кода, а не подтверждённое состояние production. По последнему выводу владельца `SBP_PROVIDER=manual`, `YOOKASSA_CONFIGURED=false`; Crypto Pay настроен, но реальная оплата отдельно не проверялась. ЮKassa, Cloudflare Tunnel и платёжный relay ещё не внедрены на серверах.
+Код сервиса аренды персональных узлов VLESS + XTLS-Reality (через панель Hiddify Manager) для защищённого подключения в публичных сетях. Этот README описывает возможности кода, а не подтверждённое состояние production. По последнему выводу владельца `SBP_PROVIDER=manual`, `YOOKASSA_CONFIGURED=false`; Crypto Pay настроен, но реальная оплата отдельно не проверялась. ЮKassa, Cloudflare Tunnel и платёжный relay ещё не внедрены на серверах.
 
 ## Состав
 
 | Компонент | Где | Что делает |
 |---|---|---|
 | Telegram-бот | `main.py`, `handlers/`, `keyboards/`, `middlewares/` | оферта, пробный период, оплата, рефералы, поддержка, админ-команды |
-| Сервисы | `services/` | Marzban, ЮKassa, Crypto Pay, СБП, биллинг, провижининг, автобан, планировщик, Web Push |
+| Сервисы | `services/` | Hiddify Manager, ЮKassa, Crypto Pay, СБП, биллинг, провижининг, автобан, планировщик, Web Push |
 | HTTP | `webhook_server.py`, `api/` | вебхуки ЮKassa / Crypto Pay / СБП, `/internal/abuse`, `/healthz`, `/metrics`, REST API `/api/v1` |
 | PWA | `pwa/` | веб-приложение с входом через Telegram Login Widget, оплатой и push-уведомлениями |
 | Mini App | `tma/` | бесплатное приложение внутри Telegram: статус, конфигурация, QR, рефералы; оплата — переход в бота |
@@ -23,7 +23,7 @@ PWA / Mini App ──► Caddy ──► aiohttp :8080 ──► SQLite ──�
 Crypto Pay ──► webhook ──────────────────────────────────┤
 ЮKassa ──► Cloudflare Tunnel ──► RU relay ──► DE bot ────┘  [план, не внедрён]
 DE bot ──► WireGuard ──► RU CONNECT relay ──► api.yookassa.ru [план, не внедрён]
-IDS на узлах ──► /internal/abuse; bot ──► Marzban API ──► VLESS Reality
+IDS на узлах ──► /internal/abuse; bot ──► Hiddify Manager API ──► VLESS Reality
 ```
 
 Hotfix пустой кнопки «Оплата» владелец установил 3 ноября
@@ -85,13 +85,13 @@ Telegram Stars внутри бота ([правила и устройство](d
 QR для AmneziaVPN, общий лимит трафика с VLESS, установка `scripts/install_awg.sh`.
 
 - Один REST API обслуживает и PWA, и Mini App: `POST /api/v1/auth/telegram` принимает данные Login Widget (PWA) или `{"initData": ...}` (Mini App).
-- Подтверждение платежа идемпотентно: `pending → paid` переводится одним `UPDATE ... WHERE status='pending'`. Отдельная очередь `payment_activations` хранит фиксированную целевую дату окончания и повторяет выдачу доступа при сбое Marzban; повтор не прибавляет оплаченный срок второй раз.
+- Подтверждение платежа идемпотентно: `pending → paid` переводится одним `UPDATE ... WHERE status='pending'`. Отдельная очередь `payment_activations` хранит фиксированную целевую дату окончания и повторяет выдачу доступа при сбое Hiddify Manager; повтор не прибавляет оплаченный срок второй раз.
 - Реферальные бонусы учитываются отдельно для пригласившего и приглашённого. Для каждой стороны сохраняется своя целевая дата, а незавершённые начисления повторяются планировщиком.
-- AUTOBAN считается завершённым только после подтверждённого отключения пользователя в Marzban. При ошибке задача остаётся в `pending_bans` и автоматически повторяется; локальный статус `banned` не выставляется заранее.
+- AUTOBAN считается завершённым только после подтверждённого отключения пользователя в Hiddify Manager. При ошибке задача остаётся в `pending_bans` и автоматически повторяется; локальный статус `banned` не выставляется заранее.
 
 ### Важное примечание при обновлении старой базы
 
-При первом запуске новой версии миграция создаёт очереди повторных операций. Уже существующие платежи со статусом `paid` и старые записи `referral_bonuses` помечаются как исторические завершённые операции, чтобы не выдать повторно уже полученные дни. Это **не доказывает**, что все старые операции действительно были выполнены в Marzban: до обновления нужно отдельно сверить платежи, срок подписки в локальной БД и срок пользователя в панели. Неуспешные старые платежи/бонусы требуют ручной сверки; новая очередь автоматически восстанавливает только операции, начатые после миграции или явно заведённые в новые job-таблицы.
+При первом запуске новой версии миграция создаёт очереди повторных операций. Уже существующие платежи со статусом `paid` и старые записи `referral_bonuses` помечаются как исторические завершённые операции, чтобы не выдать повторно уже полученные дни. Это **не доказывает**, что все старые операции действительно были выполнены в Hiddify Manager: до обновления нужно отдельно сверить платежи, срок подписки в локальной БД и срок пользователя в панели. Неуспешные старые платежи/бонусы требуют ручной сверки; новая очередь автоматически восстанавливает только операции, начатые после миграции или явно заведённые в новые job-таблицы.
 - Подпись Crypto Pay проверяется по сырым байтам до разбора JSON, сумма и актив сверяются с записью платежа.
 - Уведомления ЮKassa не подписаны, поэтому бот берёт из них только id платежа и перечитывает платёж через API ЮKassa с ключом магазина. Узел продлевается, только если API подтвердил `succeeded`, рубли, нашу метку платежа и полную сумму.
 - База шифруется SQLCipher ключом из Docker-секрета `db_key`; без ключа файл не читается.
@@ -119,7 +119,7 @@ QR для AmneziaVPN, общий лимит трафика с VLESS, устан�
 
 ```bash
 make install          # venv + зависимости + pre-commit
-cp .env.example .env  # заполнить BOT_TOKEN, BOT_USERNAME, ADMIN_TELEGRAM_ID, MARZBAN_*, JWT_SECRET
+cp .env.example .env  # заполнить BOT_TOKEN, BOT_USERNAME, ADMIN_TELEGRAM_ID, HIDDIFY_*, JWT_SECRET
 make check            # ruff, mypy, bandit, pip-audit, pytest
 make run
 cd pwa && cp .env.example .env && npm ci && npm run dev   # http://localhost:5173
@@ -132,7 +132,7 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 
 | Сервер | Адрес | Роль по архиву |
 |---|---|---|
-| Германия | `89.125.210.172` | Ubuntu 24.04; Marzban v0.8.4; управляемый Xray; бот `node-rental-bot-1`; отдельный контейнер AmneziaWG |
+| Германия | `89.125.210.172` | Ubuntu 24.04; Hiddify Manager v0.8.4; управляемый Xray; бот `node-rental-bot-1`; отдельный контейнер AmneziaWG |
 | Россия | `45.138.157.65` | Ubuntu 24.04; TCP DNAT на немецкий Xray; Nginx слушает TCP/80 |
 
 Цепочка VLESS, описанная в архиве:
@@ -144,14 +144,14 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 Российский сервер: DNAT TCP/443, TCP/2087, TCP/8443
         │ 89.125.210.172:2096
         ▼
-Германия: Marzban-managed Xray, VLESS REALITY
+Германия: Hiddify Manager-managed Xray, VLESS REALITY
         ▼
 Интернет
 ```
 
 - На Германии VLESS REALITY слушает TCP `2096`; вход на этот порт в UFW разрешён только с `45.138.157.65`.
 - На российском сервере проверены правила DNAT `443`, `2087` и `8443` на `89.125.210.172:2096`, MASQUERADE и TCP-доступность немецкого порта.
-- Caddy на Германии слушает `8443` и проксирует `panel.cyberdefency.com` и `sub.cyberdefency.com` на Marzban `127.0.0.1:8000`.
+- Caddy на Германии слушает `8443` и проксирует `panel.cyberdefency.com` и `sub.cyberdefency.com` на Hiddify Manager `127.0.0.1:8000`.
 - AmneziaWG работает отдельно в контейнере `amnezia-awg2`, UDP `49484`. Это не часть VLESS-маршрута.
 - Архив сообщает о проверке TCP-порта с relay и HTTP-ответов панели/подписки. Актуальное состояние серверов и подключение клиентского устройства через VLESS проверяются отдельно.
 - `docker-compose.yml` и `Caddyfile` — шаблоны приложения, а не копии конфигурации действующих серверов. Не запускайте весь compose-стек поверх существующих служб без сверки портов и reverse proxy.
@@ -159,7 +159,7 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 ## Политика секретов
 
 - В репозитории и в bootstrap-скриптах только плейсхолдеры. Реальные значения лежат в `./secrets/*.txt` (Docker Secrets, `/run/secrets/<name>`) или в переменных окружения.
-- Бот не стартует без обязательных секретов (`bot_token`, `marzban_password`, `jwt_secret` не короче 64 символов, `sbp_provider_token` при агрегаторе, `telegram_webhook_secret` в режиме webhook). Ошибка называет только поле, без значения и без трейсбека.
+- Бот не стартует без обязательных секретов (`bot_token`, `hiddify_api_key`, `jwt_secret` не короче 64 символов, `sbp_provider_token` при агрегаторе, `telegram_webhook_secret` в режиме webhook). Ошибка называет только поле, без значения и без трейсбека.
 - Необязательные функции без секрета выключаются с предупреждением в логе: USDT (`crypto_pay_token`), Web Push (`vapid_private`), отчёты IDS (`abuse_report_token`).
 - `scripts/secret_scan.sh` ищет литеральные значения после `password=`, `token=`, `secret=`, `key=` (разрешены пустые значения, `${VAR}`, пути к файлам и ссылки в коде). Скан запускается в CI, в pre-commit и в `make security` (`SECRET LEAK DETECTED` и выход с кодом 1). В выводе только файл и строка, без найденного значения.
 - Секреты не логируются: настройки хранятся как `SecretStr`, логи авторизации содержат только `{event, reason, ip_hash}`.
@@ -171,7 +171,7 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 - [ ] Перед изменением firewall сохранены действующие DNAT/MASQUERADE и правила доступа к Xray. Старый скрипт сброса UFW для другой топологии удалён.
 - [ ] Домен, A-запись на VPS (например `node.example.com`). Порты 80 и 443 открыты.
 - [ ] Учтите, что Docker публикует порты в обход UFW. Поэтому порт бота привязан к `127.0.0.1`, а наружу Docker открывает только 80 и 443 у Caddy.
-- [ ] Отдельные серверы узлов с установленным Marzban и inbound `VLESS TCP REALITY` (flow `xtls-rprx-vision`). Панель Marzban доступна боту по приватной сети или через HTTPS с ограничением по IP.
+- [ ] Отдельные серверы узлов с установленным Hiddify Manager и inbound `VLESS TCP REALITY` (flow `xtls-rprx-vision`). Панель Hiddify Manager доступна боту по приватной сети или через HTTPS с ограничением по IP.
 - [ ] Бот создан в @BotFather; `/setdomain` → ваш домен (нужно для Login Widget); `/newapp` или кнопка меню → `https://<домен>/tma/`.
 - [ ] Статус самозанятого оформлен в «Мой налог». ФИО и ИНН в оферте не публикуются: раздел 8.4 отсылает к чеку и поддержке. В каждом чеке «Мой налог» они всё равно есть (так требует 422-ФЗ), поэтому каждый плательщик их увидит; на запрос в поддержку о реквизитах нужно отвечать.
 - [ ] Магазин в ЮKassa подключён как самозанятый, ЮKassa привязана к «Мой налог» (в приложении «Мой налог» → «Партнёры» → ЮKassa), выплаты настроены на вашу карту или счёт физлица (например, в Совкомбанке). `YOOKASSA_RECEIPT_MODE=self_employed`.
@@ -179,13 +179,13 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 - [ ] Юрист проверил оферту и схему приёма платежей (см. раздел «Важно» ниже).
 
 ### Этап 1. Секреты
-- [ ] `make secrets` создаёт `./secrets/*.txt` (права 600, владелец uid 1000, от имени которого работает бот): `bot_token`, `crypto_pay_token`, `marzban_password`, `jwt_secret` (64 hex), `db_key` (64 hex, ключ шифрования базы), `vapid_private`, `sbp_provider_token`, `yookassa_secret_key`, `abuse_report_token`. Если создаёте файлы вручную, выполните `sudo chown 1000:1000 secrets/*.txt`.
+- [ ] `make secrets` создаёт `./secrets/*.txt` (права 600, владелец uid 1000, от имени которого работает бот): `bot_token`, `crypto_pay_token`, `hiddify_api_key`, `jwt_secret` (64 hex), `db_key` (64 hex, ключ шифрования базы), `vapid_private`, `sbp_provider_token`, `yookassa_secret_key`, `abuse_report_token`. Если создаёте файлы вручную, выполните `sudo chown 1000:1000 secrets/*.txt`.
 - [ ] Копию `db_key` храните офлайн вместе с ключом GPG для бэкапов: без него база и её резервные копии не читаются.
 - [ ] Скопируйте выведенный `VAPID_PUBLIC` в `.env`.
 - [ ] Каталог `secrets/` не попадает в git (`.gitignore`), резервная копия — в менеджере паролей.
 
 ### Этап 2. `.env`
-- [ ] `cp .env.example .env`, заполнить: `BOT_USERNAME`, `ADMIN_TELEGRAM_ID`, `DOMAIN`, `ACME_EMAIL`, `PUBLIC_BASE_URL`, `TELEGRAM_BOT_DOMAIN`, `MARZBAN_URL`, `MARZBAN_USERNAME`, `MARZBAN_INBOUND_TAG`, `SBP_PROVIDER=yookassa`, `YOOKASSA_SHOP_ID`, `YOOKASSA_RECEIPT_MODE`, `VAPID_PUBLIC`, `VAPID_CONTACT`.
+- [ ] `cp .env.example .env`, заполнить: `BOT_USERNAME`, `ADMIN_TELEGRAM_ID`, `DOMAIN`, `ACME_EMAIL`, `PUBLIC_BASE_URL`, `TELEGRAM_BOT_DOMAIN`, `HIDDIFY_URL`, `HIDDIFY_ADMIN_PROXY_PATH`, `HIDDIFY_USER_PROXY_PATH`, `SBP_PROVIDER=yookassa`, `YOOKASSA_SHOP_ID`, `YOOKASSA_RECEIPT_MODE`, `VAPID_PUBLIC`, `VAPID_CONTACT`.
 - [ ] Секреты в `.env` оставить пустыми: в контейнере они читаются из `/run/secrets/` и имеют приоритет над переменными окружения.
 - [ ] Для продакшена `CRYPTO_PAY_TESTNET=false`.
 
@@ -197,7 +197,7 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 ### Этап 4. Запуск
 - [ ] `docker compose build && docker compose up -d`
 - [ ] `docker compose ps` — `bot` в состоянии `healthy`, `web` в состоянии `Up`; `curl https://<домен>/healthz` → `{"status":"ok"}`.
-- [ ] `docker compose logs bot` — строка `started`, ошибок авторизации Marzban нет.
+- [ ] `docker compose logs bot` — строка `started`, ошибок авторизации Hiddify Manager нет.
 - [ ] Если в логах повторяется `telegram_unreachable`, бот не достучался до api.telegram.org и сам повторяет попытки (пауза растёт до 60 с). Проверьте DNS и исходящий трафик сервера. Если Telegram отклонил токен, бот завершится с кодом 3 и сообщением `Telegram rejected BOT_TOKEN`.
 - [ ] Права на `./data` и `./logs`: `chown -R 1000:1000 data logs`.
 
@@ -208,7 +208,7 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 
 ### Этап 6. Пробный период
 - [ ] Новый аккаунт → `/start` → текст оферты → «✅ Принимаю».
-- [ ] Пришли ссылка конфигурации в `<code>` и QR-код; в Marzban создан пользователь `u<telegram_id>` со сроком 24 часа.
+- [ ] Пришли ссылка конфигурации в `<code>` и QR-код; в Hiddify Manager создан пользователь `u<telegram_id>` со сроком 24 часа.
 - [ ] Повторный `/start` не выдаёт второй пробный период.
 - [ ] Подключение по ссылке работает в приложениях из меню «📱 Подключить устройство» (проверить на устройствах): v2rayNG и NekoBox (Android), Karing и OneXray (iPhone), v2rayN (Windows и Linux), OneXray и v2rayN (macOS). Почему именно они и как проверить, что они ещё доступны: `docs/CONNECT_APPS.md`. После выбора приложения бот присылает ссылку (нажатие или кнопка «📋 Скопировать ссылку» копирует её) и короткую инструкцию. Российские сайты могут идти мимо сервера (раздельное туннелирование): после `scripts/ru_direct.sh --apply` v2rayNG получает правило с подпиской сам, для остальных приложений кнопка «🇷🇺 Российские сайты напрямую» показывает шаги (`docs/CONNECT_APPS.md`).
 
@@ -216,8 +216,8 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 - [ ] `ENABLED_TIERS` в `.env` (по умолчанию `basic,complete,prime`). Тариф можно снять с продажи, не трогая код: бот, приложения и `/api/v1/tariffs` покажут только включённые.
 - [ ] Цены задаёт `config.py` (`TIER_PRICES_RUB`, `TIER_PRICES_USDT`), бейдж «Выгода N%» считается автоматически относительно оплаты по месяцам. Mini App и PWA берут тарифы из API, правка цен в одном месте.
 - [ ] Покупка в боте: «💳 Оплата» → способ → тариф → срок. Тариф последней оплаты действует на весь остаток срока; доплата при смене тарифа не считается (п. 3.3 оферты).
-- [ ] В Marzban при создании пользователя всегда `flow: xtls-rprx-vision`; в поле `note` пишется `tier=<тариф> devices=<лимит>`, чтобы администратор видел лимит в панели.
-- [ ] **Лимит устройств (5 / 10 / 15) технически не применяется.** В API Marzban нет поля `ip_limit` (поле было бы молча проигнорировано), а считать одновременные IP значило бы хранить адреса клиентов, чего сервис не делает. Лимит — условие оферты (п. 3.4, 5.4). Хотите жёсткое ограничение — понадобится форк панели, и это решение о политике журналирования.
+- [ ] В Hiddify Manager при создании пользователя всегда `flow: xtls-rprx-vision`; в поле `note` пишется `tier=<тариф> devices=<лимит>`, чтобы администратор видел лимит в панели.
+- [ ] **Лимит устройств (5 / 10 / 15) технически не применяется.** В API Hiddify Manager нет поля `ip_limit` (поле было бы молча проигнорировано), а считать одновременные IP значило бы хранить адреса клиентов, чего сервис не делает. Лимит — условие оферты (п. 3.4, 5.4). Хотите жёсткое ограничение — понадобится форк панели, и это решение о политике журналирования.
 - [ ] Приоритетная поддержка (Complete, Prime): обращения от активных пользователей этих тарифов приходят администратору с пометкой «⭐ Приоритет».
 - [ ] В продаже только то, что построено. Выделенный IP, маршрутизация через два узла и 1 ТБ облачного хранилища в тарифы не включены и в рекламе не обещаются. Добавите функцию — добавьте её в `TIERS[...].features` и в п. 3.2 оферты.
 
@@ -245,8 +245,8 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 
 ### Этап 10. AUTOBAN
 - [ ] Автобан срабатывает по оценке уверенности сигналов IDS за последние 24 часа: `CYBERCRIME` 100, `DDOS_ATTACK` 80, `PORT_SCANNING` и `NETSCAN_ABUSE` по 60, `MALICIOUS_PROBE` 40, порог 90. Один сигнал сканирования только записывается в `anomalies` (`IDS_SIGNAL`) и приходит админу с подсказкой `/ban <id>`; сканирование плюс зондирование или подтверждённое `CYBERCRIME` блокируют автоматически. Попытка открыть заблокированный сайт сигналом не считается.
-- [ ] В Marzban добавьте в заметку (note) тестового пользователя `PORT_SCANNING MALICIOUS_PROBE` и дождитесь опроса (до 5 минут) либо на хосте бота выполните `curl -X POST http://127.0.0.1:8080/internal/abuse -H "X-Abuse-Token: $(cat secrets/abuse_report_token.txt)" -H 'Content-Type: application/json' -d '{"node_username":"u<id>","kinds":["PORT_SCANNING","MALICIOUS_PROBE"]}'`. Снаружи `/internal/*` отдаёт 404.
-- [ ] Пользователь отключён в Marzban, `status='banned'`, запись `AUTOBAN` в `anomalies`, пришёл английский текст блокировки и push.
+- [ ] В Hiddify Manager добавьте в заметку (note) тестового пользователя `PORT_SCANNING MALICIOUS_PROBE` и дождитесь опроса (до 5 минут) либо на хосте бота выполните `curl -X POST http://127.0.0.1:8080/internal/abuse -H "X-Abuse-Token: $(cat secrets/abuse_report_token.txt)" -H 'Content-Type: application/json' -d '{"node_username":"u<id>","kinds":["PORT_SCANNING","MALICIOUS_PROBE"]}'`. Снаружи `/internal/*` отдаёт 404.
+- [ ] Пользователь отключён в Hiddify Manager, `status='banned'`, запись `AUTOBAN` в `anomalies`, пришёл английский текст блокировки и push.
 - [ ] Заблокированному доступны только `/start` и `/legal`; API отвечает 403 `{"error":"banned"}` везде, кроме `/me` и `/auth/logout`.
 - [ ] Порог мягкой приостановки 800 ГБ/сутки, автобана — 2000 ГБ/сутки; снятие приостановки — `/unsuspend`.
 
@@ -257,11 +257,11 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 - [ ] Устаревший refresh-токен после ротации → 401, все сессии пользователя отозваны.
 - [ ] `docker inspect` — `ReadonlyRootfs: true`, `no-new-privileges`, `CapDrop: ALL`, пользователь 1000.
 - [ ] `make security` — bandit и pip-audit без критичных находок.
-- [ ] Панель Marzban не доступна из интернета без ограничения по IP.
+- [ ] Панель Hiddify Manager не доступна из интернета без ограничения по IP.
 
 ### Этап 12. Мониторинг
-- [ ] Prometheus собирает `bot:8080/metrics`: `payments_paid_total`, `webhook_rejected_total`, `autobans_total`, `marzban_errors_total`, `scheduler_job_failures_total`, `api_request_seconds`.
-- [ ] Алерты: рост `marzban_errors_total`, `webhook_rejected_total`, любые `scheduler_job_failures_total`, `/healthz` ≠ 200.
+- [ ] Prometheus собирает `bot:8080/metrics`: `payments_paid_total`, `webhook_rejected_total`, `autobans_total`, `hiddify_errors_total`, `scheduler_job_failures_total`, `api_request_seconds`.
+- [ ] Алерты: рост `hiddify_errors_total`, `webhook_rejected_total`, любые `scheduler_job_failures_total`, `/healthz` ≠ 200.
 - [ ] Логи — JSON в `./logs/bot.log` (ротация 10 МБ × 5) и в `docker logs`; у каждого API-запроса есть `request_id`.
 
 ### Этап 13. Шифрование базы и резервные копии
@@ -273,19 +273,19 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 - [ ] cron: `0 4 * * * /opt/node-bot/scripts/backup.sh >> /opt/node-bot/logs/backup.log 2>&1`.
 - [ ] Бэкапы копируются за пределы сервера; раз в месяц пробное восстановление: `gpg -d bot-....db.gpg > data/restore.db`, затем `docker compose exec -T bot python scripts/db_tool.py check /app/data/restore.db`. Для восстановления нужны и GPG-ключ, и `db_key`.
 
-### Этап 13а. Фильтрация на узлах Marzban
+### Этап 13а. Фильтрация на узлах Hiddify Manager
 - [ ] Скопируйте `deploy/xray/` на сервер узла, например в `/opt/node-rental/deploy/xray/`.
-- [ ] В `/opt/marzban/.env` задайте `XRAY_ASSETS_PATH=/var/lib/marzban/assets`.
+- [ ] В `/opt/hiddify-manager/.env` задайте `XRAY_ASSETS_PATH=/opt/hiddify-manager/assets`.
 - [ ] `sudo ./update_geodata.sh` скачивает `geosite.dat`, `geoip.dat`, `security.dat`, `security-ip.dat` (сборка Chocolate4U/Iran-v2ray-rules, в ней все категории v2fly плюс списки malware и phishing) и сверяет SHA-256.
 - [ ] Свои домены (например, зарубежные казино: в `category-betting-ru` всего 13 записей) добавьте в `custom-blocklist.txt`.
 - [ ] `python3 update_registry.py` (нужен `git`; скачивает около 85 МБ, в `registry/` остаётся около 38 МБ). Без этого файла реестра `apply_routing.py` не запустится.
-- [ ] `sudo python3 apply_routing.py /var/lib/marzban/xray_config.json --assets-dir /var/lib/marzban/assets` создаёт **кандидата** `xray_config.json.candidate.json`. Он ничего не включает и Marzban не перезапускает: `marzban restart` сам по себе фильтр не включит. Правила ставятся первыми, повторный запуск их не дублирует; существующего кандидата скрипт не перезаписывает.
-- [ ] Проверка кандидата ядром Xray: `docker exec -e XRAY_LOCATION_ASSET=/var/lib/marzban/assets marzban-marzban-1 xray run -test -config /var/lib/marzban/xray_config.json.candidate.json`. Включение (замена конфига с резервной копией и откатом) — отдельный шаг: `docs/SECURITY_POLICY.md`, «Обновление и подготовка к включению».
-- [ ] Фильтр установлен, если его правила есть в рабочем конфиге: `grep -oE '"ruleTag": *"[a-z-]+"' /var/lib/marzban/xray_config.json` показывает `aup-malicious-domains`, `aup-ips`, `aup-domains`, `aup-bittorrent`. Пустой вывод — фильтра нет.
+- [ ] `sudo python3 apply_routing.py /opt/hiddify-manager/xray_config.json --assets-dir /opt/hiddify-manager/assets` создаёт **кандидата** `xray_config.json.candidate.json`. Он ничего не включает и Hiddify Manager не перезапускает: `hiddify restart` сам по себе фильтр не включит. Правила ставятся первыми, повторный запуск их не дублирует; существующего кандидата скрипт не перезаписывает.
+- [ ] Проверка кандидата ядром Xray: `docker exec -e XRAY_LOCATION_ASSET=/opt/hiddify-manager/assets hiddify-manager xray run -test -config /opt/hiddify-manager/xray_config.json.candidate.json`. Включение (замена конфига с резервной копией и откатом) — отдельный шаг: `docs/SECURITY_POLICY.md`, «Обновление и подготовка к включению».
+- [ ] Фильтр установлен, если его правила есть в рабочем конфиге: `grep -oE '"ruleTag": *"[a-z-]+"' /opt/hiddify-manager/xray_config.json` показывает `aup-malicious-domains`, `aup-ips`, `aup-domains`, `aup-bittorrent`. Пустой вывод — фильтра нет.
 - [ ] Блокируются: `geosite:category-porn`, `geosite:category-betting-ru`, malware, phishing, cryptominers, частные сети (в том числе адреса Tailscale, чтобы клиенты не дотянулись до панели), BitTorrent и список блокировок из снимка реестра, кроме исключений владельца (`platform-allowlist.txt`, `news-allowlist.txt`: они стоят раньше блокировки). Что это значит для оферты: `docs/SECURITY_POLICY.md`, «Проверка данных фильтра», и `docs/LEGAL_BRIEF.md`, п. 7. AmneziaWG этот фильтр не затрагивает.
 - [ ] Проверка: через клиент сайт из `category-porn` не открывается, обычные сайты открываются. В логи бота такие попытки не пишутся.
 - [ ] cron раз в неделю: `0 5 * * 1 /opt/node-rental/deploy/xray/update_geodata.sh`.
-- [ ] Оферта (п. 7.2) обещает, что адреса назначения не сохраняются. Убедитесь, что Xray не пишет access-лог: в `xray_config.json` блок `"log": {"loglevel": "warning", "access": "none"}`. Проверка: `docker logs marzban 2>&1 | grep -c accepted` должен давать 0 после нескольких подключений.
+- [ ] Оферта (п. 7.2) обещает, что адреса назначения не сохраняются. Убедитесь, что Xray не пишет access-лог: в `xray_config.json` блок `"log": {"loglevel": "warning", "access": "none"}`. Проверка: `docker logs hiddify 2>&1 | grep -c accepted` должен давать 0 после нескольких подключений.
 
 ### Этап 14. PWA и Mini App
 - [ ] Собираются в образе `web` (`VITE_BOT_USERNAME` берётся из `BOT_USERNAME`).
@@ -306,9 +306,9 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 1. **Оферта** (`legal/oferta.md`) написана по ТЗ как шаблон. Её стоит показать юристу до публикации, особенно разделы 4 (AUTOBAN: прекращение доступа без возврата и «без обжалования» для потребителя могут быть признаны недействительными, ст. 16 Закона о защите прав потребителей), 6 (возврат только при простое более 72 часов) и 7 (журналирование).
 2. **Приём USDT.** Если исполнитель является налоговым резидентом РФ (в том числе самозанятым), Федеральный закон № 259-ФЗ запрещает резидентам принимать цифровую валюту в оплату товаров и услуг, а доход от иностранных клиентов обычно всё равно облагается налогом в РФ. Поэтому в оферте нет формулировок о том, что поступления в USDT не облагаются налогом. Схему канала USDT нужно согласовать с налоговым консультантом.
 3. **Реклама.** Кампании остаются черновиками без расходов, РФ исключена из проекта запуска. Применимые ограничения, даты и штрафы нужно сверять по действующим официальным текстам и правилам площадок; новости и обсуждения не заменяют эту проверку. Название услуги не должно скрывать её назначение. Органика и рефералы не считаются автоматически разрешённой альтернативой. План устойчивости и роль RU-сервера — в `docs/NETWORK_RESILIENCE.md`.
-4. **Журнал подключений** хранит только Telegram ID, имя пользователя узла, время и объём трафика. IP-адреса, адреса назначения и порты не записываются. Marzban не отдаёт точные сессии, поэтому `conn_logs` строится по полю `online_at` при опросе раз в 5 минут: время начала и конца сессии приблизительное (±5–10 минут), весь трафик записывается в `bytes_down`. Срок хранения — 5 лет, как в политике (`legal/privacy.md`, раздел 7): записи старше двух месяцев уходят в зашифрованный архив (`docs/RETENTION.md`), `CONN_LOG_RETENTION_DAYS` (по умолчанию 1826) подстраховывает удаление из рабочей базы.
+4. **Журнал подключений** хранит только Telegram ID, имя пользователя узла, время и объём трафика. IP-адреса, адреса назначения и порты не записываются. Hiddify Manager не отдаёт точные сессии, поэтому `conn_logs` строится по полю `online_at` при опросе раз в 5 минут: время начала и конца сессии приблизительное (±5–10 минут), весь трафик записывается в `bytes_down`. Срок хранения — 5 лет, как в политике (`legal/privacy.md`, раздел 7): записи старше двух месяцев уходят в зашифрованный архив (`docs/RETENTION.md`), `CONN_LOG_RETENTION_DAYS` (по умолчанию 1826) подстраховывает удаление из рабочей базы.
 5. **Налоги и чеки.** На НПД ставка 4% с доходов от физлиц и 6% от юрлиц и ИП, лимит 2,4 млн ₽ в год, нанимать сотрудников нельзя. ЮKassa удерживает комиссию до выплаты, но доход в «Мой налог» — вся сумма платежа. Если перейдёте на ИП, переключите `YOOKASSA_RECEIPT_MODE=fiscal` и сверьте с бухгалтером коды налогообложения и НДС.
-6. **Флаги нарушений** Marzban сам не выставляет. Их пишет в заметку пользователя ваша IDS на узлах (или админ), либо IDS вызывает `/internal/abuse`. Без IDS автобан срабатывает только по объёму трафика.
+6. **Флаги нарушений** Hiddify Manager сам не выставляет. Их пишет в заметку пользователя ваша IDS на узлах (или админ), либо IDS вызывает `/internal/abuse`. Без IDS автобан срабатывает только по объёму трафика.
 
 ## Текущие ограничения
 
@@ -317,10 +317,10 @@ cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 - Монитор аномалий использует правила и пороги IDS/трафика, а не обученную ML-модель. Отдельного ML-демона нет.
 - Модуль PostgreSQL-архивации, ранее созданный отдельно, не подключён к этой схеме. Его исходники сохранены вне рабочей версии; миграция на PostgreSQL и политика архивирования остаются отдельной задачей.
 - SQLCipher устанавливается из бинарного пакета: совместимость с архитектурой целевого сервера нужно проверять отдельно.
-- Лимиты устройств договорные; жёсткого `ip_limit` в API Marzban нет. Выделенный IP, multi-hop и облачное хранилище не реализованы.
+- Лимиты устройств договорные; жёсткого `ip_limit` в API Hiddify Manager нет. Выделенный IP, multi-hop и облачное хранилище не реализованы.
 - В PWA refresh-токен хранится в `localStorage`, access-токен — в памяти; в Mini App — SecureStorage либо память.
 - Публичные рублёвые платежи — через ЮKassa; legacy-СБП сохранён для совместимости старых интеграций и отключён при обычном создании новых счетов.
-- Зелёные локальные тесты не подтверждают работу реальных Telegram, ЮKassa, Crypto Pay, Marzban или выпуск TLS-сертификатов.
+- Зелёные локальные тесты не подтверждают работу реальных Telegram, ЮKassa, Crypto Pay, Hiddify Manager или выпуск TLS-сертификатов.
 
 ## Проверка очищенной версии
 

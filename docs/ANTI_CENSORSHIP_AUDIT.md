@@ -8,9 +8,9 @@
 
 | Что | Сейчас |
 |---|---|
-| Стек | Marzban v0.8.4, Xray 24.12.31; VLESS + TCP + REALITY + Vision, маскировка `www.apple.com`, DE:2096 |
+| Стек | Hiddify Manager v0.8.4, Xray 24.12.31; VLESS + TCP + REALITY + Vision, маскировка `www.apple.com`, DE:2096 |
 | Второй протокол | AmneziaWG: клиентский экземпляр (amneziawg-go в Docker, UDP 39051) и личный `amnezia-awg2` владельца |
-| Серверы | DE (Германия): VPN, бот, сайт `app.…`, панель Marzban; RU: пробросы TCP 443/2087/8443 → DE:2096, шлюз базы |
+| Серверы | DE (Германия): VPN, бот, сайт `app.…`, панель Hiddify Manager; RU: пробросы TCP 443/2087/8443 → DE:2096, шлюз базы |
 | Подписка | Два адреса одного входа: RU:443 и DE:2096. Готов к включению вход gRPC + REALITY на DE:2097 |
 | Маршрутизация | Российские сайты напрямую (`ru_direct.sh`, правила в подписке v2rayNG) |
 | Клиенты | v2rayNG, Hiddify, AmneziaVPN/AmneziaWG; своих приложений нет |
@@ -18,9 +18,9 @@
 
 ## 2. Что уязвимо (по убыванию важности)
 
-1. **Сайт, панель и VPN на одном IP DE.** `app.…` (Caddy на 443) и панель Marzban (`panel.…:8443`)
+1. **Сайт, панель и VPN на одном IP DE.** `app.…` (Caddy на 443) и панель Hiddify Manager (`panel.…:8443`)
    живут на том же адресе, что и вход VPN. Цензор получает адрес VPN из DNS сайта без всякого DPI,
-   а панель Marzban на 8443 опознаётся сканером по странице входа. Это главная уязвимость: не
+   а панель Hiddify Manager на 8443 опознаётся сканером по странице входа. Это главная уязвимость: не
    нужно распознавать трафик, адрес уже назван.
 2. **Один вид трафика.** Все VLESS-клиенты идут одним рисунком (TCP + REALITY + Vision). Одно правило
    закрывает всех. AmneziaWG — второй вид, но UDP у мобильных операторов режут чаще.
@@ -34,7 +34,7 @@
    соединения TCP к зарубежным адресам хостингов «замерзают» после первых ~16 КБ. RU-вход обходит
    это: клиент соединяется с российским адресом. Прямой DE-вход — запасной путь на случай, если
    заблокируют RU.
-6. **Лишняя запись Shadowsocks** в таблице адресов Marzban (`{SERVER_IP}`, входа такого в Xray нет):
+6. **Лишняя запись Shadowsocks** в таблице адресов Hiddify Manager (`{SERVER_IP}`, входа такого в Xray нет):
    мусор, который может попасть в подписку.
 
 ## 3. Протоколы
@@ -43,7 +43,7 @@
 |---|---|---|---|
 | VLESS + REALITY + Vision (TCP) | Нет своего сертификата; на зондирование отвечает чужой сайт; Vision убирает признак «TLS в TLS» | Один рисунок; пара SNI/ASN | Оставить основным |
 | VLESS + REALITY + gRPC | Другой рисунок (HTTP/2-кадры); тот же ключ | Без Vision: «TLS в TLS» заметнее; чуть больше нагрузка на CPU | Включить как второй (готово, `vless_transport.sh`) |
-| VLESS + REALITY + XHTTP | Рекомендуемый Xray транспорт с 2025 года; гибкое разбиение запросов | Marzban v0.8.4 не умеет выдавать его в подписке | После обновления панели (п. 7) |
+| VLESS + REALITY + XHTTP | Рекомендуемый Xray транспорт с 2025 года; гибкое разбиение запросов | Hiddify Manager v0.8.4 не умеет выдавать его в подписке | После обновления панели (п. 7) |
 | AmneziaWG | Быстрый, хорош на домашних сетях; параметры Jc/Jmin/Jmax/S/H ломают сигнатуру WireGuard | UDP; userspace-реализация медленнее модуля ядра | Оставить |
 | Hysteria2 (QUIC) | Лучший на сетях с потерями | UDP/QUIC к зарубежным адресам в РФ режут часто; нужен отдельный сервер (sing-box) | Не сейчас: замеры UDP сначала |
 | Trojan, Shadowsocks | — | Ничего не добавляют к REALITY; SS легко распознаётся | Не использовать; лишнюю запись SS убрать |
@@ -75,21 +75,21 @@ bash /root/vpn-src/scripts/vless_transport.sh --check ИМЯ
 ### 4.2. Отпечаток клиента (uTLS)
 
 В адресах подписки задать `fingerprint: chrome`: клиентский TLS тогда неотличим от браузера Chrome.
-В Marzban это поле адреса (Hosts → Fingerprint). Проверка, что задано:
+В Hiddify Manager это поле адреса (Hosts → Fingerprint). Проверка, что задано:
 `docker exec -i node-rental-bot-1 python3 - < /root/vpn-src/scripts/vpn_entries.py` (поле
 `fingerprint=`).
 
 ### 4.3. Защита от сканеров
 
 ```bash
-# DE. Панель Marzban — только с адресов владельца/через SSH-туннель, не всему интернету.
+# DE. Панель Hiddify Manager — только с адресов владельца/через SSH-туннель, не всему интернету.
 ufw delete allow 8443/tcp
 ufw allow from RU_SERVER_IP to any port 8443 proto tcp comment 'panel via RU only'
 # Доступ владельца к панели: ssh -L 8443:127.0.0.1:8443 de, затем https://localhost:8443
 ```
 
-Компромисс: бот обращается к API Marzban по `127.0.0.1:8000` (не через 8443) — его это не
-затрагивает; проверить до применения (`--doctor`: «Marzban panel answers»).
+Компромисс: бот обращается к API Hiddify Manager по `127.0.0.1:8000` (не через 8443) — его это не
+затрагивает; проверить до применения (`--doctor`: «Hiddify Manager panel answers»).
 
 Сайт `app.…` с IP VPN — перенести (п. 5.3).
 
@@ -142,7 +142,7 @@ docker exec -i node-rental-bot-1 python3 - --add NEW_RU_IP:443 < /root/vpn-src/s
 
 ## 7. Обновление панели
 
-Marzban v0.8.4 не выдаёт XHTTP. Варианты: ветка разработки Marzban или Remnawave/Marzneshin. Это
+Hiddify Manager v0.8.4 не выдаёт XHTTP. Варианты: ветка разработки Hiddify Manager или Remnawave/Marzneshin. Это
 смена формата базы и подписок — отдельный проект с переносом пользователей и полной проверкой на
 копии. Делать после автопилота, не раньше.
 
@@ -185,7 +185,7 @@ iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-m
 | # | Что | Риск | Откат |
 |---|---|---|---|
 | 1 | Подписанные выпуски (`SIGNED_RELEASES.md`) | Нет | — |
-| 2 | Вход gRPC с маскировкой из сканера соседей | Перезапуск Marzban (секунды) | `vless_transport.sh --rollback` |
+| 2 | Вход gRPC с маскировкой из сканера соседей | Перезапуск Hiddify Manager (секунды) | `vless_transport.sh --rollback` |
 | 3 | Панель 8443 закрыть от интернета | Потеря доступа к панели извне | вернуть правило ufw |
 | 4 | `fingerprint: chrome` в адресах подписки, убрать запись SS | Нет | вернуть поле |
 | 5 | BBR и буферы на DE и RU, MSS на RU | Нет | удалить файл sysctl |
@@ -208,6 +208,6 @@ iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-m
 | uTLS (fingerprint) в подписке | **Сделано**: `vpn_entries.py --fingerprint chrome` | — |
 | AmneziaWG на 443/udp DE | Не принято как есть | 443/udp на DE занят сайтом (HTTP/3 в `docker-compose.yml`); вместо этого — проброс UDP через RU |
 | Пакеты I1–I5 AmneziaWG | Отложено | Нужны свежие клиенты у всех; старые перестанут подключаться |
-| Hysteria2, XHTTP | Отложено | Marzban v0.8.4 не выдаёт их в подписке; после обновления панели |
+| Hysteria2, XHTTP | Отложено | Hiddify Manager v0.8.4 не выдаёт их в подписке; после обновления панели |
 | `fragment` и `mux` в шаблонах клиента | Не принято для всех | `mux` несовместим с Vision; `fragment` — настройка клиента, помогает не везде; советовать точечно |
 | Проверять OCSP stapling маскировки | Не принято | На REALITY не влияет |

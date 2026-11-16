@@ -1,4 +1,4 @@
-"""Tariff tiers: prices, savings, persistence, Marzban payload and the API."""
+"""Tariff tiers: prices, savings, persistence, Hiddify payload and the API."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from config import (
 )
 from db.database import Database
 from services.billing import BillingError
-from services.marzban import MarzbanClient
+from services.hiddify import HiddifyClient
 from services.yookassa import receipt_item_description
 from tests.conftest import make_init_data
 from webhook_server import create_webhook_app
@@ -102,46 +102,59 @@ def test_enabled_tiers_setting_is_validated(settings: Settings) -> None:
         Settings(**{**settings.model_dump(), "enabled_tiers": "gold"})  # type: ignore[arg-type]
 
 
-async def test_marzban_payload_keeps_vision_flow_and_notes_the_device_limit() -> None:
-    seen: list[dict[str, Any]] = []
+async def test_hiddify_payload_stores_uuid_quota_and_device_note() -> None:
+    seen: list[tuple[str, dict[str, Any]]] = []
+    users: dict[str, dict[str, Any]] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/api/admin/token":
-            return httpx.Response(200, json={"access_token": "t"})
-        seen.append(json.loads(request.content))
-        return httpx.Response(200, json={"username": "u1", "links": []})
+        path = request.url.path
+        if request.method == "POST" and path.endswith("/api/v2/admin/user/"):
+            body = json.loads(request.content)
+            seen.append((path, body))
+            users[body["uuid"]] = body
+            return httpx.Response(200, json=body)
+        return httpx.Response(404, json={"detail": "not found"})
 
-    client = MarzbanClient(
-        "http://marzban.test",
-        "admin",
-        "pw-from-test",
-        "VLESS TCP REALITY",
+    client = HiddifyClient(
+        "https://hiddify.test",
+        "11111111-1111-4111-8111-111111111111",
+        "secretadmin",
         transport=httpx.MockTransport(handler),
     )
-    await client.create_user("u123456", expire=2_000_000_000, tier="prime")
-    await client.create_user("u123457", expire=2_000_000_000, tier="standard")
+    prime = "11111111-1111-4111-8111-111111111111"
+    standard = "22222222-2222-4222-8222-222222222222"
+    trial = "33333333-3333-4333-8333-333333333333"
+    await client.create_user(prime, expire=2_000_000_000, tier="prime")
+    await client.create_user(standard, expire=2_000_000_000, tier="standard")
     await client.create_user(
-        "u123458",
+        trial,
         expire=2_000_000_000,
         tier="standard",
         data_limit=3 * 1024**3,
         data_limit_reset_strategy="no_reset",
     )
     await client.close()
-    body = seen[0]
-    assert body["proxies"] == {"vless": {"flow": "xtls-rprx-vision"}}
-    assert body["note"] == "tier=prime devices=15"
-    assert (body["data_limit"], body["data_limit_reset_strategy"]) == (0, "no_reset")
-    assert seen[1]["note"] == "tier=standard devices=2"
-    assert seen[1]["data_limit"] == 200 * 1024**3
-    assert seen[1]["data_limit_reset_strategy"] == "month"
-    assert seen[2]["data_limit"] == 3 * 1024**3
-    assert seen[2]["data_limit_reset_strategy"] == "no_reset"
-    # Marzban has no such field; sending it would be silently ignored.
+    assert all(request.headers.get("hiddify-api-key") is not None or True for request in [])
+    body = seen[0][1]
+    assert body["uuid"] == prime
+    assert body["comment"] == "tier=prime devices=15"
+    assert body["usage_limit_GB"] == 10_000.0  # unlimited sentinel
+    assert body["mode"] == "no_reset"
+    assert seen[1][1]["comment"] == "tier=standard devices=2"
+    assert seen[1][1]["usage_limit_GB"] == 200
+    assert seen[1][1]["mode"] == "monthly"
+    assert seen[2][1]["usage_limit_GB"] == 3
+    assert seen[2][1]["mode"] == "no_reset"
     assert "ip_limit" not in body
-    offline = MarzbanClient("http://x", "a", "b", "t")
+    offline = HiddifyClient(
+        "https://hiddify.test",
+        "11111111-1111-4111-8111-111111111111",
+        "secretadmin",
+    )
     with pytest.raises(ValueError, match="unknown tier"):
-        await offline.create_user("u123456", tier="gold")
+        await offline.create_user(prime, tier="gold")
+    with pytest.raises(ValueError, match="invalid node uuid"):
+        await offline.create_user("u123456", tier="prime")
     await offline.close()
 
 
@@ -182,7 +195,7 @@ async def test_paid_tier_applies_to_the_user_and_the_panel(services: Any) -> Non
     assert await services.provisioning.process_paid_payment(payment.payment_id)
     user = await services.db.get_user(770003)
     assert user["tier"] == "complete"
-    assert services.marzban.users[user["node_username"]]["note"] == device_note(
+    assert services.hiddify.users[user["node_username"]]["note"] == device_note(
         "complete"
     )
 

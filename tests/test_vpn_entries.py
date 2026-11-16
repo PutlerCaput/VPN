@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 import pytest
 
-from services.marzban import MarzbanClient
+from services.hiddify import HiddifyClient
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
@@ -80,35 +80,9 @@ def test_the_description_prints_addresses_and_covers_only() -> None:
     assert "Shadowsocks TCP: {SERVER_IP}:inbound port" in text
 
 
-async def test_the_client_reads_and_writes_the_host_table() -> None:
-    seen: list[tuple[str, str, Any]] = []
-    table = {TAG: list(HOSTS[TAG])}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/api/admin/token":
-            return httpx.Response(200, json={"access_token": "t"})
-        seen.append((request.method, request.url.path, request.content))
-        if request.method == "PUT":
-            import json
-
-            table.clear()
-            table.update(json.loads(request.content))
-        return httpx.Response(200, json=table)
-
-    client = MarzbanClient(
-        "https://panel.test",
-        "admin",
-        "pw",
-        TAG,
-        transport=httpx.MockTransport(handler),
-    )
-    try:
-        assert await client.get_hosts() == {TAG: HOSTS[TAG]}
-        wanted = entries.with_added(await client.get_hosts(), TAG, "89.1.1.1", 2096)
-        assert await client.put_hosts(wanted) == wanted
-    finally:
-        await client.close()
-    assert [m for m, _, _ in seen] == ["GET", "GET", "PUT"]
+def test_hiddify_client_has_no_host_table_api() -> None:
+    assert not hasattr(HiddifyClient, "get_hosts")
+    assert not hasattr(HiddifyClient, "put_hosts")
 
 
 def test_the_panels_default_address_can_be_dropped() -> None:

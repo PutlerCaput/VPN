@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """What the VPN entries are now: read-only, and no secret is printed.
 
-    python3 entry_inventory.py [/var/lib/marzban/xray_config.json]
+    python3 entry_inventory.py [/opt/hiddify-manager/xray_config.json]
 
-From Xray's config (the one Marzban runs) it lists each inbound: tag, port,
+From Xray's config (the one Hiddify Manager runs) it lists each inbound: tag, port,
 protocol, transport, security and, for REALITY, the cover names and the target.
 Keys, short ids, user ids and passwords are never printed: only whether they
 are set. The output is meant to be pasted into the chat.
@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-DEFAULT = "/var/lib/marzban/xray_config.json"
+DEFAULT = "/opt/hiddify-manager/xray_config.json"
 
 
 def _reality(settings: dict[str, Any]) -> list[str]:

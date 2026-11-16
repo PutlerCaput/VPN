@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 import pytest
 
-from services.marzban import MarzbanClient
+from services.hiddify import HiddifyClient
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "vless_transport.sh"
@@ -215,38 +215,10 @@ def test_users_get_the_tag_once() -> None:
     assert entries.tags_with([base, "X-1"], base, "X-1") is None
 
 
-async def test_new_users_get_every_vless_entry_and_old_ones_can_be_given_it() -> None:
-    sent: list[tuple[str, str, Any]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/api/admin/token":
-            return httpx.Response(200, json={"access_token": "t"})
-        body = json.loads(request.content) if request.content else None
-        sent.append((request.method, request.url.path, body))
-        return httpx.Response(200, json={"username": "n" + "a" * 20})
-
-    client = MarzbanClient(
-        "https://panel.test",
-        "admin",
-        "pw",
-        "VLESS TCP REALITY",
-        transport=httpx.MockTransport(handler),
-        extra_inbound_tags=("VLESS-GRPC-REALITY", "", "VLESS TCP REALITY"),
-    )
-    try:
-        await client.create_user("n" + "a" * 20, days=1)
-        await client.set_vless_inbounds(
-            "n" + "b" * 20, ["VLESS TCP REALITY", "VLESS-GRPC-REALITY"]
-        )
-    finally:
-        await client.close()
-    created = sent[0][2]
-    assert created["inbounds"] == {"vless": ["VLESS TCP REALITY", "VLESS-GRPC-REALITY"]}
-    assert sent[1][0] == "PUT"
-    assert sent[1][2] == {
-        "inbounds": {"vless": ["VLESS TCP REALITY", "VLESS-GRPC-REALITY"]}
-    }
-
+def test_hiddify_client_has_no_per_user_inbound_assignment() -> None:
+    """Hiddify Manager applies proxies globally; there is no per-user inbound API."""
+    assert not hasattr(HiddifyClient, "set_vless_inbounds")
+    assert not hasattr(HiddifyClient, "extra_inbound_tags")
 
 # ----------------------------------------------------------- the shell switch
 DOCKER = r"""#!/bin/bash
@@ -262,7 +234,7 @@ case "$1" in
       *"x25519"*)
         echo "Private key: OWNKEYOWNKEYOWNKEYOWNKEYOWNKEYOWNKEYOWNKEYO"
         echo "Public key: PUB" ;;
-      *"printenv MARZBAN_EXTRA_INBOUND_TAGS"*) cat "$T/extra_tags" 2>/dev/null ;;
+      *"printenv HIDDIFY_EXTRA_INBOUND_TAGS"*) cat "$T/extra_tags" 2>/dev/null ;;
       *"--attach"*) echo "VPN_ENTRIES_ATTACHED: 3 users" ;;
     esac
     ;;
@@ -284,7 +256,6 @@ OPENSSL = (
 CURL = '#!/bin/bash\necho "curl $*" >> "$T/calls.log"\ncat "$T/tls_answer"\n'
 UFW = '#!/bin/bash\necho "ufw $*" >> "$T/calls.log"\n'
 UPDATE_BOT = '#!/bin/bash\necho "update_bot $*" >> "$T/calls.log"\n'
-
 
 def switch(
     tmp_path: Path, *args: str, **extra: str
@@ -376,16 +347,16 @@ def test_apply_switches_and_rollback_undoes(server: Path) -> None:
     assert own == "OWNKEYOWNKEYOWNKEYOWNKEYOWNKEYOWNKEYOWNKEYO"
     assert own not in done.stdout + done.stderr
     log = calls(server)
-    assert "docker restart marzban-marzban-1" in log
+    assert "docker restart hiddify-manager" in log
     assert "ufw allow 2097/tcp comment VLESS VLESS-GRPC-REALITY" in log
     assert "--attach VLESS-GRPC-REALITY" in log
-    assert "update_bot --set MARZBAN_EXTRA_INBOUND_TAGS=VLESS-GRPC-REALITY" in log
+    assert "update_bot --set HIDDIFY_EXTRA_INBOUND_TAGS=VLESS-GRPC-REALITY" in log
     back = switch(server, "--rollback")
     assert back.returncode == 0, back.stdout + back.stderr
     assert "VLESS_TRANSPORT_ROLLED_BACK" in back.stdout
     assert json.loads((server / "xray_config.json").read_text()) == BASE_CONFIG
     assert "ufw delete allow 2097/tcp" in calls(server)
-    assert "update_bot --set MARZBAN_EXTRA_INBOUND_TAGS=" in calls(server)
+    assert "update_bot --set HIDDIFY_EXTRA_INBOUND_TAGS=" in calls(server)
 
 
 def test_xray_that_does_not_come_back_is_rolled_back_at_once(server: Path) -> None:
@@ -415,7 +386,7 @@ def test_a_relay_only_tcp_entry_keeps_the_other_tags(server: Path) -> None:
     log = calls(server)
     assert "ufw allow from 198.51.100.7 to any port 2098 proto tcp" in log
     assert (
-        "update_bot --set MARZBAN_EXTRA_INBOUND_TAGS="
+        "update_bot --set HIDDIFY_EXTRA_INBOUND_TAGS="
         "VLESS-GRPC-REALITY,VLESS-TCP-REALITY-RU" in log
     )
     assert "TRANSPORT_TAG=VLESS-TCP-REALITY-RU ALLOW_FROM=198.51.100.7" in done.stdout
@@ -426,7 +397,7 @@ def test_a_relay_only_tcp_entry_keeps_the_other_tags(server: Path) -> None:
         ALLOW_FROM="198.51.100.7",
     )
     assert back.returncode == 0, back.stdout + back.stderr
-    assert "update_bot --set MARZBAN_EXTRA_INBOUND_TAGS=VLESS-GRPC-REALITY\n" in (
+    assert "update_bot --set HIDDIFY_EXTRA_INBOUND_TAGS=VLESS-GRPC-REALITY\n" in (
         calls(server)
     )
 

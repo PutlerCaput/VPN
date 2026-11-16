@@ -86,7 +86,7 @@ def test_env_example_with_docker_secrets_loads(
             monkeypatch.setenv(key, value)
     secrets = {
         "bot_token": "123456:" + "x" * 35,
-        "marzban_password": "p" * 16,
+        "hiddify_api_key": "p" * 16,
         "jwt_secret": "a" * 64,
         "crypto_pay_token": "",
         "vapid_private": "\n",

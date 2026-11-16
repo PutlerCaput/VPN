@@ -126,8 +126,8 @@ def env(tmp_path: Path) -> dict[str, str]:
                 "version": "27.3.1",
                 "containers": [
                     {
-                        "name": "marzban-marzban-1",
-                        "image": "gozargah/marzban:v0.8.4",
+                        "name": "hiddify-hiddify-1",
+                        "image": "hiddify/hiddify-manager:v0.8.4",
                         "running": True,
                     }
                 ],
@@ -135,9 +135,9 @@ def env(tmp_path: Path) -> dict[str, str]:
         ),
         encoding="utf-8",
     )
-    marzban_dir = tmp_path / "opt-marzban"
-    marzban_dir.mkdir()
-    (marzban_dir / ".env").write_text("UVICORN_PORT=8000\n", encoding="utf-8")
+    panel_dir = tmp_path / "opt-hiddify"
+    panel_dir.mkdir()
+    (panel_dir / ".env").write_text("UVICORN_PORT=8000\n", encoding="utf-8")
     database = tmp_path / "db.sqlite3"
     with sqlite3.connect(database) as conn:
         conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
@@ -150,8 +150,8 @@ def env(tmp_path: Path) -> dict[str, str]:
         "FAKE_DOCKER_STATE": str(state),
         "FAKE_LOG": str(tmp_path / "calls.log"),
         "BACKUP_DIR": str(tmp_path / "backups"),
-        "MARZBAN_DB": str(database),
-        "MARZBAN_DIR": str(marzban_dir),
+        "HIDDIFY_DB": str(database),
+        "HIDDIFY_DIR": str(panel_dir),
     }
 
 
@@ -175,7 +175,7 @@ def test_report_changes_nothing(env: dict[str, str]) -> None:
     assert "REPORT ONLY" in out
     assert "packages to upgrade: 2" in out
     assert "docker-ce: 5:27.3.1-1~ubuntu.24.04~noble -> 5:28.0.1" in out
-    assert "marzban-marzban-1\tgozargah/marzban:v0.8.4" in out
+    assert "hiddify-hiddify-1\thiddify/hiddify-manager:v0.8.4" in out
     assert "REPORT DONE" in out
     assert not Path(env["BACKUP_DIR"]).exists()
     assert not [c for c in calls if c.startswith("apt-get") and "upgrade" in c]
@@ -187,7 +187,7 @@ def test_apply_copies_first_and_never_removes_packages(env: dict[str, str]) -> N
     backups = Path(env["BACKUP_DIR"])
     backups.mkdir()
     for n in range(4):  # older copies: only the newest three stay
-        old = backups / f"marzban-db-2026010{n}T000000Z.sqlite3"
+        old = backups / f"hiddify-db-2026010{n}T000000Z.sqlite3"
         old.write_text("old", encoding="utf-8")
         os.utime(old, (1_700_000_000 + n, 1_700_000_000 + n))
 
@@ -195,7 +195,7 @@ def test_apply_copies_first_and_never_removes_packages(env: dict[str, str]) -> N
     assert code == 0, out
     assert "SERVER_UPDATE_OK" in out
 
-    copies = sorted(backups.glob("marzban-db-*.sqlite3"))
+    copies = sorted(backups.glob("hiddify-db-*.sqlite3"))
     assert len(copies) == 3
     newest = max(copies, key=lambda p: p.stat().st_mtime)
     with sqlite3.connect(newest) as conn:
@@ -204,7 +204,7 @@ def test_apply_copies_first_and_never_removes_packages(env: dict[str, str]) -> N
 
     (settings,) = backups.glob("settings-*.tar.gz")
     with tarfile.open(settings) as archive:
-        assert any(name.endswith("opt-marzban/.env") for name in archive.getnames())
+        assert any(name.endswith("opt-hiddify/.env") for name in archive.getnames())
     (versions,) = backups.glob("docker-versions-*.txt")
     assert "docker-ce=5:27.3.1-1~ubuntu.24.04~noble" in versions.read_text("utf-8")
     assert "apt-get install --allow-downgrades docker-ce=" in out
@@ -224,7 +224,7 @@ def test_apply_copies_first_and_never_removes_packages(env: dict[str, str]) -> N
     assert "all 1 containers run again" in out
     assert not [c for c in calls if c.startswith("docker start")]
     # Third-party images are never pulled or changed here.
-    assert not [c for c in calls if "gozargah/marzban" in c and "pull" in c]
+    assert not [c for c in calls if "hiddify/hiddify-manager" in c and "pull" in c]
 
 
 def test_apply_restarts_a_container_left_stopped_by_the_upgrade(
@@ -261,7 +261,7 @@ if args[:1] == ["start"]:
     state_path.write_text(json.dumps(state), encoding="utf-8")
     code, out, calls = _run(env, "--apply")
     assert code == 0, out
-    assert "docker start marzban-marzban-1" in calls
+    assert "docker start hiddify-hiddify-1" in calls
     assert "all 1 containers run again" in out
 
 

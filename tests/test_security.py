@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 
+import uuid
+
 import pytest
 
 from services.security import (
@@ -49,6 +51,9 @@ def test_node_username() -> None:
     assert not is_valid_node_username("n" + "a" * 19)
     assert not is_valid_node_username("admin")
     assert not is_valid_node_username("u12345/../x")
+    generated = str(uuid.uuid4())
+    assert is_valid_node_username(generated)
+    assert not is_valid_node_username(generated.replace("-", ""))
     with pytest.raises(ValueError, match="zero"):
         pseudonymous_node_username("s" * 64, 0)
 

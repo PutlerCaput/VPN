@@ -1,1 +1,1 @@
-"""Domain services. Import concrete modules directly (services.marzban, ...)."""
+"""Domain services. Import concrete modules directly (services.hiddify, ...)."""

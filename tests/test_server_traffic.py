@@ -260,7 +260,7 @@ async def _fill(db: Any, per_day_gb: float, first: date, last: date) -> None:
 
 
 async def test_watch_warns_once_and_pauses_new_trials(
-    services: Any, notifier: Any, marzban: Any
+    services: Any, notifier: Any, hiddify: Any
 ) -> None:
     settings = services.settings.model_copy(
         update={"server_traffic_counts": "both", "server_traffic_pause_trials": True}
@@ -285,7 +285,7 @@ async def test_watch_warns_once_and_pauses_new_trials(
     assert user is not None
     assert await services.db.has_accepted_offer(830001)
     assert not user["trial_used"]
-    assert not marzban.users
+    assert not hiddify.users
 
 
 async def test_without_the_switch_trials_go_on_and_the_owner_is_told(
@@ -338,7 +338,7 @@ async def test_purge_keeps_about_a_year(services: Any, notifier: Any) -> None:
 
 # ------------------------------------------------------------ data source
 async def test_poll_adds_every_subscribers_traffic_to_the_day(
-    services: Any, marzban: Any
+    services: Any, hiddify: Any
 ) -> None:
     nodes = []
     for telegram_id in (830010, 830011):
@@ -348,7 +348,7 @@ async def test_poll_adds_every_subscribers_traffic_to_the_day(
         nodes.append(user["node_username"])
 
     def panel(used: list[int]) -> None:
-        marzban.panel_usage = [
+        hiddify.panel_usage = [
             {
                 "username": node,
                 "status": "active",

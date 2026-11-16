@@ -13,7 +13,7 @@ from services.billing import BillingService
 from services.cryptopay import CryptoPayClient
 from services.email_login import EmailLogin
 from services.health import ServiceHealth
-from services.marzban import MarzbanClient
+from services.hiddify import HiddifyClient
 from services.notifier import Notifier
 from services.provisioning import ProvisioningService
 from services.push import PushService
@@ -31,7 +31,7 @@ class Services:
     settings: Settings
     db: Database
     bot: Bot
-    marzban: MarzbanClient
+    hiddify: HiddifyClient
     cryptopay: CryptoPayClient | None
     sbp: SbpService
     push: PushService

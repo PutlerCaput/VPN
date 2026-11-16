@@ -1,8 +1,8 @@
 """Russian sites past the server, handed to the apps inside the subscription.
 
-The templates are Marzban's own defaults plus the rules (scripts/
+The templates are Hiddify's own defaults plus the rules (scripts/
 ru_direct_templates.py); the server script (scripts/ru_direct.sh) runs for real
-with stand-ins for docker, the marzban command, curl and the bot's updater. What
+with stand-ins for docker, the hiddify command, curl and the bot's updater. What
 is checked is what keeps the panel safe: Xray must accept the config before
 anything changes, an owner's own template is never replaced, and a panel that
 does not answer after the restart gets the previous settings back."""
@@ -24,7 +24,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import ru_direct_templates as templates  # noqa: E402
 
-# Shaped like Marzban 0.8.4's app/templates/v2ray/default.json, which listens on
+# Shaped like Hiddify 0.8.4's app/templates/v2ray/default.json, which listens on
 # every interface: the template made from it must not.
 ANY = "0.0.0.0"  # noqa: S104
 V2RAY_DEFAULT: dict[str, Any] = {
@@ -50,7 +50,7 @@ V2RAY_DEFAULT: dict[str, Any] = {
     "dns": {"servers": ["1.1.1.1", "8.8.8.8"]},
     "routing": {"domainStrategy": "AsIs", "rules": []},
 }
-# Shaped like Marzban 0.8.4's app/templates/singbox/default.json.
+# Shaped like Hiddify 0.8.4's app/templates/singbox/default.json.
 SINGBOX_DEFAULT: dict[str, Any] = {
     "log": {"level": "warn"},
     "dns": {
@@ -91,7 +91,7 @@ def test_v2ray_template_sends_russian_names_and_addresses_direct() -> None:
     # A name that matches no rule is looked up, so a Russian address goes direct.
     assert result["routing"]["domainStrategy"] == "IPIfNonMatch"
     tags = [o["tag"] for o in result["outbounds"]]
-    assert tags == ["direct", "block"]  # Marzban puts the server before these
+    assert tags == ["direct", "block"]  # Hiddify puts the server before these
     assert result["dns"]["servers"][0]["address"] == templates.RU_DNS
     assert result["dns"]["servers"][1:] == ["1.1.1.1", "8.8.8.8"]
     # The local ports are for the app on the device only, not for the Wi-Fi.
@@ -189,15 +189,15 @@ if args[:1] == ["exec"]:
 sys.exit(0)
 """
 
-# "marzban restart -n": the panel reads .env again when it comes back.
-FAKE_MARZBAN = r"""#!/usr/bin/env python3
+# "hiddify restart -n": the panel reads .env again when it comes back.
+FAKE_HIDDIFY = r"""#!/usr/bin/env python3
 import json, os, re, sys
 state_path = os.environ["FAKE_STATE"]
 state = json.load(open(state_path))
 with open(os.environ["FAKE_LOG"], "a") as log:
-    log.write("marzban " + " ".join(sys.argv[1:]) + "\n")
+    log.write("hiddify " + " ".join(sys.argv[1:]) + "\n")
 env = {}
-for line in open(os.environ["MARZBAN_DIR"] + "/.env"):
+for line in open(os.environ["HIDDIFY_DIR"] + "/.env"):
     m = re.match(r'^\s*([A-Z0-9_]+)\s*=\s*"?([^"\n]*)"?\s*$', line)
     if m:
         env[m.group(1)] = m.group(2)
@@ -228,19 +228,19 @@ def _stub(folder: Path, name: str, body: str) -> None:
 
 @pytest.fixture
 def server(tmp_path: Path) -> dict[str, Any]:
-    marzban = tmp_path / "opt-marzban"
-    data = tmp_path / "var-lib-marzban"
-    marzban.mkdir()
+    hiddify = tmp_path / "opt-hiddify"
+    data = tmp_path / "var-lib-hiddify"
+    hiddify.mkdir()
     data.mkdir()
-    env_file = marzban / ".env"
+    env_file = hiddify / ".env"
     env_file.write_text(
-        'UVICORN_PORT = 8000\nXRAY_ASSETS_PATH = "/var/lib/marzban/assets"\n'
+        'UVICORN_PORT = 8000\nXRAY_ASSETS_PATH = "/opt/hiddify-manager/assets"\n'
         '# V2RAY_SUBSCRIPTION_TEMPLATE="v2ray/default.json"\n'
     )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _stub(bin_dir, "docker", FAKE_DOCKER)
-    _stub(bin_dir, "marzban", FAKE_MARZBAN)
+    _stub(bin_dir, "hiddify", FAKE_HIDDIFY)
     _stub(bin_dir, "curl", FAKE_CURL)
     _stub(tmp_path, "update_bot.sh", FAKE_BOT_UPDATER)
     state = tmp_path / "state.json"
@@ -252,8 +252,8 @@ def server(tmp_path: Path) -> dict[str, Any]:
     env = {
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "MARZBAN_DIR": str(marzban),
-        "MARZBAN_DATA": str(data),
+        "HIDDIFY_DIR": str(hiddify),
+        "HIDDIFY_DATA": str(data),
         "BOT_UPDATER": str(tmp_path / "update_bot.sh"),
         "WAIT_SECONDS": "2",
         "WAIT_STEP_SECONDS": "1",
@@ -310,9 +310,9 @@ def test_apply_checks_with_xray_then_turns_it_on(server: dict[str, Any]) -> None
     assert box == templates.singbox_template(SINGBOX_DEFAULT)
     assert not (server["data"] / "templates/.ru-direct-check.json").exists()
     # The geo files the panel's own Xray uses.
-    assert _state(server)["xray_assets"] == "/var/lib/marzban/assets"
+    assert _state(server)["xray_assets"] == "/opt/hiddify-manager/assets"
     log = server["log"].read_text()
-    assert "marzban restart -n" in log
+    assert "hiddify restart -n" in log
     assert "update_bot --set RU_DIRECT_SUBSCRIPTION=true" in log
     assert list(server["env_file"].parent.glob(".env.before-ru-direct-*"))
     assert "RU_DIRECT_STATE on" in _run(server).stdout
@@ -326,7 +326,7 @@ def test_a_config_xray_rejects_changes_nothing(server: dict[str, Any]) -> None:
     assert "Xray rejected the config; nothing was changed" in result.stderr
     assert server["env_file"].read_text() == before
     assert not (server["data"] / "templates/v2ray/ru-direct.json").exists()
-    assert "marzban restart" not in server["log"].read_text()
+    assert "hiddify restart" not in server["log"].read_text()
 
 
 def test_a_panel_that_does_not_answer_gets_the_old_settings_back(

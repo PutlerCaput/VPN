@@ -97,14 +97,14 @@ def env(tmp_path: Path) -> dict[str, str]:
     (project / ".env").write_text(f"BOT_TOKEN_NOTE={SECRET}\n", encoding="utf-8")
     (project / "secrets" / "db_key.txt").write_text("ab" * 32, encoding="utf-8")
 
-    marzban = tmp_path / "opt-marzban"
-    marzban.mkdir()
-    (marzban / ".env").write_text("UVICORN_PORT=8000\n", encoding="utf-8")
-    (marzban / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
-    (marzban / "Caddyfile").write_text("example.org {}\n", encoding="utf-8")
+    hiddify = tmp_path / "opt-hiddify"
+    hiddify.mkdir()
+    (hiddify / ".env").write_text("UVICORN_PORT=8000\n", encoding="utf-8")
+    (hiddify / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    (hiddify / "Caddyfile").write_text("example.org {}\n", encoding="utf-8")
     xray = tmp_path / "xray_config.json"
     xray.write_text("{}", encoding="utf-8")
-    database = tmp_path / "marzban.sqlite3"
+    database = tmp_path / "hiddify.sqlite3"
     with sqlite3.connect(database) as conn:
         conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
         conn.execute("INSERT INTO users (name) VALUES ('client-1')")
@@ -126,8 +126,8 @@ def env(tmp_path: Path) -> dict[str, str]:
         "AGE_IDENTITY": str(identity),
         "BACKUP_ENV": str(tmp_path / "missing.env"),
         "BACKUP_DIR": str(tmp_path / "backups"),
-        "MARZBAN_DB": str(database),
-        "MARZBAN_DIR": str(marzban),
+        "HIDDIFY_DB": str(database),
+        "HIDDIFY_DIR": str(hiddify),
         "XRAY_CONFIG": str(xray),
     }
 
@@ -184,18 +184,18 @@ def test_the_archive_holds_everything_and_only_the_private_key_opens_it(
             "./bot/bot.db",
             "./bot/.env",
             "./bot/secrets/db_key.txt",
-            "./marzban/db.sqlite3",
-            "./marzban/.env",
-            "./marzban/docker-compose.yml",
-            "./marzban/Caddyfile",
-            "./marzban/xray_config.json",
+            "./hiddify/db.sqlite3",
+            "./hiddify/.env",
+            "./hiddify/docker-compose.yml",
+            "./hiddify/Caddyfile",
+            "./hiddify/xray_config.json",
             "./MANIFEST.sha256",
             "./INFO.txt",
         } <= names
         env_file = tar.extractfile("./bot/.env")
         assert env_file is not None
         assert SECRET in env_file.read().decode()
-        copy = tar.extractfile("./marzban/db.sqlite3")
+        copy = tar.extractfile("./hiddify/db.sqlite3")
         assert copy is not None
         Path(env["BACKUP_DIR"], "m.sqlite3").write_bytes(copy.read())
     with sqlite3.connect(Path(env["BACKUP_DIR"], "m.sqlite3")) as conn:
@@ -253,17 +253,17 @@ def test_a_database_on_the_other_server_is_fetched_not_copied_from_the_old_file(
 
 
 @needs_age
-def test_a_missing_marzban_database_is_flagged_not_hidden(env: dict[str, str]) -> None:
-    result = run("backup_all.sh", {**env, "MARZBAN_DB": "/nonexistent/db.sqlite3"})
+def test_a_missing_hiddify_database_is_flagged_not_hidden(env: dict[str, str]) -> None:
+    result = run("backup_all.sh", {**env, "HIDDIFY_DB": "/nonexistent/db.sqlite3"})
     assert result.returncode == 0, result.stderr
-    assert "warning: нет базы Marzban" in result.stdout
+    assert "warning: нет базы Hiddify Manager" in result.stdout
     caption = Path(env["FAKE_SENT"], "caption.txt").read_text(encoding="utf-8")
-    assert "нет базы Marzban" in caption
+    assert "нет базы Hiddify Manager" in caption
     (archive,) = archives(env)
     with open_archive(env, archive) as tar:
         info = tar.extractfile("./INFO.txt")
         assert info is not None
-        assert "WARNING: нет базы Marzban" in info.read().decode()
+        assert "WARNING: нет базы Hiddify Manager" in info.read().decode()
 
 
 @needs_age

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.scheduler import AUTOBAN_CONFIDENCE, confidence
-from tests.conftest import FakeMarzban, FakeNotifier
+from tests.conftest import FakeHiddify, FakeNotifier
 
 
 async def _active(services: Any, telegram_id: int) -> str:
@@ -25,13 +25,13 @@ def test_confidence_weights() -> None:
 
 
 async def test_single_signal_alerts_admin_without_ban(
-    services: Any, notifier: FakeNotifier, marzban: FakeMarzban
+    services: Any, notifier: FakeNotifier, hiddify: FakeHiddify
 ) -> None:
     node = await _active(services, 610001)
     banned = await services.monitor.handle_report(node, {"PORT_SCANNING"}, {})
     assert banned is False
     assert (await services.db.get_user(610001))["status"] == "active"
-    assert marzban.users[node]["status"] == "active"
+    assert hiddify.users[node]["status"] == "active"
     admin = services.settings.admin_telegram_id
     assert any(
         tid == admin and "Уверенность 60/90" in text for tid, text in notifier.messages
@@ -40,12 +40,12 @@ async def test_single_signal_alerts_admin_without_ban(
     assert kinds == []  # Sub-threshold signals are retained only in memory.
 
 
-async def test_signals_accumulate_into_ban(services: Any, marzban: FakeMarzban) -> None:
+async def test_signals_accumulate_into_ban(services: Any, hiddify: FakeHiddify) -> None:
     node = await _active(services, 610002)
     assert not await services.monitor.handle_report(node, {"PORT_SCANNING"}, {})
     assert await services.monitor.handle_report(node, {"MALICIOUS_PROBE"}, {})
     assert (await services.db.get_user(610002))["status"] == "banned"
-    assert marzban.users[node]["status"] == "disabled"
+    assert hiddify.users[node]["status"] == "disabled"
     # Already banned: further reports are ignored.
     assert not await services.monitor.handle_report(node, {"CYBERCRIME"}, {})
 
@@ -57,9 +57,9 @@ async def test_unknown_kinds_and_nodes_are_ignored(services: Any) -> None:
     assert await services.db.list_anomalies(610003) == []
 
 
-async def test_weak_note_flag_does_not_ban(services: Any, marzban: FakeMarzban) -> None:
+async def test_weak_note_flag_does_not_ban(services: Any, hiddify: FakeHiddify) -> None:
     node = await _active(services, 610004)
-    marzban.panel_usage = [
+    hiddify.panel_usage = [
         {
             "username": node,
             "status": "active",

@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS referral_bonuses (
 );
 
 -- External provisioning is not part of the SQLite transaction. These small
--- job tables make retries safe after a process crash or a temporary Marzban
+-- job tables make retries safe after a process crash or a temporary panel outage
 -- outage. Expiration targets are absolute, so retrying never adds the same
 -- paid period or referral bonus twice.
 CREATE TABLE IF NOT EXISTS payment_activations (
@@ -265,8 +265,8 @@ CREATE TABLE IF NOT EXISTS awg_devices (
 );
 CREATE INDEX IF NOT EXISTS idx_awg_devices_user ON awg_devices(telegram_id);
 
--- AmneziaWG traffic in the user's current Marzban traffic window
--- (window_key = Marzban lifetime minus current usage; -1 = not known yet).
+-- AmneziaWG traffic in the user's current panel traffic window
+-- (window_key = panel lifetime minus current usage; -1 = not known yet).
 CREATE TABLE IF NOT EXISTS awg_usage (
     telegram_id INTEGER PRIMARY KEY,
     window_key INTEGER NOT NULL,
@@ -789,6 +789,13 @@ class Database:
             (config_link, telegram_id),
         )
 
+    async def set_node_username(self, telegram_id: int, node_username: str) -> None:
+        """Persist the panel UUID before the API call so a retry reuses it."""
+        await self._execute(
+            "UPDATE users SET node_username = ? WHERE telegram_id = ?",
+            (node_username, telegram_id),
+        )
+
     async def mark_trial_used(self, telegram_id: int) -> None:
         await self._execute(
             "UPDATE users SET trial_used = 1 WHERE telegram_id = ?",
@@ -1257,7 +1264,7 @@ class Database:
         return total
 
     async def add_awg_usage_bytes(self, telegram_id: int, delta: int) -> None:
-        """Traffic seen while the Marzban window is unknown."""
+        """Traffic seen while the panel window is unknown."""
         await self._execute(
             "INSERT INTO awg_usage (telegram_id, window_key, bytes) VALUES (?, -1, ?) "
             "ON CONFLICT(telegram_id) DO UPDATE SET bytes = bytes + excluded.bytes",

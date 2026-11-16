@@ -74,7 +74,7 @@ def env(tmp_path: Path) -> dict[str, str]:
         (bin_dir / name).chmod(0o755)
     workdir = tmp_path / "project"
     (workdir / "data").mkdir(parents=True)
-    big_log = tmp_path / "marzban-json.log"
+    big_log = tmp_path / "hiddify-json.log"
     with big_log.open("wb") as handle:  # sparse: 250 MB on paper, nothing on disk
         handle.truncate(250 * 1024 * 1024)
     small_log = tmp_path / "bot-json.log"
@@ -88,8 +88,8 @@ def env(tmp_path: Path) -> dict[str, str]:
                 "running": True,
             },
             {
-                "name": "marzban-marzban-1",
-                "image": "gozargah/marzban:v0.8.4",
+                "name": "hiddify-hiddify-1",
+                "image": "hiddify/hiddify-manager:v0.8.4",
                 "running": True,
             },
             {
@@ -106,8 +106,8 @@ def env(tmp_path: Path) -> dict[str, str]:
         ],
         "images": [
             "node-rental-bot:latest",
-            "gozargah/marzban:v0.8.4",
-            "gozargah/marzban:v0.8.3",
+            "hiddify/hiddify-manager:v0.8.4",
+            "hiddify/hiddify-manager:v0.8.3",
             "amnezia-awg2:latest",
             "cloudflare/cloudflared:2024.1.0",
             "hello-world:latest",
@@ -116,7 +116,7 @@ def env(tmp_path: Path) -> dict[str, str]:
         ],
         "volumes": ["3f9c0ffee"],
         "logs": {
-            "marzban-marzban-1": str(big_log),
+            "hiddify-hiddify-1": str(big_log),
             "node-rental-bot-1": str(small_log),
         },
     }
@@ -147,12 +147,12 @@ def _run(env: dict[str, str], *args: str) -> tuple[str, list[str]]:
 def test_report_lists_and_removes_nothing(env: dict[str, str]) -> None:
     out, calls = _run(env)
     assert "REPORT ONLY" in out
-    assert "would remove: gozargah/marzban:v0.8.3 (no container uses it" in out
+    assert "would remove: hiddify/hiddify-manager:v0.8.3 (no container uses it" in out
     assert "hello-world:latest (123 MB)" in out  # listed, never removed
     assert "would remove: amnezia-awg2" not in out  # a running container uses it
     assert "old-tunnel (cloudflare/cloudflared:2024.1.0" in out
     assert "3f9c0ffee" in out
-    assert "would empty: marzban-marzban-1 (250 MB)" in out
+    assert "would empty: hiddify-hiddify-1 (250 MB)" in out
     assert f"would remove old kernels: {OLD_KERNEL}" in out
     assert platform.release() not in out.split("would remove old kernels:")[1]
     assert "libfoo1" not in out
@@ -165,10 +165,10 @@ def test_report_lists_and_removes_nothing(env: dict[str, str]) -> None:
 def test_apply_removes_only_the_safe_part(env: dict[str, str]) -> None:
     out, calls = _run(env, "--apply")
     removed = [c.split()[-1] for c in calls if c.startswith("docker rmi")]
-    assert removed == ["gozargah/marzban:v0.8.3"]
+    assert removed == ["hiddify/hiddify-manager:v0.8.3"]
     assert "amnezia-awg2:latest" not in " ".join(calls)
     for kept in (
-        "gozargah/marzban:v0.8.4",
+        "hiddify/hiddify-manager:v0.8.4",
         "hello-world:latest",
         "python:3.11-slim-bookworm",
         "caddy:2.11.7-builder",
@@ -177,7 +177,7 @@ def test_apply_removes_only_the_safe_part(env: dict[str, str]) -> None:
     ):
         assert kept not in removed
     assert not [c for c in calls if c.startswith(("docker rm ", "docker volume rm"))]
-    assert "emptied: marzban-marzban-1 (250 MB)" in out
+    assert "emptied: hiddify-hiddify-1 (250 MB)" in out
     assert Path(env["BIG_LOG"]).stat().st_size == 0
     purges = [c for c in calls if "purge" in c]
     assert purges == [f"apt-get -y -q purge {OLD_KERNEL}"]

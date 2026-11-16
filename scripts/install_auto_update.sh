@@ -89,5 +89,5 @@ if ((check)); then
   exit 1
 fi
 printf 'AUTO_UPDATE_INSTALL_OK. It runs on the first Sunday of each month at about 05:00 UTC.\n'
-printf 'Docker, Marzban, the project code and the reboot stay with you (docs/SERVER_MAINTENANCE.md).\n'
+printf 'Docker, Hiddify Manager, the project code and the reboot stay with you (docs/SERVER_MAINTENANCE.md).\n'
 printf 'Check: bash scripts/update_bot.sh --doctor   Off: bash scripts/install_auto_update.sh --remove\n'

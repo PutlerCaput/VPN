@@ -43,8 +43,8 @@ from services.container import Services
 from services.cryptopay import CryptoPayClient
 from services.email_login import EmailLogin
 from services.health import ServiceHealth
+from services.hiddify import HiddifyClient
 from services.mailer import Mailer
-from services.marzban import MarzbanClient
 from services.notifier import Notifier
 from services.payment_reconciliation import PaymentReconciler
 from services.provisioning import ProvisioningService
@@ -63,16 +63,14 @@ logger = logging.getLogger("main")
 
 
 def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
-    marzban = MarzbanClient(
-        settings.marzban_url,
-        settings.marzban_username,
-        settings.marzban_password.get_secret_value(),
-        settings.marzban_inbound_tag,
-        verify_tls=settings.marzban_verify_tls,
-        timeout=settings.marzban_timeout,
-        extra_inbound_tags=tuple(
-            t.strip() for t in settings.marzban_extra_inbound_tags.split(",")
-        ),
+    hiddify = HiddifyClient(
+        settings.hiddify_url,
+        settings.hiddify_api_key.get_secret_value(),
+        settings.hiddify_admin_proxy_path,
+        user_proxy_path=settings.hiddify_user_proxy_path,
+        subscription_base_url=settings.subscription_base_url,
+        verify_tls=settings.hiddify_verify_tls,
+        timeout=settings.hiddify_timeout,
     )
     cryptopay = (
         CryptoPayClient(
@@ -96,7 +94,7 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
         settings.vapid_contact,
     )
     notifier = Notifier(bot, push)
-    provisioning = ProvisioningService(db, marzban, notifier, settings)
+    provisioning = ProvisioningService(db, hiddify, notifier, settings)
     traffic = (
         ServerTrafficWatch(db, notifier, settings)
         if settings.server_traffic_limit_gb > 0
@@ -125,7 +123,7 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
         settings=settings,
         db=db,
         bot=bot,
-        marzban=marzban,
+        hiddify=hiddify,
         cryptopay=cryptopay,
         sbp=sbp,
         push=push,
@@ -141,7 +139,7 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
                 settings.stars_rub_per_star if settings.stars_enabled else None
             ),
         ),
-        monitor=AnomalyMonitor(db, marzban, provisioning, settings),
+        monitor=AnomalyMonitor(db, hiddify, provisioning, settings),
         yookassa=yookassa,
         email_login=EmailLogin(
             db,
@@ -155,7 +153,7 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
             else None
         ),
         health=ServiceHealth(
-            marzban, notifier, settings.admin_telegram_id, settings.main_location_name
+            hiddify, notifier, settings.admin_telegram_id, settings.main_location_name
         ),
         telegram_rub=(
             TelegramRubPayments(
@@ -174,7 +172,7 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
                     settings.awg_agent_url,
                     settings.awg_agent_token.get_secret_value(),
                 ),
-                marzban,
+                hiddify,
                 settings,
             )
             if settings.awg_enabled and settings.awg_agent_token is not None
@@ -444,7 +442,7 @@ async def run() -> None:
                 await polling
         scheduler.shutdown(wait=False)
         await runner.cleanup()
-        await services.marzban.close()
+        await services.hiddify.close()
         if services.cryptopay is not None:
             await services.cryptopay.close()
         if services.yookassa is not None:

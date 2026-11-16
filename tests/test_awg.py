@@ -326,8 +326,8 @@ def fake_agent() -> FakeAgent:
 
 
 @pytest.fixture
-def awg(services: Any, fake_agent: FakeAgent, marzban: Any) -> AwgService:
-    service = AwgService(services.db, fake_agent, marzban, services.settings)  # type: ignore[arg-type]
+def awg(services: Any, fake_agent: FakeAgent, hiddify: Any) -> AwgService:
+    service = AwgService(services.db, fake_agent, hiddify, services.settings)  # type: ignore[arg-type]
     services.awg = service
     return service
 
@@ -438,8 +438,8 @@ async def test_reconcile_follows_the_subscription(
     assert key(77) not in fake_agent.state
 
 
-async def test_shared_quota_lowers_marzban_and_cuts_awg(
-    services: Any, awg: AwgService, fake_agent: FakeAgent, marzban: Any
+async def test_shared_quota_lowers_panel_and_cuts_awg(
+    services: Any, awg: AwgService, fake_agent: FakeAgent, hiddify: Any
 ) -> None:
     user = await _active(services, 640005)
     node = user["node_username"]
@@ -449,14 +449,14 @@ async def test_shared_quota_lowers_marzban_and_cuts_awg(
 
     def panel(used: int, lifetime: int | None = None) -> None:
         lifetime = lifetime if lifetime is not None else used
-        marzban.users[node]["used_traffic"] = used
-        marzban.users[node]["lifetime_used_traffic"] = lifetime
-        marzban.panel_usage = [
+        hiddify.users[node]["used_traffic"] = used
+        hiddify.users[node]["lifetime_used_traffic"] = lifetime
+        hiddify.panel_usage = [
             {
                 "username": node,
                 "used_traffic": used,
                 "lifetime_used_traffic": lifetime,
-                "data_limit": marzban.users[node]["data_limit"],
+                "data_limit": hiddify.users[node]["data_limit"],
                 "status": "active",
             }
         ]
@@ -465,7 +465,7 @@ async def test_shared_quota_lowers_marzban_and_cuts_awg(
     fake_agent.state[pk]["tx_bytes"] = 20 * GIB
     panel(10 * GIB)
     await awg.reconcile()
-    assert marzban.users[node]["data_limit"] == limit - quantize(50 * GIB)
+    assert hiddify.users[node]["data_limit"] == limit - quantize(50 * GIB)
     assert (await services.db.get_awg_usage(640005))["bytes"] == 50 * GIB
     status = await services.provisioning.traffic_status(
         await services.db.get_user(640005)
@@ -481,20 +481,20 @@ async def test_shared_quota_lowers_marzban_and_cuts_awg(
     assert (await services.db.get_awg_usage(640005))["bytes"] == 200 * GIB
     assert fake_agent.state[pk]["enabled"] is False  # 10 + 200 >= 200 GB
 
-    # Marzban reset its counter: a new window, AmneziaWG works again.
+    # Hiddify reset its counter: a new window, AmneziaWG works again.
     panel(0, lifetime=10 * GIB)
     await awg.reconcile()
     assert fake_agent.state[pk]["enabled"] is True
-    assert marzban.users[node]["data_limit"] == limit
+    assert hiddify.users[node]["data_limit"] == limit
 
 
 async def test_agent_restart_counter_reset_is_not_negative(
-    services: Any, awg: AwgService, fake_agent: FakeAgent, marzban: Any
+    services: Any, awg: AwgService, fake_agent: FakeAgent, hiddify: Any
 ) -> None:
     user = await _active(services, 640006)
     device = await awg.add_device(640006)
     pk = str(device["public_key"])
-    marzban.panel_usage = [
+    hiddify.panel_usage = [
         {"username": user["node_username"], "used_traffic": 0, "data_limit": 1}
     ]
     fake_agent.state[pk]["rx_bytes"] = 5 * GIB
@@ -505,7 +505,7 @@ async def test_agent_restart_counter_reset_is_not_negative(
 
 
 async def test_combined_usage_ignores_another_window(services: Any) -> None:
-    # The window is Marzban's lifetime minus current usage: 6 - 1 = 5 GiB.
+    # The window is Hiddify's lifetime minus current usage: 6 - 1 = 5 GiB.
     await services.db.set_awg_usage(640007, 5 * GIB, 3 * GIB)
     assert await combined_usage(services.db, 640007, GIB, 6 * GIB, 10 * GIB) == (
         4 * GIB,

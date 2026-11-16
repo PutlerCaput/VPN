@@ -47,7 +47,7 @@ pydantic-core и typing-inspection согласно его зависимост�
 также прошли. После серверного переключения
 нужны /healthz, приём платежных вебхуков, наблюдение RSS/anon/memory.events,
 проверка очередей и сохранённая возможность отката к прежнему образу.
-Это обновление бота не должно затрагивать Marzban, AmneziaWG, Caddy и firewall.
+Это обновление бота не должно затрагивать Hiddify Manager, AmneziaWG, Caddy и firewall.
 
 ## Обновление по production
 

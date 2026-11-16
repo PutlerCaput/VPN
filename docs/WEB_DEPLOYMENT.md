@@ -1,11 +1,11 @@
-# Веб-приложение рядом с действующим Marzban
+# Веб-приложение рядом с действующим Hiddify Manager
 
-На DE уже работает `marzban-caddy`, которому принадлежат порты 80/8443.
+На DE уже работает `hiddify-caddy`, которому принадлежат порты 80/8443.
 Обычный `docker compose up -d` из корня проекта пытается занять порт 80 ещё раз.
 Для этого сервера используйте отдельный `deploy/web/compose.yaml`: веб-контейнер
 слушает только `127.0.0.1:18082`, обращается к боту на `127.0.0.1:8080`
 и не запускает второй экземпляр бота. Существующий Caddy завершает HTTPS.
-Панель, подписки Marzban и Amnezia продолжают обслуживаться прежним стеком.
+Панель, подписки Hiddify Manager и Amnezia продолжают обслуживаться прежним стеком.
 
 Эти файлы являются подготовкой развёртывания. Команды ниже необходимо выполнять
 на DE после переноса проверенной версии проекта. Они не подтверждают, что
@@ -65,10 +65,10 @@ Cloudflare. TLS при проксировании должен оставать�
 
 ```bash
 WEB_CADDY_BACKUP="/root/Caddyfile.before-app-$(date -u +%Y%m%dT%H%M%SZ)"
-cp -a /opt/marzban/Caddyfile "$WEB_CADDY_BACKUP"
-cp -a /opt/marzban/Caddyfile /root/Caddyfile.app-candidate
+cp -a /opt/hiddify-manager/Caddyfile "$WEB_CADDY_BACKUP"
+cp -a /opt/hiddify-manager/Caddyfile /root/Caddyfile.app-candidate
 cat deploy/web/frontdoor.caddy >> /root/Caddyfile.app-candidate
-docker exec -i marzban-caddy caddy validate --config /dev/stdin --adapter caddyfile < /root/Caddyfile.app-candidate
+docker exec -i hiddify-caddy caddy validate --config /dev/stdin --adapter caddyfile < /root/Caddyfile.app-candidate
 ```
 
 Добавляйте сайт только один раз: если `app.cyberdefency.com` уже существует
@@ -77,10 +77,10 @@ docker exec -i marzban-caddy caddy validate --config /dev/stdin --adapter caddyf
 bind mount; замена файла через `mv` может оставить контейнер на старой конфигурации.
 
 ```bash
-cat /root/Caddyfile.app-candidate > /opt/marzban/Caddyfile
-if ! docker exec marzban-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
-  cat "$WEB_CADDY_BACKUP" > /opt/marzban/Caddyfile
-  docker exec marzban-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+cat /root/Caddyfile.app-candidate > /opt/hiddify-manager/Caddyfile
+if ! docker exec hiddify-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+  cat "$WEB_CADDY_BACKUP" > /opt/hiddify-manager/Caddyfile
+  docker exec hiddify-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
 fi
 bash deploy/web/check-web.sh https://app.cyberdefency.com
 ```
@@ -114,8 +114,8 @@ Telegram Login через `/setdomain`: `app.cyberdefency.com`. Кнопке Min
 
 ```bash
 test -s "$WEB_CADDY_BACKUP"
-cat "$WEB_CADDY_BACKUP" > /opt/marzban/Caddyfile
-docker exec marzban-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+cat "$WEB_CADDY_BACKUP" > /opt/hiddify-manager/Caddyfile
+docker exec hiddify-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
 docker compose -f deploy/web/compose.yaml stop app-web
 ```
 

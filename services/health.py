@@ -1,10 +1,10 @@
 """Service health: which locations serve traffic, with outage alerts.
 
 Large VPN services publish a server list with live status and react to an
-outage before users write in. Here the source is the Marzban panel:
+outage before users write in. Here the source is the Hiddify Manager panel:
 
-* ``/api/core`` — Xray on the panel host (the main location);
-* ``/api/nodes`` — every additional Marzban node (other locations).
+* ``/api/v2/panel/info`` and ``/api/v2/panel/ping`` — the panel itself
+  (the main location). Additional locations are configured in the panel.
 
 A location must fail ``failures_to_alert`` consecutive checks before the owner
 is alerted, so a single slow answer does not page anyone; recovery is reported
@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from services.marzban import MarzbanError, MarzbanForbidden
+from services.hiddify import HiddifyError, HiddifyForbidden
 from services.metrics import LOCATION_UP
 from services.security import html_escape
 
@@ -86,19 +86,19 @@ class ServiceHealth:
             locations.append(
                 Location(self.main_location_name, core.get("started") is True)
             )
-        except MarzbanForbidden:
+        except HiddifyForbidden:
             # The panel answered: it is up, but this account cannot see the core.
             self._warn_forbidden("core")
-        except (MarzbanError, TimeoutError):
+        except (HiddifyError, TimeoutError):
             return HealthReport(int(time.time()), False, ())
         try:
             nodes = await asyncio.wait_for(
                 self.source.get_nodes(), timeout=CHECK_TIMEOUT_SECONDS
             )
-        except MarzbanForbidden:
+        except HiddifyForbidden:
             self._warn_forbidden("nodes")
             nodes = []
-        except (MarzbanError, TimeoutError):
+        except (HiddifyError, TimeoutError):
             return HealthReport(int(time.time()), False, tuple(locations))
         for node in nodes:
             status = node.get("status")
@@ -137,7 +137,7 @@ class ServiceHealth:
         return report
 
     async def _track(self, key: str, ok: bool) -> None:
-        label = "Панель Marzban" if key == PANEL_KEY else f"Сервер {html_escape(key)}"
+        label = "Панель Hiddify" if key == PANEL_KEY else f"Сервер {html_escape(key)}"
         if ok:
             self._streaks[key] = 0
             if key in self._alerted:

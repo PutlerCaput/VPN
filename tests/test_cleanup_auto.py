@@ -154,7 +154,7 @@ def env(tmp_path: Path) -> dict[str, str]:
 
     home = tmp_path / "home"
     (home / "vpn-update").mkdir(parents=True)
-    big_log = tmp_path / "marzban-json.log"
+    big_log = tmp_path / "hiddify-json.log"
     with big_log.open("wb") as handle:  # sparse: 250 MB on paper, nothing on disk
         handle.truncate(250 * 1024 * 1024)
 
@@ -167,7 +167,7 @@ def env(tmp_path: Path) -> dict[str, str]:
                 "name": "node-rental-web-local-app-web-1",
                 "image": f"node-rental-web:release-{stamp(30)}",
             },
-            {"name": "marzban-marzban-1", "image": "gozargah/marzban:v0.8.4"},
+            {"name": "hiddify-hiddify-1", "image": "hiddify/hiddify-manager:v0.8.4"},
         ],
         "images": [
             "node-rental-bot:latest",
@@ -183,12 +183,12 @@ def env(tmp_path: Path) -> dict[str, str]:
             f"node-rental-web:rollback-{stamp(50)}",
             f"node-rental-web:rollback-{stamp(45)}",
             f"node-rental-web:rollback-{stamp(40)}",
-            "gozargah/marzban:v0.8.4",
-            "gozargah/marzban:v0.8.3",
+            "hiddify/hiddify-manager:v0.8.4",
+            "hiddify/hiddify-manager:v0.8.3",
             "hello-world:latest",
         ],
         "volumes": ["3f9c0ffee"],
-        "logs": {"marzban-marzban-1": str(big_log)},
+        "logs": {"hiddify-hiddify-1": str(big_log)},
     }
     for container in state["containers"]:
         container.update({"running": True, "status": up})
@@ -339,7 +339,7 @@ def test_the_weekly_run_never_touches_what_needs_someone_at_the_keyboard(
         result.stdout
     )
     assert not [c for c in everything if "db_maintenance" in c]
-    assert "gozargah/marzban:v0.8.3" not in " ".join(removed_images(env))
+    assert "hiddify/hiddify-manager:v0.8.3" not in " ".join(removed_images(env))
     removals = ("docker rm ", "docker volume rm")
     assert not [c for c in everything if c.startswith(removals)]
     assert "hello-world:latest" in result.stdout  # listed
@@ -353,7 +353,7 @@ def test_the_supervised_run_is_unchanged_and_leaves_no_record(
     result = run_script("server_cleanup.sh", env, "--apply")
     assert result.returncode == 0, result.stdout + result.stderr
     # Not the weekly rules: the old v0.8.3 image, the kernel and the key go too.
-    assert "gozargah/marzban:v0.8.3" in removed_images(env)
+    assert "hiddify/hiddify-manager:v0.8.3" in removed_images(env)
     assert [c for c in calls(env) if "purge" in c] == [
         f"apt-get -y -q purge {OLD_KERNEL}"
     ]
@@ -492,7 +492,7 @@ def test_it_leaves_everything_alone_while_a_container_is_unwell(
     assert_skipped(
         env,
         result,
-        "not touching anything while a container is not healthy: marzban-marzban-1",
+        "not touching anything while a container is not healthy: hiddify-hiddify-1",
     )
 
 
@@ -523,11 +523,11 @@ def test_it_does_nothing_when_docker_or_the_bot_is_not_running(
 def test_a_container_that_goes_away_during_the_cleanup_is_reported(
     env: dict[str, str],
 ) -> None:
-    change_state(env, stop_on_prune="marzban-marzban-1")
+    change_state(env, stop_on_prune="hiddify-hiddify-1")
     result = auto(env)
     assert result.returncode == 1
     assert "CLEANUP_AUTO_FAILED: the running containers changed" in result.stderr
-    assert "marzban-marzban-1" in result.stderr
+    assert "hiddify-hiddify-1" in result.stderr
     assert record(env)["result"] == "failed"
     (message,) = texts(env)
     assert message.startswith("⚠️ Автоочистка закончилась")

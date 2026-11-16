@@ -1,4 +1,4 @@
-# Append this site to the EXISTING /opt/marzban/Caddyfile after validation.
+# Append this site to the EXISTING /opt/hiddify-manager/Caddyfile after validation.
 # Keep its panel/sub sites and global settings. Do not replace the whole file.
 app.cyberdefency.com {
 	# Internal application endpoints must never be exposed by this front door.

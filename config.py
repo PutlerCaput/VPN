@@ -74,7 +74,7 @@ SELLABLE_TIERS: tuple[str, ...] = ("standard",)
 
 
 GIB = 1024**3
-# Marzban's "month" reset strategy restarts the counter every 30 days counted
+# The "month" reset strategy restarts the counter every 30 days counted
 # from the user's creation or last reset, not on a calendar month.
 TRAFFIC_RESET_STRATEGIES = ("no_reset", "day", "week", "month", "year")
 
@@ -83,12 +83,12 @@ TRAFFIC_RESET_STRATEGIES = ("no_reset", "day", "week", "month", "year")
 class Tier:
     slug: str
     title: str
-    # Contractual limit (offer, clause 3.4). Marzban has no per-user IP limit, and the
+    # Contractual limit (offer, clause 3.4). The panel has no per-user IP limit, and the
     # service does not log client IPs, so the limit is not enforced technically.
     devices: int
     priority_support: bool
     features: tuple[str, ...]
-    # Shared traffic quota of the whole subscription, enforced by Marzban
+    # Shared traffic quota of the whole subscription, enforced by Hiddify Manager
     # (data_limit). 0 means unlimited, as in the original tiers.
     traffic_gb: int = 0
     traffic_reset: str = "no_reset"
@@ -241,30 +241,32 @@ class Settings(BaseSettings):
     conn_log_retention_days: int = 1826
     activity_logging_enabled: bool = False
 
-    # --- Marzban ------------------------------------------------------------
-    marzban_url: str = "https://marzban.internal:8000"
-    marzban_username: str = "admin"
-    marzban_password: SecretStr
-    marzban_inbound_tag: str = "VLESS TCP REALITY"
-    # Further VLESS inbounds every new user gets as well (comma-separated tags):
-    # backup entries of another kind (docs/VPN_ENTRIES.md).
-    marzban_extra_inbound_tags: str = ""
-    marzban_verify_tls: bool = True
-    marzban_timeout: float = 15.0
+    # --- Hiddify Manager ----------------------------------------------------
+    # Origin of the panel (scheme + host + optional port), no trailing path.
+    hiddify_url: str = "https://panel.internal"
+    # Admin UUID used as the Hiddify-API-Key header (not a password).
+    hiddify_api_key: SecretStr
+    # Secret path from Settings -> Advanced Settings -> Admin Proxy Path.
+    hiddify_admin_proxy_path: str = ""
+    # Secret path from Settings -> Advanced Settings -> User Proxy Path.
+    # Used to build the public subscription URL for a user UUID.
+    hiddify_user_proxy_path: str = ""
+    hiddify_verify_tls: bool = True
+    hiddify_timeout: float = 15.0
 
     # --- Locations and configuration delivery -------------------------------
     # link: one vless:// link to the first location (original behaviour).
-    # subscription: the Marzban subscription URL with every location; clients
+    # subscription: the Hiddify subscription URL with every location; clients
     # refresh the server list themselves when servers are added or removed.
     config_delivery: Literal["link", "subscription"] = "link"
-    # Public origin of the Marzban subscription endpoint, used when Marzban
-    # reports a relative /sub/... path (XRAY_SUBSCRIPTION_URL_PREFIX unset).
+    # Public origin of the Hiddify subscription (user proxy path + UUID),
+    # used when the panel origin is not the public HTTPS address.
     subscription_base_url: str | None = None
     # True once scripts/ru_direct.sh --apply has put the rule "Russian sites
-    # directly" into Marzban's subscription: v2rayNG then needs no setup and the
+    # directly" into the Hiddify subscription: v2rayNG then needs no setup and the
     # bot, the site and the Mini App say so instead of showing steps.
     ru_direct_subscription: bool = False
-    # Display name of the server that runs the Marzban core itself.
+    # Display name of the server that runs the Hiddify Manager core itself.
     main_location_name: str = Field("Основной сервер", min_length=1, max_length=64)
 
     # --- AmneziaWG: second protocol, one key per device ----------------------
@@ -457,10 +459,15 @@ class Settings(BaseSettings):
             raise ValueError("awg_agent_url must be an http(s) origin without a path")
         return value
 
-    @field_validator("marzban_url")
+    @field_validator("hiddify_url")
     @classmethod
-    def _strip_marzban_slash(cls, value: str) -> str:
+    def _strip_hiddify_slash(cls, value: str) -> str:
         return value.rstrip("/")
+
+    @field_validator("hiddify_admin_proxy_path", "hiddify_user_proxy_path")
+    @classmethod
+    def _strip_proxy_path(cls, value: str) -> str:
+        return value.strip().strip("/")
 
     @field_validator(
         "telegram_webhook_secret",
@@ -571,8 +578,8 @@ class Settings(BaseSettings):
             problems.append("jwt_secret must be at least 64 characters (32 bytes hex)")
         if not self.bot_token.get_secret_value().strip():
             problems.append("bot_token is empty")
-        if not self.marzban_password.get_secret_value().strip():
-            problems.append("marzban_password is empty")
+        if not self.hiddify_api_key.get_secret_value().strip():
+            problems.append("hiddify_api_key is empty")
         if (
             self.sbp_provider in ("robokassa", "payanyway")
             and not self.sbp_provider_token

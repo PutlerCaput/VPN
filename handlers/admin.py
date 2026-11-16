@@ -214,7 +214,7 @@ async def cmd_ban(message: Message, command: CommandObject, services: Services) 
         await message.answer("🚫 Заблокирован.")
     elif await services.db.get_pending_ban(int(parts[0])):
         await message.answer(
-            "⏳ Блокировка поставлена в очередь: Marzban пока не подтвердил "
+            "⏳ Блокировка поставлена в очередь: Hiddify пока не подтвердил "
             "отключение узла. Бот повторит попытку автоматически."
         )
     else:

@@ -16,21 +16,21 @@
 # makes a TCP entry with a Russian cover that only the RU relay may reach (the RU
 # address then forwards a port to it, docs/VPN_ENTRIES.md). Each new entry gets its
 # own REALITY key (xray x25519) and short id.
-# --apply restarts Marzban once: connected clients drop
+# --apply restarts Hiddify Manager once: connected clients drop
 # for a few seconds and reconnect by themselves. If Xray does not come back with
 # both ports listening, the previous config is put back at once.
 # Nothing secret is printed. docs/VPN_ENTRIES.md explains the rest.
 set -euo pipefail
 
-CONFIG="${XRAY_CONFIG:-/var/lib/marzban/xray_config.json}"
-MARZBAN="${MARZBAN_CONTAINER:-marzban-marzban-1}"
+CONFIG="${XRAY_CONFIG:-/opt/hiddify-manager/xray_config.json}"
+PANEL="${HIDDIFY_CONTAINER:-hiddify-manager}"
 BOT="${BOT_CONTAINER:-node-rental-bot-1}"
 TAG="${TRANSPORT_TAG:-VLESS-GRPC-REALITY}"
 NETWORK="${TRANSPORT_NETWORK:-grpc}"
 ALLOW_FROM="${ALLOW_FROM:-}"   # empty: the port is open to everyone
 BASE_PORT="${BASE_PORT:-2096}"
-ASSETS="${XRAY_ASSETS:-/var/lib/marzban/assets}"
-STATE="${TRANSPORT_STATE:-/var/lib/marzban/.vless-transport-$TAG}"   # path of the backup
+ASSETS="${XRAY_ASSETS:-/opt/hiddify-manager/assets}"
+STATE="${TRANSPORT_STATE:-/opt/hiddify-manager/.vless-transport-$TAG}"   # path of the backup
 WAIT_SECONDS="${WAIT_SECONDS:-60}"
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 SRC="$(dirname "$HERE")"
@@ -50,7 +50,7 @@ stop() {
 listening() { ss -lnt 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1\$"; }
 
 xray_test() {
-  docker exec -e "XRAY_LOCATION_ASSET=$ASSETS" "$MARZBAN" \
+  docker exec -e "XRAY_LOCATION_ASSET=$ASSETS" "$PANEL" \
     xray run -test -config "$1" >/dev/null 2>&1
 }
 
@@ -58,7 +58,7 @@ check() {
   local cover="$1" port="$2" candidate="$3" answer key
   [[ -r "$CONFIG" ]] || stop "cannot read $CONFIG"
   [[ "$port" =~ ^[0-9]{4,5}$ ]] || stop "the port is a number, 1024-65535"
-  docker inspect "$MARZBAN" >/dev/null 2>&1 || stop "no container $MARZBAN"
+  docker inspect "$PANEL" >/dev/null 2>&1 || stop "no container $PANEL"
   if listening "$port"; then stop "port $port is already in use on this server"; fi
   # REALITY needs a cover that speaks TLS 1.3 and HTTP/2 to this server. curl asks
   # for exactly that and fails otherwise ("xray tls ping" does not print the version).
@@ -76,7 +76,7 @@ check() {
   [[ "$NETWORK" =~ ^(grpc|tcp|xhttp)$ ]] || stop "TRANSPORT_NETWORK is grpc, tcp or xhttp"
   # Its own REALITY key, made by Xray itself; it goes to the writer through the
   # environment, never on a command line, and is never printed.
-  key="$(docker exec "$MARZBAN" xray x25519 2>/dev/null \
+  key="$(docker exec "$PANEL" xray x25519 2>/dev/null \
     | sed -nE 's/^ *Private ?[Kk]ey: *([A-Za-z0-9_-]{43}) *$/\1/p' | head -1)"
   [[ -n "$key" ]] || stop "xray x25519 gave no key"
   REALITY_PRIVATE_KEY="$key" python3 "$HERE/xray_add_inbound.py" "$CONFIG" "$candidate" \
@@ -87,8 +87,8 @@ check() {
   say "Xray accepts the candidate config"
 }
 
-# The bot's MARZBAN_EXTRA_INBOUND_TAGS now, and the list with or without one tag.
-extra_tags() { docker exec "$BOT" printenv MARZBAN_EXTRA_INBOUND_TAGS 2>/dev/null || true; }
+# The bot's HIDDIFY_EXTRA_INBOUND_TAGS now, and the list with or without one tag.
+extra_tags() { docker exec "$BOT" printenv HIDDIFY_EXTRA_INBOUND_TAGS 2>/dev/null || true; }
 with_tag() {
   local list="$1" tag="$2"
   [[ ",$list," == *",$tag,"* ]] && { printf '%s' "$list"; return; }
@@ -105,7 +105,7 @@ without_tag() {
 
 restart_and_wait() {
   local port="$1" waited=0
-  docker restart "$MARZBAN" >/dev/null
+  docker restart "$PANEL" >/dev/null
   while ((waited < WAIT_SECONDS)); do
     if listening "$BASE_PORT" && { [[ -z "$port" ]] || listening "$port"; }; then
       return 0
@@ -155,9 +155,9 @@ case "${1:-}" in
     docker exec -i "$BOT" python3 - --attach "$TAG" <"$HERE/vpn_entries.py" \
       || stop "Xray is switched, but the users were not given the entry; run again: docker exec -i $BOT python3 - --attach $TAG < $HERE/vpn_entries.py"
     tags="$(with_tag "$(extra_tags)" "$TAG")"
-    bash "$HERE/update_bot.sh" --set "MARZBAN_EXTRA_INBOUND_TAGS=$tags" >/dev/null \
-      || stop "the users have the entry, but new users will not: update_bot.sh --set MARZBAN_EXTRA_INBOUND_TAGS=$tags"
-    say "new users get it too (MARZBAN_EXTRA_INBOUND_TAGS=$tags)"
+    bash "$HERE/update_bot.sh" --set "HIDDIFY_EXTRA_INBOUND_TAGS=$tags" >/dev/null \
+      || stop "the users have the entry, but new users will not: update_bot.sh --set HIDDIFY_EXTRA_INBOUND_TAGS=$tags"
+    say "new users get it too (HIDDIFY_EXTRA_INBOUND_TAGS=$tags)"
     say "VLESS_TRANSPORT_OK: $TAG ($NETWORK) on $port, cover $cover. Clients see it after a subscription update."
     if [[ "$TAG" == VLESS-GRPC-REALITY ]]; then
       say "Undo: bash $SRC/scripts/vless_transport.sh --rollback"
@@ -171,17 +171,17 @@ case "${1:-}" in
     port="$(sed -n 2p "$STATE")"
     [[ -r "$backup" ]] || stop "the backup $backup is gone"
     cp -p "$backup" "$CONFIG"
-    restart_and_wait "" || stop "Xray did not come back after the rollback: look at docker logs $MARZBAN"
+    restart_and_wait "" || stop "Xray did not come back after the rollback: look at docker logs $PANEL"
     if command -v ufw >/dev/null 2>&1 && [[ -n "$port" ]]; then
       ufw delete allow "$port/tcp" >/dev/null 2>&1 || true
       if [[ -n "$ALLOW_FROM" ]]; then
         ufw delete allow from "$ALLOW_FROM" to any port "$port" proto tcp >/dev/null 2>&1 || true
       fi
     fi
-    bash "$HERE/update_bot.sh" --set "MARZBAN_EXTRA_INBOUND_TAGS=$(without_tag "$(extra_tags)" "$TAG")" >/dev/null \
-      || say "WARN: set it by hand, or new users get a tag Xray no longer has: update_bot.sh --set MARZBAN_EXTRA_INBOUND_TAGS="
+    bash "$HERE/update_bot.sh" --set "HIDDIFY_EXTRA_INBOUND_TAGS=$(without_tag "$(extra_tags)" "$TAG")" >/dev/null \
+      || say "WARN: set it by hand, or new users get a tag Xray no longer has: update_bot.sh --set HIDDIFY_EXTRA_INBOUND_TAGS="
     rm -f "$STATE"
-    say "VLESS_TRANSPORT_ROLLED_BACK: the config from before --apply is back. Users keep a tag Xray no longer has; Marzban ignores it."
+    say "VLESS_TRANSPORT_ROLLED_BACK: the config from before --apply is back. Users keep a tag Xray no longer has; Hiddify Manager ignores it."
     ;;
   *)
     stop "usage: --check COVER [PORT] | --apply COVER [PORT] | --rollback"

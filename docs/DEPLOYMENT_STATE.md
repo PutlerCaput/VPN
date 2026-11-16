@@ -306,7 +306,7 @@ Security → Dependabot.
   (`NETWORK_RESILIENCE.md`). **Исправление от 10 ноября (вечер):** squid в этот список не
   входит: это прокси Telegram для бота на RU (вариант A', `TELEGRAM_PROXY.md`). Платёжные
   остатки выведены из эксплуатации, см. раздел выше.
-- **Бот и панель:** бот на `127.0.0.1:8080`, Marzban на `127.0.0.1:8000`; публичных
+- **Бот и панель:** бот на `127.0.0.1:8080`, Hiddify Manager на `127.0.0.1:8000`; публичных
   слушателей у них нет.
 - **AmneziaWG владельца:** `amnezia-awg2` публикует `44877/udp`, Docker открывает его
   мимо ufw. README и `NETWORK_RESILIENCE.md` называют `49484`: сверьте с профилем
@@ -344,10 +344,10 @@ Security → Dependabot.
 ## Германия — 89.125.210.172
 
 - Ubuntu 24.04.5, x86_64, RAM 1.9 GiB; последний известный свободный диск 5.9 GiB.
-- Marzban v0.8.4, Xray TCP/2096; UFW разрешает этот порт с российского relay.
+- Hiddify Manager v0.8.4, Xray TCP/2096; UFW разрешает этот порт с российского relay.
 - AmneziaWG `amnezia-awg2`, UDP/49484; конфигурация внутри writable layer
   контейнера, отдельного тома с ней по диагностике не обнаружено.
-- Caddy/панель: TCP/8443, Marzban API: 127.0.0.1:8000.
+- Caddy/панель: TCP/8443, Hiddify Manager API: 127.0.0.1:8000.
 - Бот `node-rental-bot-1`, HTTP: 127.0.0.1:8080, Compose-проект `node-rental`.
 - Папка Compose: `/root/secure-node-bot/node-rental/node-rental`.
 
@@ -356,7 +356,7 @@ Security → Dependabot.
 Архив `vpn-20261102T144129Z-.owner-vpn-backup.Onl1W5gv.tar.gz.gpg`
 на сервере проверен расшифрованием и SHA256. Владелец подтвердил совпадение
 скачанного на ПК архива по SHA256. Отдельная проверка в контейнере без сети
-успешно прочитала обе восстановленные базы (бот и Marzban), проверила
+успешно прочитала обе восстановленные базы (бот и Hiddify Manager), проверила
 integrity_check и ожидаемые таблицы. Это проверка баз, не полное восстановление
 сервера. Ключ восстановления не передавался агенту. Содержимое Docker-образов
 в архив не включено; прежние образы не удалять.
@@ -407,7 +407,7 @@ bash /root/vpn-memoryfix-20261102T145858Z/rollback-memoryfix.sh
 отдельной диагностики. База при откате образа не восстанавливается из старой
 копии, чтобы не потерять новые платежи. `node-rental-bot:latest` после успешного
 переключения указывает на исправленный образ. Существующие рабочие контейнеры
-Marzban, AmneziaWG и Caddy не перезапускались скриптом переключения.
+Hiddify Manager, AmneziaWG и Caddy не перезапускались скриптом переключения.
 
 ## Что ещё не внедрено
 
@@ -525,7 +525,7 @@ python3 /root/vpn-payment-menu-20261103T060540Z-3z2djzsa/fix.py --rollback /root
   `OFFER_URL=https://node.example.com/#/legal`; both are placeholder URLs, so
   the app and offer links cannot work for the owner's domain. `PUBLIC_BASE_URL`
   is now required and placeholder origins are rejected at startup.
-- The earlier production inventory showed `marzban-caddy` already owns host
+- The earlier production inventory showed `hiddify-caddy` already owns host
   port 80 and did not show a `node-rental-web` container. The project's web
   Compose service also binds port 80, so starting it as-is would collide with
   the live Caddy. Its `/tma` and `/oferta` routes must be merged into the live
@@ -537,7 +537,7 @@ python3 /root/vpn-payment-menu-20261103T060540Z-3z2djzsa/fix.py --rollback /root
   The candidate now redirects Nginx proxy/FastCGI/uWSGI/SCGI temp paths to the
   writable runtime directory. The owner stopped the failing unit; it remains
   unavailable until these latest additions are installed.
-- `marzban-caddy` uses host networking and mounts `/opt/marzban/Caddyfile`.
+- `hiddify-caddy` uses host networking and mounts `/opt/hiddify-manager/Caddyfile`.
   Its only public sites are `panel.cyberdefency.com:8443` and
   `sub.cyberdefency.com:8443`; there is still no site for the bot app domain.
 
@@ -550,7 +550,7 @@ python3 /root/vpn-payment-menu-20261103T060540Z-3z2djzsa/fix.py --rollback /root
   unavailable API checks return 503 for retry; duplicate notifications do not
   extend the subscription twice.
 - Subscription activation is persisted and retried by the bot scheduler every
-  minute if Marzban is temporarily unavailable.
+  minute if Hiddify Manager is temporarily unavailable.
 - Verification: all 176 tests pass, including API-confirmation, underpayment,
   retry, and duplicate-notification cases; Ruff, format check, and mypy pass.
   Read-only `GET /v3/me` against the bound YooKassa test shop returned HTTP 200,

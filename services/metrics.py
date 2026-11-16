@@ -35,9 +35,9 @@ SOFT_SUSPENSIONS = Counter(
     "Soft suspensions on traffic anomaly",
     registry=REGISTRY,
 )
-MARZBAN_ERRORS = Counter(
-    "marzban_errors_total",
-    "Marzban API failures after retries",
+HIDDIFY_ERRORS = Counter(
+    "hiddify_errors_total",
+    "Hiddify Manager API failures after retries",
     ["operation"],
     registry=REGISTRY,
 )
@@ -62,7 +62,7 @@ JOB_FAILURES = Counter(
 )
 LOCATION_UP = Gauge(
     "location_up",
-    "1 if the location (Marzban core or node) is serving, else 0",
+    "1 if the location (Hiddify Manager core or another server) is serving, else 0",
     ["location"],
     registry=REGISTRY,
 )

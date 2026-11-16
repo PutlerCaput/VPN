@@ -53,7 +53,7 @@ EOF
 umask 022
 cat > "$UNIT_DIR/node-backup.service" <<EOF
 [Unit]
-Description=Encrypted backup of the bot, Marzban and their settings
+Description=Encrypted backup of the bot, Hiddify Manager and their settings
 After=docker.service
 Wants=docker.service
 

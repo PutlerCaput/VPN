@@ -6,8 +6,8 @@
 #   bash scripts/server_update.sh --apply    # update, step by step
 #
 # With --apply, in this order, stopping at the first step that fails:
-#   1. copies: Marzban's database (online copy, integrity-checked), the
-#      Marzban and bot settings; the newest three of each are kept;
+#   1. copies: Hiddify Manager's database (online copy, integrity-checked), the
+#      Hiddify Manager and bot settings; the newest three of each are kept;
 #   2. system packages: upgrade that never removes a package and keeps every
 #      changed config file; Docker's previous versions are saved for a
 #      downgrade; containers that ran before are checked to run again;
@@ -21,7 +21,7 @@
 # Disk: it wants 5 GB free on / and cleans up first when there is less; if
 # less than 3 GB remain after the cleanup it does not start.
 #
-# Never touched: Marzban's version and settings, Xray, its rule and geo files,
+# Never touched: Hiddify Manager's version and settings, Xray, its rule and geo files,
 # the firewall, SSH. A new kernel waits for a reboot at a time you choose.
 set -o pipefail
 
@@ -32,8 +32,8 @@ APPLY=0
 SRC="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 CONTAINER="${CONTAINER:-node-rental-bot-1}"
 BACKUP_DIR="${BACKUP_DIR:-/root/server-backups}"
-MARZBAN_DB="${MARZBAN_DB:-/var/lib/marzban/db.sqlite3}"
-MARZBAN_DIR="${MARZBAN_DIR:-/opt/marzban}"
+HIDDIFY_DB="${HIDDIFY_DB:-/opt/hiddify-manager/db.sqlite3}"
+HIDDIFY_DIR="${HIDDIFY_DIR:-/opt/hiddify-manager}"
 KEEP=3
 WANT_FREE_MB=5120  # comfortable: packages, images and two builds
 MIN_FREE_MB=3072   # below this after the cleanup the update does not start
@@ -147,10 +147,10 @@ section "Copies"
 if ((APPLY)); then
   umask 077
   mkdir -p "$BACKUP_DIR"
-  if [[ -f "$MARZBAN_DB" ]]; then
-    copy="$BACKUP_DIR/marzban-db-$STAMP.sqlite3"
-    # SQLite's online backup: a consistent copy while Marzban keeps running.
-    python3 - "$MARZBAN_DB" "$copy" <<'PY' || stop "Marzban database copy failed"
+  if [[ -f "$HIDDIFY_DB" ]]; then
+    copy="$BACKUP_DIR/hiddify-db-$STAMP.sqlite3"
+    # SQLite's online backup: a consistent copy while Hiddify Manager keeps running.
+    python3 - "$HIDDIFY_DB" "$copy" <<'PY' || stop "Hiddify Manager database copy failed"
 import sqlite3
 import sys
 
@@ -168,20 +168,20 @@ source.close()
 if check != "ok":
     sys.exit(f"integrity_check: {check}")
 PY
-    say "  Marzban database: $copy (integrity ok)"
-    keep_newest 'marzban-db-*.sqlite3'
+    say "  Hiddify Manager database: $copy (integrity ok)"
+    keep_newest 'hiddify-db-*.sqlite3'
   else
-    say "  Marzban database not at $MARZBAN_DB (MARZBAN_DB=... to point at it): skipped"
+    say "  Hiddify Manager database not at $HIDDIFY_DB (HIDDIFY_DB=... to point at it): skipped"
   fi
   settings=()
-  if [[ -d "$MARZBAN_DIR" ]]; then
-    if (($(du -sm "$MARZBAN_DIR" | cut -f1) <= 200)); then
-      settings+=("$MARZBAN_DIR")
+  if [[ -d "$HIDDIFY_DIR" ]]; then
+    if (($(du -sm "$HIDDIFY_DIR" | cut -f1) <= 200)); then
+      settings+=("$HIDDIFY_DIR")
     else
-      say "  $MARZBAN_DIR is larger than 200 MB: not copied"
+      say "  $HIDDIFY_DIR is larger than 200 MB: not copied"
     fi
   fi
-  [[ -f /var/lib/marzban/xray_config.json ]] && settings+=(/var/lib/marzban/xray_config.json)
+  [[ -f /opt/hiddify-manager/xray_config.json ]] && settings+=(/opt/hiddify-manager/xray_config.json)
   workdir="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$CONTAINER" 2>/dev/null)"
   if [[ -n "$workdir" && -d "$workdir" ]]; then
     [[ -f "$workdir/.env" ]] && settings+=("$workdir/.env")
@@ -195,7 +195,7 @@ PY
   fi
   say "  the bot's own database copy is made by update_bot.sh below"
 else
-  say "  would copy: $MARZBAN_DB (online, checked), $MARZBAN_DIR, xray_config.json, the bot's .env and secrets"
+  say "  would copy: $HIDDIFY_DB (online, checked), $HIDDIFY_DIR, xray_config.json, the bot's .env and secrets"
   say "  into $BACKUP_DIR, keeping the newest $KEEP of each"
 fi
 
@@ -286,10 +286,10 @@ if docker inspect "$CONTAINER" >/dev/null 2>&1; then
     say "  bot database: CHECK FAILED; see: docker exec $CONTAINER python scripts/db_tool.py check /app/data/bot.db"
   fi
 fi
-if [[ -f "$MARZBAN_DB" ]]; then
-  say "  Marzban database: $(du -h "$MARZBAN_DB" | cut -f1)$( ((APPLY)) && printf ', copy checked above')"
+if [[ -f "$HIDDIFY_DB" ]]; then
+  say "  Hiddify Manager database: $(du -h "$HIDDIFY_DB" | cut -f1)$( ((APPLY)) && printf ', copy checked above')"
 fi
-for asset in /var/lib/marzban/assets/geosite.dat /var/lib/marzban/assets/geoip.dat; do
+for asset in /opt/hiddify-manager/assets/geosite.dat /opt/hiddify-manager/assets/geoip.dat; do
   [[ -f "$asset" ]] && say "  $(basename "$asset"): $(( ($(date +%s) - $(stat -c %Y "$asset")) / 86400 )) days old (update: docs/SECURITY_POLICY.md)"
 done
 

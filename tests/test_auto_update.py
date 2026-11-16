@@ -249,7 +249,7 @@ def env(tmp_path: Path) -> dict[str, str]:
     containers = [
         {"name": "node-rental-bot-1", "source": "abc123"},
         {"name": "node-rental-web-local-app-web-1", "source": "abc123", "web": True},
-        {"name": "marzban-marzban-1"},
+        {"name": "hiddify-hiddify-1"},
     ]
     for container in containers:
         container.update({"running": True, "status": up, "health": "healthy"})
@@ -520,11 +520,11 @@ def test_a_failed_upgrade_stops_everything_and_says_so(env: dict[str, str]) -> N
 def test_a_container_that_does_not_come_back_after_the_upgrade_is_reported(
     env: dict[str, str],
 ) -> None:
-    change_container(env, "marzban-marzban-1", stuck=True)
-    result = update({**env, "FAKE_APT_STOPS": "marzban-marzban-1"})
+    change_container(env, "hiddify-hiddify-1", stuck=True)
+    result = update({**env, "FAKE_APT_STOPS": "hiddify-hiddify-1"})
     assert result.returncode == 1
-    assert "not back: marzban-marzban-1" in result.stdout
-    assert "docker start marzban-marzban-1" in calls(env)
+    assert "not back: hiddify-hiddify-1" in result.stdout
+    assert "docker start hiddify-hiddify-1" in calls(env)
     assert "AUTO_UPDATE_FAILED: containers are not back" in result.stderr
     assert "docker pull python:3.11-slim-bookworm" not in calls(env)
     assert "не поднялась" in texts(env)[0]
@@ -533,9 +533,9 @@ def test_a_container_that_does_not_come_back_after_the_upgrade_is_reported(
 def test_a_container_that_stopped_is_started_again_and_the_update_goes_on(
     env: dict[str, str],
 ) -> None:
-    result = update({**env, "FAKE_APT_STOPS": "marzban-marzban-1"})
+    result = update({**env, "FAKE_APT_STOPS": "hiddify-hiddify-1"})
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "docker start marzban-marzban-1" in calls(env)
+    assert "docker start hiddify-hiddify-1" in calls(env)
     assert "AUTO_UPDATE_OK" in result.stdout
 
 
@@ -644,11 +644,11 @@ def test_it_waits_outside_the_quiet_hours(env: dict[str, str]) -> None:
 def test_it_waits_while_a_container_is_unwell_or_the_bot_is_down(
     env: dict[str, str],
 ) -> None:
-    change_container(env, "marzban-marzban-1", status="Up 5 minutes (unhealthy)")
+    change_container(env, "hiddify-hiddify-1", status="Up 5 minutes (unhealthy)")
     result = update(env)
-    assert_skipped(env, result, "a container is not healthy: marzban-marzban-1")
+    assert_skipped(env, result, "a container is not healthy: hiddify-hiddify-1")
 
-    change_container(env, "marzban-marzban-1", status="Up 5 minutes (healthy)")
+    change_container(env, "hiddify-hiddify-1", status="Up 5 minutes (healthy)")
     change_container(env, "node-rental-bot-1", status="Up 4 seconds (health: starting)")
     assert "not healthy: node-rental-bot-1" in update(env).stdout
 
@@ -839,10 +839,10 @@ def test_a_dry_run_shows_the_plan_and_changes_nothing(env: dict[str, str]) -> No
 def test_a_dry_run_lists_every_reason_the_real_run_would_stop(
     env: dict[str, str],
 ) -> None:
-    change_container(env, "marzban-marzban-1", status="Up 5 minutes (unhealthy)")
+    change_container(env, "hiddify-hiddify-1", status="Up 5 minutes (unhealthy)")
     result = update({**env, "FAKE_FREE_MB": "2000"}, "--dry-run")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "BLOCKED: a container is not healthy: marzban-marzban-1" in result.stdout
+    assert "BLOCKED: a container is not healthy: hiddify-hiddify-1" in result.stdout
     assert "BLOCKED: only 2000 MB free on /" in result.stdout
     assert "AUTO_UPDATE_DRY_RUN: the real run would stop now:" in result.stdout
     assert texts(env) == []

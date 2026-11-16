@@ -32,7 +32,7 @@ TAG_RE = re.compile(r"^[A-Za-z0-9_-]{3,40}$")
 
 
 KEY_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
-# xhttp: Marzban v0.8.4 writes it into v2ray links (v2rayNG and other Xray-based
+# xhttp: Hiddify Manager v0.8.4 writes it into v2ray links (v2rayNG and other Xray-based
 # apps); its sing-box and Clash subscriptions leave such entries out.
 NETWORKS = ("grpc", "tcp", "xhttp")
 

@@ -8,8 +8,8 @@ number of keys is limited by the tier's device limit.
 The bot is the source of truth. A reconciliation job makes the server agent
 match it: peers are enabled only for active subscriptions, deleted devices
 disappear, and AmneziaWG traffic counts towards the same 30-day quota as
-VLESS. Marzban stays the meter of record: the bot lowers the user's Marzban
-limit by the AmneziaWG traffic of the current Marzban window, so whichever
+VLESS. Hiddify Manager stays the meter of record: the bot lowers the user's
+panel limit by the AmneziaWG traffic of the current panel window, so whichever
 protocol is used, the total stays within the tariff.
 """
 
@@ -38,12 +38,12 @@ from cryptography.hazmat.primitives.serialization import (
 from config import GIB, TIERS, Settings
 from db.database import Database
 from services.audit import audit
-from services.marzban import MarzbanClient, MarzbanError
+from services.hiddify import HiddifyClient, HiddifyError
 
 logger = logging.getLogger(__name__)
 
 INFO_CACHE_SECONDS = 600.0
-# Marzban limits are adjusted in steps, so the panel is not edited on every
+# Panel limits are adjusted in steps, so the panel is not edited on every
 # poll while AmneziaWG traffic grows.
 QUOTA_STEP_BYTES = 100 * 1024**2
 MIN_PANEL_LIMIT = 1024**2
@@ -62,9 +62,9 @@ def utc_day() -> str:
 async def combined_usage(
     db: Database, telegram_id: int, used: int, lifetime: int, limit: int
 ) -> tuple[int, int]:
-    """(used, limit) including AmneziaWG traffic of the same Marzban window.
+    """(used, limit) including AmneziaWG traffic of the same panel window.
 
-    The bot lowers the Marzban limit by the AmneziaWG traffic (rounded up to
+    The bot lowers the panel limit by the AmneziaWG traffic (rounded up to
     QUOTA_STEP_BYTES); adding both back shows the tariff's real quota.
     """
     row = await db.get_awg_usage(telegram_id)
@@ -243,12 +243,12 @@ class AwgService:
         self,
         db: Database,
         agent: AwgAgent,
-        marzban: MarzbanClient,
+        hiddify: HiddifyClient,
         settings: Settings,
     ) -> None:
         self.db = db
         self.agent = agent
-        self.marzban = marzban
+        self.hiddify = hiddify
         self.settings = settings
         # One lock per owner: the count-then-create in add_device and the
         # delete in remove_device must not interleave, or many parallel taps
@@ -344,8 +344,8 @@ class AwgService:
         current = int(panel_user.get("data_limit") or 0)
         if user["status"] == "active" and current != desired:
             try:
-                await self.marzban.modify_user(str(node), data_limit=desired)
-            except MarzbanError:
+                await self.hiddify.modify_user(str(node), data_limit=desired)
+            except HiddifyError:
                 logger.warning("awg_quota_panel_update_failed")
         return exhausted
 
@@ -364,9 +364,9 @@ class AwgService:
             try:
                 panel = {
                     str(item.get("username")): item
-                    for item in await self.marzban.get_users_usage()
+                    for item in await self.hiddify.get_users_usage()
                 }
-            except MarzbanError:
+            except HiddifyError:
                 logger.warning("awg_reconcile_panel_unavailable")
 
         server_delta = 0
@@ -422,7 +422,7 @@ class AwgService:
                 logger.warning("awg_server_traffic_failed")
 
     async def window_bytes(self, telegram_id: int, window: int) -> int:
-        """AmneziaWG traffic of the given Marzban window (0 if none)."""
+        """AmneziaWG traffic of the given panel window (0 if none)."""
         row = await self.db.get_awg_usage(telegram_id)
         if row is None or int(row["window_key"]) != window:
             return 0

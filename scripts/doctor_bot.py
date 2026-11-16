@@ -144,23 +144,23 @@ async def check_yookassa(s: Any) -> None:
             line("FAIL", "SBP is NOT enabled in the YooKassa shop: turn it on there")
 
 
-async def check_marzban(s: Any) -> None:
-    from services.marzban import MarzbanClient
+async def check_hiddify(s: Any) -> None:
+    from services.hiddify import HiddifyClient
 
-    client = MarzbanClient(
-        s.marzban_url,
-        s.marzban_username,
-        s.marzban_password.get_secret_value(),
-        s.marzban_inbound_tag,
-        verify_tls=s.marzban_verify_tls,
+    client = HiddifyClient(
+        s.hiddify_url,
+        s.hiddify_api_key.get_secret_value(),
+        s.hiddify_admin_proxy_path,
+        user_proxy_path=s.hiddify_user_proxy_path,
+        subscription_base_url=s.subscription_base_url,
+        verify_tls=s.hiddify_verify_tls,
         timeout=10,
     )
     try:
-        await client.get_core()
-        nodes = await client.get_nodes()
-        line("OK", f"Marzban panel answers, nodes: {len(nodes)}")
+        core = await client.get_core()
+        line("OK", f"Hiddify Manager answers, version: {core.get('version')}")
     except Exception as exc:
-        line("FAIL", f"Marzban panel: {type(exc).__name__}")
+        line("FAIL", f"Hiddify Manager panel: {type(exc).__name__}")
     finally:
         await client.close()
 
@@ -318,7 +318,7 @@ async def main() -> None:
     check_connection_records(settings, await check_database(settings))
     if rest:
         await check_yookassa(settings)
-    await check_marzban(settings)
+    await check_hiddify(settings)
     await check_telegram(settings)
 
 

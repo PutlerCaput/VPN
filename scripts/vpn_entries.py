@@ -23,7 +23,7 @@ Runs inside the bot container (it has the panel's address and password):
                            inbound gets one; an entry only the relay may reach
                            must not be offered with this server's own address)
 
-Only Marzban's host table changes: no key, user or Xray setting, no restart of the
+Only the panel host list changes: no key, user or Xray setting, no restart of the
 VPN. A client gets the new address with its next subscription update and can
 switch to it when the first one does not answer. The firewall on the server must
 let the port in; this script does not touch it (docs/VPN_ENTRIES.md).
@@ -108,7 +108,7 @@ def with_added(
 
 
 SERVER_IP = "{SERVER_IP}"
-# Marzban's fragment setting: packet lengths, pause in ms, which packets
+# The fragment setting: packet lengths, pause in ms, which packets
 # ("tlshello": the TLS ClientHello, which carries the cover name).
 FRAGMENT_RE = re.compile(
     r"^\d{1,4}(-\d{1,4})?,\d{1,4}(-\d{1,4})?,(tlshello|\d{1,3}-\d{1,3})$"
@@ -216,89 +216,19 @@ async def attach(client: Any, base: str, extra: str, hosts: dict[str, Any]) -> i
 
 
 async def main(argv: list[str]) -> int:
-    from config import get_settings
-    from services.marzban import MarzbanClient, MarzbanError
+    """Host-table edits are not exposed by Hiddify Manager API v2.
 
-    settings = get_settings()
-    tag = settings.marzban_inbound_tag
-    if len(argv) >= 2 and argv[0] == "--tag":
-        tag, argv = argv[1], argv[2:]
-    client = MarzbanClient(
-        settings.marzban_url,
-        settings.marzban_username,
-        settings.marzban_password.get_secret_value(),
-        tag,
-        verify_tls=settings.marzban_verify_tls,
-        timeout=15,
+    Addresses and fragments are configured in the panel UI (proxies / domains).
+    The helpers in this file still describe a host table and are used in tests.
+    """
+    del argv
+    print(
+        "VPN_ENTRIES_STOPPED: Hiddify Manager API v2 has no host-table "
+        "endpoints. Add or remove entry addresses in the panel UI. "
+        "See docs/HIDDIFY.md and docs/VPN_ENTRIES.md."
     )
-    try:
-        hosts = await client.get_hosts()
-        if len(argv) == 0:
-            print("\n".join(describe(hosts)) or "no addresses")
-            print(f"VPN_ENTRIES_PLAN: --add ADDRESS:PORT adds an address for {tag!r}")
-            return 0
-        if len(argv) == 2 and argv[0] == "--attach":
-            return await attach(client, settings.marzban_inbound_tag, argv[1], hosts)
-        if len(argv) == 2 and argv[0] == "--fingerprint":
-            wanted = with_fingerprint(hosts, argv[1])
-            if wanted == hosts:
-                print(f"VPN_ENTRIES_UNCHANGED: every address already has {argv[1]}")
-                return 0
-            await client.put_hosts(wanted)
-            print("\n".join(describe(await client.get_hosts())))
-            print(f"VPN_ENTRIES_OK: fingerprint {argv[1]} on every address")
-            return 0
-        if argv and argv[0] in ("--fragment-copy", "--fragment-remove"):
-            if len(argv) not in (2, 3):
-                print(
-                    "usage: --fragment-copy ADDRESS:PORT [SETTING]"
-                    " | --fragment-remove ADDRESS:PORT"
-                )
-                return 2
-            address, port = parse_target(argv[1])
-            if argv[0] == "--fragment-copy":
-                spec = argv[2] if len(argv) == 3 else DEFAULT_FRAGMENT
-                wanted = with_fragment_copy(hosts, address, port, spec)
-            else:
-                wanted = without_fragment_copy(hosts, address, port)
-            if wanted == hosts:
-                print(f"VPN_ENTRIES_UNCHANGED: {argv[0][2:]} {address}:{port}")
-                return 0
-            await client.put_hosts(wanted)
-            print("\n".join(describe(await client.get_hosts())))
-            print(f"VPN_ENTRIES_OK: {argv[0][2:]} {address}:{port}")
-            return 0
-        if len(argv) != 2 or argv[0] not in ("--add", "--remove"):
-            print(
-                "usage: [--tag TAG] [--add|--remove ADDRESS:PORT]"
-                " | --attach TAG | --fingerprint NAME"
-            )
-            return 2
-        if argv[0] == "--remove" and argv[1] == SERVER_IP:
-            address, port = SERVER_IP, 0
-        else:
-            address, port = parse_target(argv[1])
-        if argv[0] == "--add":
-            wanted = with_added(hosts, tag, address, port)
-        else:
-            wanted = without(hosts, tag, address, port)
-        if wanted == hosts:
-            print(f"VPN_ENTRIES_UNCHANGED: {address}:{port} is already there")
-            return 0
-        await client.put_hosts(wanted)
-        after = await client.get_hosts()
-        present = any(matches(e, address, port) for e in after.get(tag) or [])
-        print("\n".join(describe(after)))
-        if present == (argv[0] == "--add"):
-            print(f"VPN_ENTRIES_OK: {argv[0][2:]} {address}:{port}")
-            return 0
-        print("VPN_ENTRIES_NOT_APPLIED: the panel did not keep the change")
-        return 1
-    except (MarzbanError, ValueError) as exc:
-        print(f"VPN_ENTRIES_STOPPED: {exc}")
-        return 1
-    finally:
-        await client.close()
+    return 2
+
 
 
 if __name__ == "__main__":

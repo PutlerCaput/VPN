@@ -15,7 +15,7 @@ from services.health import (
     ServiceHealth,
     servers_text,
 )
-from services.marzban import MarzbanClient, MarzbanError
+from services.hiddify import HiddifyClient, HiddifyError
 from tests.conftest import make_init_data
 from webhook_server import create_webhook_app
 
@@ -30,7 +30,7 @@ def _subscription_mode(services: Any, base: str | None = SUB_BASE) -> None:
 
 
 def test_subscription_url_is_made_absolute_and_validated() -> None:
-    extract = MarzbanClient.extract_subscription_url
+    extract = HiddifyClient.extract_subscription_url
     assert extract({"subscription_url": "/sub/abc"}, SUB_BASE) == f"{SUB_BASE}/sub/abc"
     assert extract({"subscription_url": "/sub/abc"}, None) is None
     assert (
@@ -52,7 +52,7 @@ def test_subscription_base_url_setting_is_an_https_origin(settings: Settings) ->
 
 
 async def test_trial_and_config_use_the_subscription_link(
-    services: Any, marzban: Any
+    services: Any, hiddify: Any
 ) -> None:
     _subscription_mode(services)
     await services.db.create_user(720001, "user", None)
@@ -60,9 +60,11 @@ async def test_trial_and_config_use_the_subscription_link(
     node = (await services.db.get_user(720001))["node_username"]
     assert result.config_link == f"{SUB_BASE}/sub/{node}"
     assert await services.provisioning.fresh_config(720001) == result.config_link
-    # Resetting the link changes the subscription token too.
+    # Rotating the UUID issues a new subscription URL.
     new = await services.provisioning.revoke_link(720001)
-    assert new.startswith(f"{SUB_BASE}/sub/{node}")
+    fresh = (await services.db.get_user(720001))["node_username"]
+    assert fresh != node
+    assert new.startswith(f"{SUB_BASE}/sub/{fresh}")
     assert new != result.config_link
 
 
@@ -92,13 +94,13 @@ class Admin:
         return True
 
 
-async def test_health_lists_core_and_enabled_nodes(marzban: Any) -> None:
-    marzban.nodes = [
+async def test_health_lists_core_and_enabled_nodes(hiddify: Any) -> None:
+    hiddify.nodes = [
         {"name": "🇫🇮 Финляндия", "status": "connected"},
         {"name": "🇳🇱 Нидерланды", "status": "error"},
         {"name": "Резерв", "status": "disabled"},
     ]
-    health = ServiceHealth(marzban, Admin(), 1, "🇩🇪 Германия")
+    health = ServiceHealth(hiddify, Admin(), 1, "🇩🇪 Германия")
     report = await health.check()
     assert report.locations == (
         Location("🇩🇪 Германия", True),
@@ -112,53 +114,53 @@ async def test_health_lists_core_and_enabled_nodes(marzban: Any) -> None:
     assert "Резерв" not in text
 
 
-async def test_alert_after_two_failures_and_recovery_once(marzban: Any) -> None:
+async def test_alert_after_two_failures_and_recovery_once(hiddify: Any) -> None:
     admin = Admin()
-    health = ServiceHealth(marzban, admin, 1, "Основной")
-    marzban.core_started = False
+    health = ServiceHealth(hiddify, admin, 1, "Основной")
+    hiddify.core_started = False
     await health.poll()
     assert admin.messages == []  # one failed check is not an outage yet
     await health.poll()
     await health.poll()
     assert len(admin.messages) == 1
     assert "🔴 Сервер Основной" in admin.messages[0]
-    marzban.core_started = True
+    hiddify.core_started = True
     await health.poll()
     await health.poll()
     assert len(admin.messages) == 2
     assert "🟢 Сервер Основной снова работает" in admin.messages[1]
 
 
-async def test_unreachable_panel_is_reported_separately(marzban: Any) -> None:
+async def test_unreachable_panel_is_reported_separately(hiddify: Any) -> None:
     admin = Admin()
-    health = ServiceHealth(marzban, admin, 1, "Основной")
-    marzban.core_error = MarzbanError("down")
+    health = ServiceHealth(hiddify, admin, 1, "Основной")
+    hiddify.core_error = HiddifyError("down")
     report = await health.poll()
     report = await health.poll()
     assert not report.panel_ok
-    assert "Панель Marzban" in admin.messages[0]
+    assert "Панель Hiddify" in admin.messages[0]
     assert "не удалось проверить" in servers_text(report, subscription=False)
 
 
-async def test_node_names_are_escaped_in_alerts(marzban: Any) -> None:
+async def test_node_names_are_escaped_in_alerts(hiddify: Any) -> None:
     admin = Admin()
-    marzban.nodes = [{"name": "<b>x</b>", "status": "error"}]
-    health = ServiceHealth(marzban, admin, 1, "Основной", failures_to_alert=1)
+    hiddify.nodes = [{"name": "<b>x</b>", "status": "error"}]
+    health = ServiceHealth(hiddify, admin, 1, "Основной", failures_to_alert=1)
     await health.poll()
     assert "&lt;b&gt;x&lt;/b&gt;" in admin.messages[0]
 
 
-async def test_profile_shows_known_outage(services: Any, marzban: Any) -> None:
+async def test_profile_shows_known_outage(services: Any, hiddify: Any) -> None:
     from handlers.profile import outage_suffix
 
-    services.health = ServiceHealth(marzban, Admin(), 1, "Основной")
+    services.health = ServiceHealth(hiddify, Admin(), 1, "Основной")
     assert outage_suffix(services) == ""
     services.health.last = HealthReport(0, True, (Location("Основной", False),))
     assert OUTAGE_NOTICE in outage_suffix(services)
 
 
-async def test_servers_api(services: Any, marzban: Any) -> None:
-    services.health = ServiceHealth(marzban, Admin(), 1, "🇩🇪 Германия")
+async def test_servers_api(services: Any, hiddify: Any) -> None:
+    services.health = ServiceHealth(hiddify, Admin(), 1, "🇩🇪 Германия")
     app = create_webhook_app(services.bot, None, services)  # type: ignore[arg-type]
     token = services.settings.bot_token.get_secret_value()
     async with TestClient(TestServer(app)) as client:
@@ -198,18 +200,18 @@ async def test_kill_switch_guide_is_offered(services: Any) -> None:
     assert "Блокировать подключения без VPN" in KILL_SWITCH_TEXT
 
 
-async def test_forbidden_node_list_is_not_reported_as_an_outage(marzban: Any) -> None:
-    from services.marzban import MarzbanForbidden
+async def test_forbidden_node_list_is_not_reported_as_an_outage(hiddify: Any) -> None:
+    from services.hiddify import HiddifyForbidden
 
     admin = Admin()
-    marzban.nodes_error = MarzbanForbidden("get_nodes")
-    health = ServiceHealth(marzban, admin, 1, "Основной", failures_to_alert=1)
+    hiddify.nodes_error = HiddifyForbidden("get_nodes")
+    health = ServiceHealth(hiddify, admin, 1, "Основной", failures_to_alert=1)
     report = await health.poll()
     assert report.panel_ok
     assert report.locations == (Location("Основной", True),)
     assert admin.messages == []
 
-    marzban.core_error = MarzbanForbidden("get_core")
+    hiddify.core_error = HiddifyForbidden("get_core")
     report = await health.poll()
     assert report.panel_ok
     assert report.locations == ()
@@ -219,59 +221,51 @@ async def test_forbidden_node_list_is_not_reported_as_an_outage(marzban: Any) ->
     assert admin.messages == []
 
 
-async def test_node_list_failure_after_core_ok_is_an_outage(marzban: Any) -> None:
+async def test_node_list_failure_after_core_ok_is_an_outage(hiddify: Any) -> None:
     admin = Admin()
-    marzban.nodes_error = MarzbanError("timeout")
-    health = ServiceHealth(marzban, admin, 1, "Основной", failures_to_alert=1)
+    hiddify.nodes_error = HiddifyError("timeout")
+    health = ServiceHealth(hiddify, admin, 1, "Основной", failures_to_alert=1)
     report = await health.poll()
     assert not report.panel_ok
-    assert "Панель Marzban" in admin.messages[0]
+    assert "Панель Hiddify" in admin.messages[0]
 
 
-async def test_marzban_403_raises_forbidden() -> None:
+async def test_hiddify_403_raises_forbidden() -> None:
     import httpx
 
-    from services.marzban import MarzbanForbidden
+    from services.hiddify import HiddifyForbidden
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/api/admin/token":
-            return httpx.Response(200, json={"access_token": "t"})
         return httpx.Response(403, json={"detail": "You're not allowed"})
 
-    client = MarzbanClient(
-        "http://marzban.test", "a", "b", "t", transport=httpx.MockTransport(handler)
+    client = HiddifyClient(
+        "https://hiddify.test",
+        "11111111-1111-4111-8111-111111111111",
+        "secretadmin",
+        transport=httpx.MockTransport(handler),
     )
-    with pytest.raises(MarzbanForbidden):
-        await client.get_nodes()
-    with pytest.raises(MarzbanForbidden):
+    with pytest.raises(HiddifyForbidden):
         await client.get_core()
+    with pytest.raises(HiddifyForbidden):
+        await client.get_users_usage()
     await client.close()
 
 
-async def test_marzban_page_that_is_not_json_is_a_panel_error() -> None:
+async def test_hiddify_page_that_is_not_json_is_a_panel_error() -> None:
     """A proxy error page must not escape as a crash past the payment retry."""
     import httpx
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/api/admin/token":
-            return httpx.Response(200, json={"access_token": "t"})
         return httpx.Response(200, text="<html>Bad gateway</html>")
 
-    client = MarzbanClient(
-        "http://marzban.test", "a", "b", "t", transport=httpx.MockTransport(handler)
+    client = HiddifyClient(
+        "https://hiddify.test",
+        "11111111-1111-4111-8111-111111111111",
+        "secretadmin",
+        transport=httpx.MockTransport(handler),
     )
-    with pytest.raises(MarzbanError, match="not JSON"):
+    with pytest.raises(HiddifyError, match="not JSON"):
         await client.get_core()
-    with pytest.raises(MarzbanError, match="not JSON"):
-        await client.get_nodes()
-    await client.close()
-
-    def bad_token(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text="maintenance")
-
-    client = MarzbanClient(
-        "http://marzban.test", "a", "b", "t", transport=httpx.MockTransport(bad_token)
-    )
-    with pytest.raises(MarzbanError, match="auth"):
-        await client.get_core()
+    with pytest.raises(HiddifyError, match="not JSON"):
+        await client.get_users_usage()
     await client.close()

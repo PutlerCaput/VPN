@@ -32,7 +32,7 @@ services:
     secrets:
       - bot_token
       - crypto_pay_token
-      - marzban_password
+      - hiddify_api_key
       - jwt_secret
       - vapid_private
       - sbp_provider_token
@@ -87,8 +87,8 @@ secrets:
     file: ./secrets/bot_token.txt
   crypto_pay_token:
     file: ./secrets/crypto_pay_token.txt
-  marzban_password:
-    file: ./secrets/marzban_password.txt
+  hiddify_api_key:
+    file: ./secrets/hiddify_api_key.txt
   jwt_secret:
     file: ./secrets/jwt_secret.txt
   vapid_private:

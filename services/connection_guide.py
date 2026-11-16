@@ -75,7 +75,7 @@ DIRECT_CHECK = (
     "а на ifconfig.me — адрес сервера."
 )
 # Apps that receive the rule with the subscription once scripts/ru_direct.sh
-# has turned it on (RU_DIRECT_SUBSCRIPTION): Marzban sends v2rayNG full Xray
+# has turned it on (RU_DIRECT_SUBSCRIPTION): Hiddify sends v2rayNG full Xray
 # configs with it. The others receive server links only and keep their steps.
 AUTO_DIRECT_APPS = frozenset({"v2rayng"})
 AUTO_DIRECT_NOTE = (

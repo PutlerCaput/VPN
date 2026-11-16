@@ -187,7 +187,7 @@ async def test_stale_order_is_refused_at_checkout(
 
 
 async def test_success_credits_once_with_the_tier_quota(
-    services: Any, stars: StarsPayments, marzban: Any
+    services: Any, stars: StarsPayments, hiddify: Any
 ) -> None:
     user = await _buyer(services)
     order = await _order(services, 2)
@@ -207,7 +207,7 @@ async def test_success_credits_once_with_the_tier_quota(
     expected = before + 2 * DAYS_PER_MONTH * 86400
     assert abs(int(after["expires_at"]) - expected) <= 2
     assert after["tier"] == "standard"
-    panel = marzban.users[after["node_username"]]
+    panel = hiddify.users[after["node_username"]]
     assert panel["data_limit"] == 200 * 1024**3
     assert panel["data_limit_reset_strategy"] == "month"
 
@@ -339,7 +339,7 @@ async def test_failed_telegram_refund_changes_nothing(
 
 
 async def test_refund_of_whole_period_expires_the_node(
-    services: Any, stars: StarsPayments, marzban: Any
+    services: Any, stars: StarsPayments, hiddify: Any
 ) -> None:
     await _buyer(services)
     order = await _order(services)
@@ -359,7 +359,7 @@ async def test_refund_of_whole_period_expires_the_node(
     await stars.refund(order.payment_id)
     user = await services.db.get_user(BUYER)
     assert user["status"] == "expired"
-    assert marzban.users[user["node_username"]]["status"] == "disabled"
+    assert hiddify.users[user["node_username"]]["status"] == "disabled"
 
 
 # ----------------------------------------------------------------- handlers

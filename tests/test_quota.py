@@ -29,31 +29,31 @@ async def _trial(services: Any, telegram_id: int) -> dict[str, Any]:
 
 
 async def test_trial_gets_the_configured_quota_and_first_tier_on_sale(
-    services: Any, marzban: Any
+    services: Any, hiddify: Any
 ) -> None:
     _with(services, trial_traffic_gb=3, enabled_tiers_csv="standard")
     user = await _trial(services, 610001)
     assert user["tier"] == "standard"
-    panel = marzban.users[user["node_username"]]
+    panel = hiddify.users[user["node_username"]]
     assert panel["data_limit"] == 3 * GIB
     assert panel["data_limit_reset_strategy"] == "no_reset"
     assert panel["note"] == "tier=standard devices=2"
 
 
-async def test_default_trial_stays_unlimited(services: Any, marzban: Any) -> None:
+async def test_default_trial_stays_unlimited(services: Any, hiddify: Any) -> None:
     user = await _trial(services, 610002)
     assert user["tier"] == "standard"
-    assert marzban.users[user["node_username"]]["data_limit"] == 0
+    assert hiddify.users[user["node_username"]]["data_limit"] == 0
 
 
 async def test_paid_period_sets_the_tier_quota_and_bonus_keeps_it(
-    services: Any, marzban: Any
+    services: Any, hiddify: Any
 ) -> None:
     _with(services, trial_traffic_gb=3)
     user = await _trial(services, 610003)
     payment = await services.billing.create(610003, 2, "sbp", "standard")
     assert await services.provisioning.process_paid_payment(payment.payment_id)
-    panel = marzban.users[user["node_username"]]
+    panel = hiddify.users[user["node_username"]]
     assert (panel["data_limit"], panel["data_limit_reset_strategy"]) == (
         200 * GIB,
         "month",
@@ -168,27 +168,30 @@ def test_traffic_line_and_status() -> None:
     assert "Трафик" in text
 
 
-async def test_traffic_status_reads_the_panel(services: Any, marzban: Any) -> None:
+async def test_traffic_status_reads_the_panel(services: Any, hiddify: Any) -> None:
     user = await _trial(services, 610009)
-    marzban.users[user["node_username"]]["used_traffic"] = 5 * GIB
+    hiddify.users[user["node_username"]]["used_traffic"] = 5 * GIB
     status = await services.provisioning.traffic_status(user)
     assert status == TrafficStatus(5 * GIB, 0, "no_reset", False)
     assert await services.provisioning.traffic_status({"node_username": None}) is None
 
 
-async def test_revoke_link_issues_new_credentials(services: Any, marzban: Any) -> None:
+async def test_revoke_link_issues_new_credentials(services: Any, hiddify: Any) -> None:
     user = await _trial(services, 610010)
     old = user["config_link"]
+    old_uuid = user["node_username"]
     new = await services.provisioning.revoke_link(610010)
+    fresh = await services.db.get_user(610010)
     assert new != old
-    assert (await services.db.get_user(610010))["config_link"] == new
-    assert ("revoke", user["node_username"]) in marzban.calls
+    assert fresh["config_link"] == new
+    assert fresh["node_username"] != old_uuid
+    assert ("revoke", old_uuid) in hiddify.calls
     await services.db.set_user_status(610010, "expired")
     with pytest.raises(ProvisioningError):
         await services.provisioning.revoke_link(610010)
 
 
-async def test_api_reports_traffic_and_new_periods(services: Any, marzban: Any) -> None:
+async def test_api_reports_traffic_and_new_periods(services: Any, hiddify: Any) -> None:
     services.settings = Settings(
         autoban_mode="automatic",
         enabled_tiers="standard,basic",  # type: ignore[call-arg]
@@ -204,7 +207,7 @@ async def test_api_reports_traffic_and_new_periods(services: Any, marzban: Any) 
         headers = {"Authorization": f"Bearer {(await auth.json())['access_token']}"}
         await client.post("/api/v1/legal/accept", headers=headers)
         user = await services.db.get_user(610011)
-        marzban.users[user["node_username"]]["used_traffic"] = 2 * GIB
+        hiddify.users[user["node_username"]]["used_traffic"] = 2 * GIB
 
         sub = await (await client.get("/api/v1/subscription", headers=headers)).json()
         assert sub["traffic"]["used_bytes"] == 2 * GIB
@@ -251,13 +254,13 @@ async def test_trial_profile_shows_trial_not_paid_quota(services: Any) -> None:
 
 
 async def test_traffic_status_is_cached_and_refreshed_after_payment(
-    services: Any, marzban: Any
+    services: Any, hiddify: Any
 ) -> None:
     user = await _trial(services, 610013)
     node = user["node_username"]
-    marzban.users[node]["used_traffic"] = 1 * GIB
+    hiddify.users[node]["used_traffic"] = 1 * GIB
     first = await services.provisioning.traffic_status(user)
-    marzban.users[node]["used_traffic"] = 2 * GIB
+    hiddify.users[node]["used_traffic"] = 2 * GIB
     assert await services.provisioning.traffic_status(user) == first
     payment = await services.billing.create(610013, 1, "sbp", "standard")
     await services.provisioning.process_paid_payment(payment.payment_id)

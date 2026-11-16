@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Marzban subscription templates that send Russian sites past the server.
+"""Hiddify Manager subscription templates that send Russian sites past the server.
 
 Traffic that has reached the server leaves it with the server's foreign address,
-so only the client app can open Russian sites directly. Marzban can hand that
+so only the client app can open Russian sites directly. Hiddify Manager can hand that
 rule to the app inside the subscription: v2rayNG then receives full Xray configs
 (USE_CUSTOM_JSON_FOR_V2RAYNG) and the sing-box apps a sing-box config, each built
-from a template. These functions take Marzban's own default templates, read from
+from a template. These functions take Hiddify Manager's own default templates, read from
 its container on the server, and add the rules. Nothing else in them changes.
 
 The rules use no geosite list: a tag missing from the geo file of an older app
@@ -35,7 +35,7 @@ MARK = "ru-direct"  # names the rules this module adds, so a rerun adds none
 
 
 def v2ray_template(default: dict[str, Any]) -> dict[str, Any]:
-    """Marzban's v2ray-json template with Russian sites going direct."""
+    """Hiddify Manager's v2ray-json template with Russian sites going direct."""
     template = copy.deepcopy(default)
     for inbound in template.get("inbounds", []):
         # The app connects to these ports on the device itself; nobody else on
@@ -43,7 +43,7 @@ def v2ray_template(default: dict[str, Any]) -> dict[str, Any]:
         inbound["listen"] = "127.0.0.1"
     outbounds = template.setdefault("outbounds", [])
     tags = {outbound.get("tag") for outbound in outbounds}
-    # Marzban puts the server ("proxy") first: anything unmatched goes there.
+    # Hiddify Manager puts the server ("proxy") first: anything unmatched goes there.
     if DIRECT not in tags:
         outbounds.append(
             {
@@ -90,7 +90,7 @@ def v2ray_template(default: dict[str, Any]) -> dict[str, Any]:
 
 
 def singbox_template(default: dict[str, Any]) -> dict[str, Any]:
-    """Marzban's sing-box template with Russian sites going direct."""
+    """Hiddify Manager's sing-box template with Russian sites going direct."""
     template = copy.deepcopy(default)
     outbounds = template.setdefault("outbounds", [])
     if DIRECT not in {o.get("tag") for o in outbounds}:
@@ -116,7 +116,7 @@ def singbox_template(default: dict[str, Any]) -> dict[str, Any]:
 
 
 def check_config(template: dict[str, Any]) -> dict[str, Any]:
-    """The template as Marzban serves it, with a stand-in server, for xray -test."""
+    """The template as Hiddify Manager serves it, with a stand-in server, for xray -test."""
     config = copy.deepcopy(template)
     config.pop("remarks", None)
     server = {

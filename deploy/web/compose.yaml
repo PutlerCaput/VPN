@@ -1,5 +1,5 @@
-# Independent web-only stack for the DE server that already runs Marzban Caddy.
-# The live bot and Marzban stack are not members of this Compose project.
+# Independent web-only stack for the DE server that already runs Hiddify Manager Caddy.
+# The live bot and Hiddify Manager stack are not members of this Compose project.
 name: node-rental-web-local
 
 services:

@@ -1,9 +1,10 @@
-"""Shared fixtures: in-memory DB, fake Marzban, fake notifier, settings."""
+"""Shared fixtures: in-memory DB, fake Hiddify, fake notifier, settings."""
 
 from __future__ import annotations
 
 import os
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -14,7 +15,7 @@ os.environ.setdefault("BOT_TOKEN", "123456:TEST-TOKEN-abcdefghijklmnopqrstuvwxyz
 os.environ.setdefault("BOT_USERNAME", "test_node_bot")
 os.environ.setdefault("ADMIN_TELEGRAM_ID", "1")
 os.environ.setdefault("PUBLIC_BASE_URL", "https://app.test")
-os.environ.setdefault("MARZBAN_PASSWORD", "test")
+os.environ.setdefault("HIDDIFY_API_KEY", "11111111-1111-4111-8111-111111111111")
 os.environ.setdefault("JWT_SECRET", "a" * 64)
 os.environ.setdefault("CRYPTO_PAY_TOKEN", "12345:TESTCRYPTOPAYTOKEN")
 os.environ.setdefault("SECRETS_DIR", "/nonexistent")
@@ -25,7 +26,7 @@ from config import Settings, device_note
 from db.database import Database
 from db.gateway import create_gateway_app
 from db.remote import RemoteDatabase
-from services.marzban import MarzbanNotFound
+from services.hiddify import HiddifyNotFound, traffic_policy
 
 GATEWAY_TOKEN = "test-gateway-token-" + "0" * 24
 REMOTE_BACKEND = os.environ.get("TEST_DB_BACKEND") == "remote"
@@ -93,7 +94,7 @@ async def through_gateway(database: Database) -> AsyncIterator[LoopbackRemoteDat
         await server.close()
 
 
-class FakeMarzban:
+class FakeHiddify:
     def __init__(self) -> None:
         self.users: dict[str, dict[str, Any]] = {}
         self.calls: list[tuple[str, str]] = []
@@ -127,11 +128,10 @@ class FakeMarzban:
         data_limit: int | None = None,
         data_limit_reset_strategy: str | None = None,
     ) -> dict[str, Any]:
-        from services.marzban import traffic_policy
-
         self.calls.append(("create", username))
         limit, strategy = traffic_policy(tier, data_limit, data_limit_reset_strategy)
         self.users[username] = {
+            "uuid": username,
             "username": username,
             "expire": expire or int(time.time()) + (days or 1) * 86400,
             "status": "active",
@@ -144,10 +144,15 @@ class FakeMarzban:
 
     async def revoke_subscription(self, username: str) -> dict[str, Any]:
         if username not in self.users:
-            raise MarzbanNotFound(username)
+            raise HiddifyNotFound(username)
         self.calls.append(("revoke", username))
-        self.users[username]["revision"] = self.users[username].get("revision", 0) + 1
-        return self._payload(username)
+        new_uuid = str(uuid.uuid4())
+        record = self.users.pop(username)
+        record["revision"] = record.get("revision", 0) + 1
+        record["uuid"] = new_uuid
+        record["username"] = new_uuid
+        self.users[new_uuid] = record
+        return self._payload(new_uuid)
 
     async def modify_user(
         self,
@@ -160,7 +165,7 @@ class FakeMarzban:
         data_limit_reset_strategy: str | None = None,
     ) -> dict[str, Any]:
         if username not in self.users:
-            raise MarzbanNotFound(username)
+            raise HiddifyNotFound(username)
         failure = self.fail_modify_once.pop(username, None)
         if failure is not None:
             raise failure
@@ -181,7 +186,7 @@ class FakeMarzban:
 
     async def get_user(self, username: str) -> dict[str, Any]:
         if username not in self.users:
-            raise MarzbanNotFound(username)
+            raise HiddifyNotFound(username)
         return self._payload(username)
 
     async def disable_user(self, username: str) -> dict[str, Any]:
@@ -261,8 +266,8 @@ async def db() -> AsyncIterator[Database]:
 
 
 @pytest.fixture
-def marzban() -> FakeMarzban:
-    return FakeMarzban()
+def hiddify() -> FakeHiddify:
+    return FakeHiddify()
 
 
 @pytest.fixture
@@ -272,17 +277,17 @@ def notifier() -> FakeNotifier:
 
 @pytest.fixture
 def provisioning(
-    db: Database, marzban: FakeMarzban, notifier: FakeNotifier, settings: Settings
+    db: Database, hiddify: FakeHiddify, notifier: FakeNotifier, settings: Settings
 ) -> Any:
     from services.provisioning import ProvisioningService
 
-    return ProvisioningService(db, marzban, notifier, settings)  # type: ignore[arg-type]
+    return ProvisioningService(db, hiddify, notifier, settings)  # type: ignore[arg-type]
 
 
 @pytest.fixture
 def services(
     db: Database,
-    marzban: FakeMarzban,
+    hiddify: FakeHiddify,
     notifier: FakeNotifier,
     settings: Settings,
     provisioning: Any,
@@ -304,14 +309,14 @@ def services(
         settings=settings,
         db=db,
         bot=MagicMock(),
-        marzban=marzban,  # type: ignore[arg-type]
+        hiddify=hiddify,  # type: ignore[arg-type]
         cryptopay=cryptopay,
         sbp=sbp,
         push=PushService(db, None, None, "mailto:test@example.com"),
         notifier=notifier,  # type: ignore[arg-type]
         provisioning=provisioning,
         billing=BillingService(db, sbp, cryptopay, allow_legacy_sbp=True),
-        monitor=AnomalyMonitor(db, marzban, provisioning, settings),  # type: ignore[arg-type]
+        monitor=AnomalyMonitor(db, hiddify, provisioning, settings),  # type: ignore[arg-type]
     )
 
 

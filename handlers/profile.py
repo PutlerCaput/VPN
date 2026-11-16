@@ -19,7 +19,7 @@ from keyboards.main_menu import (
 )
 from services.container import Services
 from services.health import OUTAGE_NOTICE, servers_text
-from services.marzban import MarzbanError
+from services.hiddify import HiddifyError
 from services.provisioning import ProvisioningError
 from services.security import SlidingWindowLimiter
 
@@ -112,7 +112,7 @@ async def config_access(owner_id: int, services: Services) -> ConfigAccess:
         )
     try:
         link = await services.provisioning.fresh_config(user["telegram_id"])
-    except (MarzbanError, ProvisioningError):
+    except (HiddifyError, ProvisioningError):
         logger.warning(
             "fresh_config_failed", extra={"telegram_id": user["telegram_id"]}
         )
@@ -186,7 +186,7 @@ async def cb_revoke(callback: CallbackQuery, services: Services) -> None:
             "«💳 Оплата»."
         )
         return
-    except MarzbanError:
+    except HiddifyError:
         logger.warning("revoke_link_failed", extra={"telegram_id": owner_id})
         await message.answer(
             "⚠️ Узел сейчас недоступен, ссылка не изменена. Попробуйте позже."

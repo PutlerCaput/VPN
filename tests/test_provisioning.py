@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid as uuidlib
 from typing import Any
 
 import pytest
 
 from db.database import Database
-from services.marzban import MarzbanError
+from services.hiddify import HiddifyError
 from services.provisioning import AUTOBAN_TEXT
-from tests.conftest import FakeMarzban, FakeNotifier
+from tests.conftest import FakeHiddify, FakeNotifier
 
 
 async def _register(
@@ -21,7 +22,7 @@ async def _register(
 async def test_trial_requires_user_and_is_single_use(
     db: Database,
     provisioning: Any,
-    marzban: FakeMarzban,
+    hiddify: FakeHiddify,
 ) -> None:
     result = await provisioning.accept_offer_and_start_trial(100001)
     assert not result.ok
@@ -33,14 +34,13 @@ async def test_trial_requires_user_and_is_single_use(
     user = await db.get_user(100001)
     assert user["status"] == "active"
     name = user["node_username"]
-    assert name.startswith("n")
-    assert len(name) == 21
+    assert uuidlib.UUID(name).version == 4
     assert "100001" not in name
     assert 86000 < user["expires_at"] - time.time() <= 86400
     assert await db.has_accepted_offer(100001)
     again = await provisioning.accept_offer_and_start_trial(100001)
     assert again.reason == "already_used"
-    assert [c for c in marzban.calls if c[0] == "create"] == [("create", name)]
+    assert [c for c in hiddify.calls if c[0] == "create"] == [("create", name)]
 
 
 async def test_payment_is_idempotent_and_extends(
@@ -64,7 +64,7 @@ async def test_payment_is_idempotent_and_extends(
 
 
 async def test_paid_payment_retries_without_extending_twice(
-    db: Database, provisioning: Any, marzban: FakeMarzban
+    db: Database, provisioning: Any, hiddify: FakeHiddify
 ) -> None:
     await _register(db, 210002)
     await provisioning.accept_offer_and_start_trial(210002)
@@ -80,7 +80,7 @@ async def test_paid_payment_retries_without_extending_twice(
     )
 
     node = (await db.get_user(210002))["node_username"]
-    marzban.fail_modify_once[node] = MarzbanError("temporary panel outage")
+    hiddify.fail_modify_once[node] = HiddifyError("temporary panel outage")
     assert await provisioning.process_paid_payment(payment_id)
     activation = await db.get_payment_activation(payment_id)
     assert activation["status"] == "pending"
@@ -114,7 +114,7 @@ async def test_paid_payment_marked_before_crash_is_picked_up_by_retry(
     )
 
     # Simulate a process crash after the paid status commit but before a job
-    # row or Marzban request was created.
+    # row or Hiddify request was created.
     assert await db.mark_payment_paid(payment_id)
     pending = await db.payments_pending_activation()
     assert [row["payment_id"] for row in pending] == [payment_id]
@@ -154,7 +154,7 @@ async def test_referral_bonus_only_on_first_payment(
 
 
 async def test_referral_bonus_retries_each_side_without_duplicate_days(
-    db: Database, provisioning: Any, marzban: FakeMarzban
+    db: Database, provisioning: Any, hiddify: FakeHiddify
 ) -> None:
     await _register(db, 310003)
     await provisioning.accept_offer_and_start_trial(310003)
@@ -174,7 +174,7 @@ async def test_referral_bonus_retries_each_side_without_duplicate_days(
     # The payment itself provisions the invitee; fail only the inviter's
     # separate reward so the retry ledger must resume that side alone.
     inviter_node = (await db.get_user(310003))["node_username"]
-    marzban.fail_modify_once[inviter_node] = MarzbanError("temporary panel outage")
+    hiddify.fail_modify_once[inviter_node] = HiddifyError("temporary panel outage")
     assert await provisioning.process_paid_payment("f" * 32)
     job = await db.get_referral_bonus_job(310004)
     assert job["status"] == "pending"
@@ -233,30 +233,30 @@ async def test_referral_job_is_recovered_after_payment_activation_crash(
 
 
 async def test_expiration_target_keeps_suspended_user_disabled(
-    db: Database, provisioning: Any, marzban: FakeMarzban
+    db: Database, provisioning: Any, hiddify: FakeHiddify
 ) -> None:
     await _register(db, 330003)
     await provisioning.accept_offer_and_start_trial(330003)
     await db.set_user_status(330003, "suspended")
     node = (await db.get_user(330003))["node_username"]
-    marzban.users[node]["status"] = "disabled"
+    hiddify.users[node]["status"] = "disabled"
 
     async with provisioning._lock(330003):
         await provisioning._apply_expiration_target(
             330003, int(time.time()) + 60 * 86400
         )
 
-    assert marzban.users[node]["status"] == "disabled"
+    assert hiddify.users[node]["status"] == "disabled"
     assert (await db.get_user(330003))["status"] == "suspended"
 
 
 async def test_autoban_from_flags(
-    services: Any, db: Database, marzban: FakeMarzban, notifier: FakeNotifier
+    services: Any, db: Database, hiddify: FakeHiddify, notifier: FakeNotifier
 ) -> None:
     await _register(db, 400004)
     await services.provisioning.accept_offer_and_start_trial(400004)
     node = (await db.get_user(400004))["node_username"]
-    marzban.panel_usage = [
+    hiddify.panel_usage = [
         {
             "username": node,
             "status": "active",
@@ -267,19 +267,19 @@ async def test_autoban_from_flags(
     await services.monitor.poll()
     user = await db.get_user(400004)
     assert user["status"] == "banned"
-    assert marzban.users[node]["status"] == "disabled"
+    assert hiddify.users[node]["status"] == "disabled"
     anomalies = await db.list_anomalies(400004)
     assert anomalies[0]["kind"] == "AUTOBAN"
     assert (400004, AUTOBAN_TEXT) in notifier.messages
 
 
-async def test_autoban_remains_pending_until_marzban_confirms_disable(
-    db: Database, provisioning: Any, marzban: FakeMarzban
+async def test_autoban_remains_pending_until_hiddify_confirms_disable(
+    db: Database, provisioning: Any, hiddify: FakeHiddify
 ) -> None:
     await _register(db, 410004)
     await provisioning.accept_offer_and_start_trial(410004)
     node = (await db.get_user(410004))["node_username"]
-    marzban.fail_disable_once = MarzbanError("temporary panel outage")
+    hiddify.fail_disable_once = HiddifyError("temporary panel outage")
 
     assert not await provisioning.autoban(
         410004, node, "admin", {"flags": ["CONFIRMED_ABUSE"]}
@@ -289,17 +289,17 @@ async def test_autoban_remains_pending_until_marzban_confirms_disable(
     pending = await db.get_pending_ban(410004)
     assert pending is not None
     assert pending["attempts"] == 1
-    assert marzban.users[node]["status"] == "active"
+    assert hiddify.users[node]["status"] == "active"
 
     await provisioning.retry_pending_bans()
     user = await db.get_user(410004)
     assert user["status"] == "banned"
     assert await db.get_pending_ban(410004) is None
-    assert marzban.users[node]["status"] == "disabled"
+    assert hiddify.users[node]["status"] == "disabled"
 
 
 async def test_autoban_on_traffic_and_soft_suspend(
-    services: Any, db: Database, marzban: FakeMarzban
+    services: Any, db: Database, hiddify: FakeHiddify
 ) -> None:
     gb = 1024**3
     names: dict[int, str] = {}
@@ -307,12 +307,12 @@ async def test_autoban_on_traffic_and_soft_suspend(
         await _register(db, tid)
         await services.provisioning.accept_offer_and_start_trial(tid)
         names[tid] = (await db.get_user(tid))["node_username"]
-    marzban.panel_usage = [
+    hiddify.panel_usage = [
         {"username": names[500005], "status": "active", "used_traffic": 0},
         {"username": names[500006], "status": "active", "used_traffic": 0},
     ]
     await services.monitor.poll()  # establishes today's baseline
-    marzban.panel_usage = [
+    hiddify.panel_usage = [
         {"username": names[500005], "status": "active", "used_traffic": 2100 * gb},
         {"username": names[500006], "status": "active", "used_traffic": 900 * gb},
     ]
@@ -324,7 +324,7 @@ async def test_autoban_on_traffic_and_soft_suspend(
 
 
 async def test_expire_user(
-    db: Database, provisioning: Any, marzban: FakeMarzban
+    db: Database, provisioning: Any, hiddify: FakeHiddify
 ) -> None:
     await _register(db, 600006)
     await provisioning.accept_offer_and_start_trial(600006)
@@ -335,7 +335,7 @@ async def test_expire_user(
     for user in await db.users_to_expire(int(time.time())):
         await provisioning.expire_user(user)
     assert (await db.get_user(600006))["status"] == "expired"
-    assert marzban.users[node]["status"] == "disabled"
+    assert hiddify.users[node]["status"] == "disabled"
 
 
 async def test_banned_user_is_not_reactivated_by_payment(
@@ -398,3 +398,36 @@ async def test_refund_recorded_while_activation_waits_wins(
     activation = await db.get_payment_activation(payment_id)
     assert activation is None or activation["status"] != "completed"
     assert await db.payments_pending_activation() == []
+
+
+async def test_create_user_stores_uuid4_in_node_username(
+    db: Database, provisioning: Any, hiddify: FakeHiddify
+) -> None:
+    await _register(db, 100101)
+    first = await provisioning.accept_offer_and_start_trial(100101)
+    assert first.ok
+    stored = (await db.get_user(100101))["node_username"]
+    assert uuidlib.UUID(stored).version == 4
+    assert stored in hiddify.users
+    assert ("create", stored) in hiddify.calls
+
+
+async def test_revoke_subscription_rotates_uuid(
+    db: Database, provisioning: Any, hiddify: FakeHiddify
+) -> None:
+    await _register(db, 100102)
+    await provisioning.accept_offer_and_start_trial(100102)
+    before = await db.get_user(100102)
+    old = before["node_username"]
+    old_link = before["config_link"]
+    new_link = await provisioning.revoke_link(100102)
+    after = await db.get_user(100102)
+    new = after["node_username"]
+    assert uuidlib.UUID(new).version == 4
+    assert new != old
+    assert new_link != old_link
+    assert after["config_link"] == new_link
+    assert old not in hiddify.users
+    assert new in hiddify.users
+    assert ("revoke", old) in hiddify.calls
+    assert after["expires_at"] == before["expires_at"]

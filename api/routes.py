@@ -50,7 +50,7 @@ from keyboards.main_menu import channel_kb
 from services.billing import BillingError
 from services.email_login import is_site_account, mask_email, normalize_email
 from services.mailer import MailError
-from services.marzban import MarzbanError
+from services.hiddify import HiddifyError
 from services.provisioning import ProvisioningError
 from services.security import sanitize_username
 from services.yookassa import is_valid_email
@@ -356,7 +356,7 @@ async def config(request: web.Request) -> web.Response:
         return json_error(403, "inactive")
     try:
         link = await services.provisioning.fresh_config(telegram_id)
-    except (MarzbanError, ProvisioningError):
+    except (HiddifyError, ProvisioningError):
         link = user["config_link"]
     if not link:
         return json_error(503, "node_unavailable")
