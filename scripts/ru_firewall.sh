@@ -8,7 +8,8 @@
 #   bash ru_firewall.sh --status   one line: OK or WARN
 #
 # Touches ONLY the filter INPUT chain: never FORWARD, nat or OUTPUT. The VPN entry
-# (DNAT 443/2087/8443 -> DE:2096) is forwarded traffic, so it is unaffected.
+# (DNAT 443/2087/8443/2083/2085 -> DE:2443, scripts/ru_vless_relay.sh) is
+# forwarded traffic, so it is unaffected.
 # IPv4 only (RU has no IPv6 address).
 #
 # Cannot lock you out: the ESTABLISHED rule goes in before the policy flips to DROP
