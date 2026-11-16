@@ -233,6 +233,14 @@ Hiddify Manager. Так правила стоят на сервере сейча
   обфускацией Salamander) и MASQUERADE для него. Это вход для мобильных сетей,
   где режут TCP/TLS, но пропускают UDP (16.11.2026). Порт можно сменить через
   `HY2_PORT`; порты AmneziaWG (39051, 44877) скрипт не примет.
+- nat PREROUTING: UDP 443 → `89.125.210.172:36099` — запасной порт Hysteria2
+  (16.11.2026). Для фильтра это выглядит как QUIC/HTTP/3, который обычно пропускают.
+  MASQUERADE для 36099 покрывает и его. В подписке пока не объявлен (для этого нужна
+  правка Hiddify); вручную в клиенте можно сменить порт 36099 на 443. Отключить:
+  `HY2_BACKUP_PORT=` (пусто); порты AmneziaWG и сам `HY2_PORT` скрипт не примет.
+- `net.netfilter.nf_conntrack_max = 65536` в `/etc/sysctl.d/91-vpn-relay.conf`.
+  Ядро на RU (868 МБ ОЗУ) само ставило 7168 — мало для NAT многих клиентов
+  (Hysteria2, AmneziaWG и TCP-вход держат записи conntrack). `CONNTRACK_MAX` меняет число.
 
 Старые правила Marzban (→ `:2096` и `:2098` и их MASQUERADE) и прямые TCP-пробросы на
 `89.125.210.172:2443` по открытому интернету `--apply` убирает сам,
@@ -295,6 +303,25 @@ systemctl enable --now wg-quick@wg-vpn
 Откат на прямой проброс: `iptables-restore < /etc/iptables/rules.v4.pre-tcp-via-wgvpn-*`
 и `netfilter-persistent save` на RU (или выпуск скрипта до этого изменения), затем
 `systemctl disable --now wg-quick@wg-vpn` на обоих серверах.
+
+### Оптимизация UDP RU↔DE (16 ноября 2026)
+
+Проверено: BBR и fq работают на `eth0` обоих серверов (`net_tuning.sh`); у `wg-vpn`
+очередь `noqueue`, как у любого WireGuard: зашифрованные пакеты уходят через `eth0`
+с fq, а TCP-сокеты Hiddify на DE:2443 используют bbr (`ss -ti`). MSS для TCP через
+туннель ограничивает `TCPMSS --clamp-mss-to-pmtu` (MTU `wg-vpn` 1420 → MSS 1380).
+Hysteria2 идёт по UDP мимо туннеля, его пакеты (QUIC, до ~1350 байт) влезают в MTU 1500.
+
+Таймауты conntrack UDP (30 с без ответа, 120 с для потока с ответами) не менялись:
+Hysteria2 и WireGuard шлют keepalive чаще, чем раз в 120 с, так что записи NAT не
+истекают. Multipath не нужен: на RU один внешний адрес и один путь до DE.
+
+Замер Hysteria2 (8 попыток, 20 МБ): с DE через RU:36099 — 8/8, ~70 Мбит/с; через
+RU:443/udp — 8/8, ~85 Мбит/с; с RU напрямую на DE:36099 — 8/8, ~107 Мбит/с.
+
+Откат: `iptables-restore < /etc/iptables/rules.v4.pre-udp-opt-*` и
+`netfilter-persistent save`; `rm /etc/sysctl.d/91-vpn-relay.conf` (значение вернётся
+после перезагрузки).
 
 На RU, как и на DE, включаются BBR и fq — `scripts/net_tuning.sh`:
 

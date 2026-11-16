@@ -62,6 +62,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
         ),
         "BACKUP_DIR": str(tmp_path / "backup"),
         "IP_BIN": str(write_exe(tmp_path / "ip", "#!/bin/sh\nexit 0\n")),
+        "RELAY_SYSCTL_CONF": str(tmp_path / "sysctl.d" / "91-vpn-relay.conf"),
     }
 
 
@@ -91,6 +92,7 @@ EXPECTED = [
     "mangle|FORWARD|-p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu",
     f"nat|PREROUTING|-p udp --dport 36099 -j DNAT --to-destination {DE}:36099",
     f"nat|POSTROUTING|-d {DE} -p udp --dport 36099 -j MASQUERADE",
+    f"nat|PREROUTING|-p udp --dport 443 -j DNAT --to-destination {DE}:36099",
 ]
 ADDED = [
     f"-t nat -A PREROUTING -p tcp --dport 443 -j DNAT --to-destination {TUN}:2443",
@@ -102,6 +104,7 @@ ADDED = [
     "-t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu",
     f"-t nat -A PREROUTING -p udp --dport 36099 -j DNAT --to-destination {DE}:36099",
     f"-t nat -A POSTROUTING -d {DE} -p udp --dport 36099 -j MASQUERADE",
+    f"-t nat -A PREROUTING -p udp --dport 443 -j DNAT --to-destination {DE}:36099",
 ]
 # The Marzban forwards live on RU before the move to Hiddify (16.11.2026).
 OBSOLETE = [
@@ -135,13 +138,13 @@ def backups(tmp_path: Path) -> list[Path]:
     return sorted((tmp_path / "backup").glob("rules.v4.before-ru-vless-relay-*"))
 
 
-def test_apply_adds_the_nine_rules_and_saves(tmp_path: Path) -> None:
+def test_apply_adds_the_ten_rules_and_saves(tmp_path: Path) -> None:
     env = _env(tmp_path)
     result = run(env, "--apply")
     assert result.returncode == 0, result.stderr
     assert rules(env) == EXPECTED
     assert "RU_VLESS_RELAY_OK" in result.stdout
-    assert "9 rules added" in result.stdout
+    assert "10 rules added" in result.stdout
     log = Path(env["FAKE_LOG"]).read_text(encoding="utf-8")
     for needle in ADDED:
         assert needle in log
@@ -204,7 +207,7 @@ def test_remove_takes_every_rule_away(tmp_path: Path) -> None:
     result = run(env, "--remove")
     assert result.returncode == 0, result.stderr
     assert rules(env) == []
-    assert "9 rules removed" in result.stdout
+    assert "10 rules removed" in result.stdout
     assert "RU_VLESS_RELAY_REMOVED" in result.stdout
 
 
@@ -216,7 +219,7 @@ def test_remove_clears_duplicate_copies(tmp_path: Path) -> None:
     result = run(env, "--remove")
     assert result.returncode == 0, result.stderr
     assert rules(env) == []
-    assert "18 rules removed" in result.stdout
+    assert "20 rules removed" in result.stdout
 
 
 def test_another_de_address_and_a_bad_one(tmp_path: Path) -> None:
@@ -253,7 +256,7 @@ def test_apply_replaces_marzban_forwards_keeps_amneziawg(tmp_path: Path) -> None
     result = run(env, "--apply")
     assert result.returncode == 0, result.stderr
     assert sorted(rules(env)) == sorted(AWG + EXPECTED)
-    assert "8 rules added, 7 obsolete removed" in result.stdout
+    assert "9 rules added, 7 obsolete removed" in result.stdout
     log = Path(env["FAKE_LOG"]).read_text(encoding="utf-8").splitlines()
     first_delete = next(i for i, line in enumerate(log) if " -D " in line)
     last_add = max(i for i, line in enumerate(log) if " -A " in line)
@@ -295,7 +298,7 @@ def test_remove_also_drops_obsolete_and_keeps_amneziawg(tmp_path: Path) -> None:
     result = run(env, "--remove")
     assert result.returncode == 0, result.stderr
     assert sorted(rules(env)) == sorted(AWG)
-    assert "16 rules removed" in result.stdout
+    assert "17 rules removed" in result.stdout
     assert len(backups(tmp_path)) == 1
 
 
@@ -401,3 +404,40 @@ def test_tunnel_address_settings(tmp_path: Path) -> None:
         bad = run(bad_env, "--check")
         assert bad.returncode == 1, (name, value)
         assert needle in bad.stderr
+
+
+def test_spare_hysteria2_port_and_conntrack(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    result = run(env, "--apply")
+    assert result.returncode == 0, result.stderr
+    assert "UDP 36099 and 443" in result.stdout
+    conf = Path(env["RELAY_SYSCTL_CONF"])
+    assert "net.netfilter.nf_conntrack_max = 65536" in conf.read_text(encoding="utf-8")
+    assert "conntrack max 65536" in result.stdout
+
+
+def test_spare_port_can_be_left_out(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    env["HY2_BACKUP_PORT"] = ""
+    result = run(env, "--apply")
+    assert result.returncode == 0, result.stderr
+    assert not any("--dport 443 -j DNAT" in r and "udp" in r for r in rules(env))
+    assert len(rules(env)) == len(EXPECTED) - 1
+
+
+def test_bad_spare_ports_and_conntrack(tmp_path: Path) -> None:
+    for name, bad in (
+        ("HY2_BACKUP_PORT", "39051"),
+        ("HY2_BACKUP_PORT", "44877"),
+        ("HY2_BACKUP_PORT", "36099"),
+        ("HY2_BACKUP_PORT", "x"),
+        ("HY2_BACKUP_PORT", "70000"),
+        ("CONNTRACK_MAX", "12;id"),
+        ("CONNTRACK_MAX", "1"),
+    ):
+        env = _env(tmp_path)
+        env[name] = bad
+        result = run(env, "--apply")
+        assert result.returncode == 1, (name, bad)
+        assert name in result.stderr
+        assert rules(env) == []

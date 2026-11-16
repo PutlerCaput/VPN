@@ -19,6 +19,10 @@
 #   MASQUERADE for 10.205.0.2:2443 out of wg-vpn
 #   UDP 36099 -> DE:36099 (Hiddify: Hysteria2 with Salamander obfuscation),
 #   for mobile networks that cut TCP/TLS but pass UDP; MASQUERADE for it
+#   UDP 443 -> DE:36099 as well: a spare Hysteria2 port that looks like QUIC
+#   (HTTP/3) to a filter; HY2_BACKUP_PORT= (empty) leaves it out
+#   nf_conntrack_max 65536 (/etc/sysctl.d/91-vpn-relay.conf): the kernel picks
+#   7168 for 1 GB of RAM, too few NAT entries for many clients
 #   MSS clamp on forwarded SYN packets, so large packets do not stall on
 #   mobile networks
 # The Marzban forwards (-> DE:2096 and DE:2098) and the direct TCP forwards to
@@ -38,6 +42,9 @@ shopt -s inherit_errexit
 DE_IP="${DE_IP:-89.125.210.172}"
 DE_PORT="${DE_PORT:-2443}"
 HY2_PORT="${HY2_PORT:-36099}"
+HY2_BACKUP_PORT="${HY2_BACKUP_PORT-443}"
+CONNTRACK_MAX="${CONNTRACK_MAX:-65536}"
+RELAY_SYSCTL_CONF="${RELAY_SYSCTL_CONF:-/etc/sysctl.d/91-vpn-relay.conf}"
 DE_TUNNEL_IP="${DE_TUNNEL_IP:-10.205.0.2}"
 TUNNEL_IF="${TUNNEL_IF:-wg-vpn}"
 IP_BIN="${IP_BIN:-ip}"
@@ -71,6 +78,16 @@ fi
 [[ "$((10#$HY2_PORT))" != 39051 && "$((10#$HY2_PORT))" != 44877 ]] \
   || stop "HY2_PORT $HY2_PORT belongs to AmneziaWG"
 HY2_PORT="$((10#$HY2_PORT))"
+if [[ -n "$HY2_BACKUP_PORT" ]]; then
+  if ! [[ "$HY2_BACKUP_PORT" =~ ^[0-9]+$ ]] || ((10#$HY2_BACKUP_PORT < 1 || 10#$HY2_BACKUP_PORT > 65535)); then
+    stop "HY2_BACKUP_PORT is not a UDP port"
+  fi
+  HY2_BACKUP_PORT="$((10#$HY2_BACKUP_PORT))"
+  [[ "$HY2_BACKUP_PORT" != 39051 && "$HY2_BACKUP_PORT" != 44877 ]] \
+    || stop "HY2_BACKUP_PORT $HY2_BACKUP_PORT belongs to AmneziaWG"
+  [[ "$HY2_BACKUP_PORT" != "$HY2_PORT" ]] || stop "HY2_BACKUP_PORT is the same as HY2_PORT"
+fi
+[[ "$CONNTRACK_MAX" =~ ^[0-9]{4,8}$ ]] || stop "CONNTRACK_MAX is not a number of entries"
 # 2096 and 2098 are the old Marzban ports: their rules are in OBSOLETE below and
 # would be removed again right after being added.
 [[ "$((10#$DE_PORT))" != 2096 && "$((10#$DE_PORT))" != 2098 ]] \
@@ -88,6 +105,10 @@ RULES=(
   "nat|PREROUTING|A|-p udp --dport $HY2_PORT -j DNAT --to-destination $DE_IP:$HY2_PORT"
   "nat|POSTROUTING|A|-d $DE_IP -p udp --dport $HY2_PORT -j MASQUERADE"
 )
+# The spare port lands on the same DE port, so the MASQUERADE above covers it.
+if [[ -n "$HY2_BACKUP_PORT" ]]; then
+  RULES+=("nat|PREROUTING|A|-p udp --dport $HY2_BACKUP_PORT -j DNAT --to-destination $DE_IP:$HY2_PORT")
+fi
 
 # Marzban (removed on 16 November 2026) listened on DE:2096 and DE:2098. While
 # these DNAT rules stay, they win over the new ones for the same ports.
@@ -183,9 +204,26 @@ drop_obsolete() {
   printf '%s\n' "$n"
 }
 
+conntrack_text() {
+  printf '%s\n' "# VPN relay on RU (scripts/ru_vless_relay.sh): room for NAT entries of many clients." \
+    "net.netfilter.nf_conntrack_max = $CONNTRACK_MAX"
+}
+
+# Writes the sysctl file only when it differs, then sets the live value.
+set_conntrack() {
+  local tmp
+  mkdir -p "$(dirname "$RELAY_SYSCTL_CONF")" || return 1
+  if ! [[ -f "$RELAY_SYSCTL_CONF" ]] || ! cmp -s <(conntrack_text) "$RELAY_SYSCTL_CONF"; then
+    tmp="$(mktemp "$RELAY_SYSCTL_CONF.XXXXXX")" || return 1
+    conntrack_text >"$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$RELAY_SYSCTL_CONF" || return 1
+  fi
+  "$SYSCTL" -q -w "net.netfilter.nf_conntrack_max=$CONNTRACK_MAX" >/dev/null
+}
+
 case "$MODE" in
   --check)
     say "ip_forward: $("$SYSCTL" -n net.ipv4.ip_forward 2>/dev/null || echo unknown)"
+    say "nf_conntrack_max: $("$SYSCTL" -n net.netfilter.nf_conntrack_max 2>/dev/null || echo unknown) (wanted $CONNTRACK_MAX)"
     show
     say "RU_VLESS_RELAY_CHECK_OK: nothing changed. Switch on with: --apply"
     ;;
@@ -216,8 +254,9 @@ case "$MODE" in
         || stop "an obsolete rule could not be removed; nothing saved. Undo: iptables-restore < the backup above"
     fi
     "$SAVE" save >/dev/null 2>&1 || stop "rules are active but not saved: run $SAVE save"
+    set_conntrack || stop "rules are saved, but nf_conntrack_max could not be set ($RELAY_SYSCTL_CONF)"
     show
-    say "RU_VLESS_RELAY_OK: TCP 443/2087/8443/2083/2085 -> $DE_TUNNEL_IP:$DE_PORT via $TUNNEL_IF, UDP $HY2_PORT -> $DE_IP:$HY2_PORT ($added rules added, $dropped obsolete removed, saved)"
+    say "RU_VLESS_RELAY_OK: TCP 443/2087/8443/2083/2085 -> $DE_TUNNEL_IP:$DE_PORT via $TUNNEL_IF, UDP $HY2_PORT${HY2_BACKUP_PORT:+ and $HY2_BACKUP_PORT} -> $DE_IP:$HY2_PORT, conntrack max $CONNTRACK_MAX ($added rules added, $dropped obsolete removed, saved)"
     ;;
   --remove)
     removed=0
