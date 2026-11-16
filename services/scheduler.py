@@ -467,6 +467,10 @@ class Jobs:
             await self.refunds.run()
 
     async def housekeeping(self) -> None:
+        # The in-memory limiters first: a database that does not answer must
+        # not leave every address and user seen this hour in memory.
+        for limiter in self.limiters:
+            limiter.prune()
         current = int(time.time())
         await self.db.purge_refresh_tokens(current)
         retention = self.settings.conn_log_retention_days * 86400
@@ -479,8 +483,6 @@ class Jobs:
             await self.traffic.purge()
         if self.stars is not None:
             await self.stars.end_lapsed()
-        for limiter in self.limiters:
-            limiter.prune()
 
     async def cancel_unpaid(self) -> None:
         now = int(time.time())

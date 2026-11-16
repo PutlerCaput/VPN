@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import os
 import sqlite3
 import sys
@@ -668,22 +669,32 @@ async def test_a_retry_repeats_the_same_request_id(
 
 
 async def test_an_outage_fails_fast_and_recovers(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setattr("db.remote.RETRY_DELAYS", (0.0, 0.0))
-    flaky = FlakyGateway([503, 503, 503])
+    # Four attempts (three retries) before the call gives up.
+    flaky = FlakyGateway([503, 503, 503, 503])
     server = TestServer(flaky.app)
     await server.start_server()
     client = RemoteDatabase(str(server.make_url("/")), GATEWAY_TOKEN, cooldown=0.2)
     try:
         await client.connect()
-        with pytest.raises(DatabaseUnavailableError):
+        with (
+            caplog.at_level(logging.WARNING, logger="db.remote"),
+            pytest.raises(DatabaseUnavailableError),
+        ):
             await client.count_active_users()
-        assert len(flaky.bodies) == 3
+        assert len(flaky.bodies) == 4
+        # The class of the last failure is logged, for the next outage's diagnosis.
+        [record] = [
+            r for r in caplog.records if r.msg == "database_gateway_unreachable"
+        ]
+        assert record.failure == "RemoteDatabaseError"
+        assert record.attempt == 4
         # During the cooldown nobody waits behind timeouts and nothing is sent.
         with pytest.raises(DatabaseUnavailableError):
             await client.count_active_users()
-        assert len(flaky.bodies) == 3
+        assert len(flaky.bodies) == 4
         await asyncio.sleep(0.25)
         assert await client.count_active_users() == 7
     finally:

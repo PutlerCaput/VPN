@@ -8,7 +8,8 @@ import json
 import logging
 import time
 import uuid
-from collections import OrderedDict, defaultdict
+import weakref
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -95,7 +96,12 @@ class ProvisioningService:
         self.hiddify = hiddify
         self.notifier = notifier
         self.settings = settings
-        self._locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+        # One lock per user while someone holds or waits for it; a lock nobody
+        # references any more drops out, so the map does not grow with every
+        # user the bot has ever served.
+        self._locks: weakref.WeakValueDictionary[int, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
         self._traffic_cache: OrderedDict[str, tuple[float, TrafficStatus]] = (
             OrderedDict()
         )
@@ -104,7 +110,11 @@ class ProvisioningService:
         self.trial_gate: Callable[[], bool] | None = None
 
     def _lock(self, telegram_id: int) -> asyncio.Lock:
-        return self._locks[telegram_id]
+        lock = self._locks.get(telegram_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[telegram_id] = lock
+        return lock
 
     def _config_from(self, data: dict[str, Any]) -> str:
         """What the user imports: all-locations subscription or a single link."""

@@ -12,6 +12,7 @@ from aiohttp import web
 from aiohttp.typedefs import Middleware
 
 from api.auth import AuthError, TokenService
+from db.remote import DatabaseUnavailableError
 from logging_setup import request_id_var
 from services.container import Services
 from services.metrics import API_LATENCY, API_REQUESTS
@@ -80,6 +81,10 @@ def build_limiters(settings: Any = None) -> dict[str, SlidingWindowLimiter]:
     }
 
 
+# Seconds a client waits after the database on the other server did not answer.
+API_RETRY_AFTER = "30"
+
+
 def json_error(
     status: int, error: str, headers: dict[str, str] | None = None
 ) -> web.Response:
@@ -128,6 +133,13 @@ async def context_middleware(
             response = await handler(request)
         except web.HTTPException as exc:
             response = json_error(exc.status, exc.reason.lower().replace(" ", "_"))
+        except DatabaseUnavailableError:
+            # A short outage between the servers, not a bug: the app (and a VPN
+            # app refreshing its subscription) is told to come back shortly.
+            logger.warning("api_database_unavailable", extra={"route": route})
+            response = json_error(
+                503, "temporarily_unavailable", {"Retry-After": API_RETRY_AFTER}
+            )
         except Exception:
             logger.exception("api_unhandled_error", extra={"route": route})
             response = json_error(500, "internal_error")
