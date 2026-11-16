@@ -167,3 +167,9 @@ def test_unreadable_secret_file_exits_cleanly(
     assert "bot_token" in err
     assert "chown 1000:1000" in err
     assert "Traceback" not in err
+
+
+def test_brand_animation_is_on_by_default(settings: Settings) -> None:
+    assert settings.brand_animation_enabled is True
+    example = Path(__file__).resolve().parent.parent / ".env.example"
+    assert "BRAND_ANIMATION_ENABLED=true" in example.read_text(encoding="utf-8")

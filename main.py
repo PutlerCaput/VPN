@@ -93,7 +93,9 @@ def build_services(settings: Settings, db: Database, bot: Bot) -> Services:
         settings.vapid_private.get_secret_value() if settings.vapid_private else None,
         settings.vapid_contact,
     )
-    notifier = Notifier(bot, push)
+    notifier = Notifier(
+        bot, push, brand_animation_enabled=settings.brand_animation_enabled
+    )
     provisioning = ProvisioningService(db, hiddify, notifier, settings)
     traffic = (
         ServerTrafficWatch(db, notifier, settings)

@@ -1,5 +1,5 @@
 """Brand: icons in the sizes the manifests promise, fonts with their licence,
-and the logo before the bot's first greeting."""
+the logo before the bot's first greeting, and the brand animation."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from aiogram.filters import CommandObject
 from aiogram.types import Chat, Message, User
 from PIL import Image
 
-import handlers.start as start
+import services.brand_animation as brand
 from handlers.start import cmd_start
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,72 +73,77 @@ def test_fonts_ship_with_their_licence(app: str, prefix: str) -> None:
 
 
 def _message(owner: int) -> Message:
-    return Message(
+    message = Message(
         message_id=10,
         date=datetime.now(UTC),
         chat=Chat(id=owner, type="private"),
         from_user=User(id=owner, is_bot=False, first_name="Owner"),
     )
+    for name in ("answer", "answer_photo", "answer_animation"):
+        object.__setattr__(message, name, AsyncMock())
+    return message
 
 
-async def test_new_user_sees_the_logo_before_the_offer(
+async def test_new_user_sees_the_animation_with_the_offer(
     services: Any, monkeypatch: Any
 ) -> None:
-    monkeypatch.setattr(start, "_welcome_file", {})
-    order: list[str] = []
-    uploaded = SimpleNamespace(
-        photo=[SimpleNamespace(file_id="small"), SimpleNamespace(file_id="large")]
-    )
+    monkeypatch.setattr(brand, "_file_ids", {})
+    uploaded = SimpleNamespace(animation=SimpleNamespace(file_id="anim-1"))
     first = _message(995001)
-    object.__setattr__(
-        first,
-        "answer_photo",
-        AsyncMock(side_effect=lambda *_a, **_k: order.append("photo") or uploaded),
-    )
-    object.__setattr__(
-        first, "answer", AsyncMock(side_effect=lambda *_a, **_k: order.append("offer"))
-    )
+    first.answer_animation.return_value = uploaded
 
     await cmd_start(first, CommandObject(command="start"), services)
 
-    assert order == ["photo", "offer"]
-    assert start._welcome_file == {"file_id": "large"}
+    first.answer_animation.assert_awaited_once()
+    caption = first.answer_animation.await_args.kwargs["caption"]
+    assert "Добро пожаловать" in caption
+    assert "24 часа бесплатно" in caption
+    first.answer.assert_not_awaited()
+    assert brand.cached_animation_file_id() == "anim-1"
 
     second = _message(995002)
-    for name in ("answer", "answer_photo"):
-        object.__setattr__(second, name, AsyncMock())
+    second.answer_animation.return_value = SimpleNamespace(
+        animation=SimpleNamespace(file_id="ignored")
+    )
     await cmd_start(second, CommandObject(command="start"), services)
     # Uploaded once; later greetings send Telegram's copy.
-    assert second.answer_photo.call_args.args[0] == "large"
+    assert second.answer_animation.await_args.args[0] == "anim-1"
 
 
-async def test_logo_failure_does_not_block_the_offer(
+async def test_animation_failure_does_not_block_the_offer(
     services: Any, monkeypatch: Any
 ) -> None:
-    monkeypatch.setattr(start, "_welcome_file", {})
+    monkeypatch.setattr(brand, "_file_ids", {})
     message = _message(995003)
-    object.__setattr__(
-        message,
-        "answer_photo",
-        AsyncMock(side_effect=TelegramNetworkError(method=MagicMock(), message="down")),
+    message.answer_animation.side_effect = TelegramNetworkError(
+        method=MagicMock(), message="down"
     )
-    object.__setattr__(message, "answer", AsyncMock())
+    message.answer_photo.side_effect = TelegramNetworkError(
+        method=MagicMock(), message="down"
+    )
 
     await cmd_start(message, CommandObject(command="start"), services)
 
     message.answer.assert_awaited_once()
+    assert "24 часа бесплатно" in message.answer.await_args.args[0]
 
 
-async def test_returning_user_gets_no_logo(services: Any) -> None:
+async def test_returning_user_sees_the_animation_on_start(services: Any) -> None:
     await services.db.create_user(995004, "owner", None)
     await services.provisioning.accept_offer_and_start_trial(995004)
     message = _message(995004)
-    for name in ("answer", "answer_photo"):
-        object.__setattr__(message, name, AsyncMock())
+    message.answer_animation.return_value = SimpleNamespace(
+        animation=SimpleNamespace(file_id="anim-return")
+    )
 
     await cmd_start(message, CommandObject(command="start"), services)
 
-    message.answer_photo.assert_not_awaited()
+    message.answer_animation.assert_awaited_once()
+    caption = message.answer_animation.await_args.kwargs["caption"]
+    assert "Рады снова видеть" in caption
+    # The Mini App hint stays a plain follow-up, not a second animation.
+    assert message.answer.await_count == 1
+    assert "приложении" in message.answer.await_args.args[0]
 
 
 def test_pictures_have_the_sizes_botfather_and_the_page_declare() -> None:
@@ -151,9 +156,16 @@ def test_pictures_have_the_sizes_botfather_and_the_page_declare() -> None:
     for name, size in wanted.items():
         with Image.open(ROOT / name) as image:
             assert (image.format, image.size) == ("JPEG", size), name
+    assert (ROOT / "branding/telegram/brand-animation.mp4").is_file()
+    assert (ROOT / "branding/telegram/brand-animation.gif").is_file()
     page = (ROOT / "pwa" / "index.html").read_text(encoding="utf-8")
     assert 'og:image:width" content="1200"' in page
     assert 'og:image:height" content="630"' in page
+
+
+def test_bot_image_copies_the_animation_into_the_container() -> None:
+    docker = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "branding/telegram/brand-animation.mp4" in docker
 
 
 def test_the_banner_is_drawn_the_same_every_time() -> None:
