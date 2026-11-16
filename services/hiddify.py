@@ -201,15 +201,21 @@ class HiddifyClient:
                 follow_redirects=False,
             )
         try:
-            response = await self._sub_client.get(
-                url, headers={"User-Agent": user_agent[:200] or "v2rayNG/1.9"}
-            )
+            async with self._sub_client.stream(
+                "GET", url, headers={"User-Agent": user_agent[:200] or "v2rayNG/1.9"}
+            ) as response:
+                # Read up to the limit, never the whole body first.
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > SUBSCRIPTION_MAX_BYTES:
+                        raise HiddifyError("fetch_subscription: body too large")
+                encoding = response.encoding or "utf-8"
+                status, headers = response.status_code, dict(response.headers)
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             HIDDIFY_ERRORS.labels(operation="fetch_subscription").inc()
             raise HiddifyError(f"fetch_subscription failed: {exc}") from None
-        if len(response.content) > SUBSCRIPTION_MAX_BYTES:
-            raise HiddifyError("fetch_subscription: body too large")
-        return response.status_code, response.text, dict(response.headers)
+        return status, bytes(body).decode(encoding, errors="replace"), headers
 
     def _admin(self, *segments: str) -> str:
         parts = [self._admin_proxy_path, "api/v2/admin", *segments]

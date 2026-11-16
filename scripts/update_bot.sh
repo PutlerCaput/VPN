@@ -197,6 +197,9 @@ if [[ "${1:-}" == "--doctor" ]]; then
   # Monthly update of system packages and base images, and a pending reboot (scripts/install_auto_update.sh).
   row="$(bash "$(dirname "$SELF")/auto_update_status.sh" 2>/dev/null || true)"
   case "$row" in OK\ * | WARN\ *) report "${row%% *}" "${row#* }" ;; *) report WARN "auto-update status could not be read" ;; esac
+  # Hiddify's nightly auto-update stays off, also after a reboot (scripts/hiddify_cron_guard.sh).
+  row="$(bash "$(dirname "$SELF")/hiddify_cron_guard.sh" --status 2>/dev/null || true)"
+  case "$row" in OK\ * | WARN\ *) report "${row%% *}" "${row#* }" ;; *) report WARN "Hiddify auto-update guard status could not be read" ;; esac
   # SSH: password login off, keys only (scripts/ssh_hardening.sh).
   row="$(bash "$(dirname "$SELF")/ssh_hardening.sh" --status 2>/dev/null || true)"
   case "$row" in OK\ * | WARN\ *) report "${row%% *}" "${row#* }" ;; *) report WARN "ssh status could not be read (run as root)" ;; esac

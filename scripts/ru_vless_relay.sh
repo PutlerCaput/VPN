@@ -22,7 +22,8 @@
 #   UDP 443 -> DE:36099 as well: a spare Hysteria2 port that looks like QUIC
 #   (HTTP/3) to a filter; HY2_BACKUP_PORT= (empty) leaves it out
 #   nf_conntrack_max 65536 (/etc/sysctl.d/91-vpn-relay.conf): the kernel picks
-#   7168 for 1 GB of RAM, too few NAT entries for many clients
+#   7168 for 1 GB of RAM, too few NAT entries for many clients; nf_conntrack
+#   in /etc/modules-load.d/vpn-relay.conf so the value survives a reboot
 #   MSS clamp on forwarded SYN packets, so large packets do not stall on
 #   mobile networks
 # The Marzban forwards (-> DE:2096 and DE:2098) and the direct TCP forwards to
@@ -45,6 +46,10 @@ HY2_PORT="${HY2_PORT:-36099}"
 HY2_BACKUP_PORT="${HY2_BACKUP_PORT-443}"
 CONNTRACK_MAX="${CONNTRACK_MAX:-65536}"
 RELAY_SYSCTL_CONF="${RELAY_SYSCTL_CONF:-/etc/sysctl.d/91-vpn-relay.conf}"
+# nf_conntrack is loaded at boot before systemd-sysctl runs (systemd-sysctl is
+# ordered after systemd-modules-load); otherwise the key does not exist yet,
+# the sysctl file is skipped and the limit falls back to 7168 after a reboot.
+RELAY_MODULES_CONF="${RELAY_MODULES_CONF:-/etc/modules-load.d/vpn-relay.conf}"
 DE_TUNNEL_IP="${DE_TUNNEL_IP:-10.205.0.2}"
 TUNNEL_IF="${TUNNEL_IF:-wg-vpn}"
 IP_BIN="${IP_BIN:-ip}"
@@ -209,9 +214,19 @@ conntrack_text() {
     "net.netfilter.nf_conntrack_max = $CONNTRACK_MAX"
 }
 
-# Writes the sysctl file only when it differs, then sets the live value.
+modules_text() {
+  printf '%s\n' "# nf_conntrack before systemd-sysctl, so net.netfilter.nf_conntrack_max ($(basename "$RELAY_SYSCTL_CONF")) applies at boot" \
+    "nf_conntrack"
+}
+
+# Writes the sysctl and module files only when they differ, then sets the live value.
 set_conntrack() {
   local tmp
+  mkdir -p "$(dirname "$RELAY_MODULES_CONF")" || return 1
+  if ! [[ -f "$RELAY_MODULES_CONF" ]] || ! cmp -s <(modules_text) "$RELAY_MODULES_CONF"; then
+    tmp="$(mktemp "$RELAY_MODULES_CONF.XXXXXX")" || return 1
+    modules_text >"$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$RELAY_MODULES_CONF" || return 1
+  fi
   mkdir -p "$(dirname "$RELAY_SYSCTL_CONF")" || return 1
   if ! [[ -f "$RELAY_SYSCTL_CONF" ]] || ! cmp -s <(conntrack_text) "$RELAY_SYSCTL_CONF"; then
     tmp="$(mktemp "$RELAY_SYSCTL_CONF.XXXXXX")" || return 1

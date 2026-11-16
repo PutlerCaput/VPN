@@ -558,3 +558,33 @@ bash scripts/update_bot.sh --set SERVER_TRAFFIC_PAUSE_TRIALS=true
 **Ограничения.** В учёт не входит собственный трафик сервера: обновления,
 скачивание образов, резервные копии. Обычно это единицы гигабайт в месяц.
 Если серверов станет несколько, прогноз сложит трафик всех серверов вместе.
+
+## Ночное автообновление Hiddify остаётся выключенным (DE)
+
+Ночное `update.sh` Hiddify (`/etc/cron.d/hiddify_auto_update`) закомментировано:
+оно возвращает настройки Hiddify по умолчанию поверх наших портов, поэтому
+Hiddify обновляется только вручную. Но Hiddify сам пишет эту строку обратно:
+`/etc/cron.d/hiddify_reinstall_on_reboot` при каждой загрузке запускает
+`scripts/install.sh`, а его `scripts/common/run.sh` переписывает файл с
+активной строкой (так же делает ручной `install.sh`).
+
+`scripts/hiddify_cron_guard.sh` держит её выключенной: path-юнит
+`hiddify-cron-guard.path` срабатывает на каждое изменение файла, таймер
+смотрит ещё раз через 5 минут после загрузки и каждые 15 минут. Перед
+изменением файл копируется в `/var/backups/hiddify-cron-guard/`.
+
+```
+bash scripts/hiddify_cron_guard.sh --install   # поставить (копия в /usr/local/sbin)
+bash scripts/hiddify_cron_guard.sh --status    # строка для доктора
+bash scripts/hiddify_cron_guard.sh --remove    # снять (файл cron остаётся как есть)
+```
+
+`bash scripts/update_bot.sh --doctor` показывает его состояние.
+
+## Таблица соединений на RU после перезагрузки
+
+`nf_conntrack_max = 65536` задан в `/etc/sysctl.d/91-vpn-relay.conf`. Чтобы
+значение применялось при загрузке, модуль `nf_conntrack` загружается раньше
+`systemd-sysctl` (`/etc/modules-load.d/vpn-relay.conf`, пишет
+`scripts/ru_vless_relay.sh --apply`). Без этого после перезагрузки остаётся
+7168.

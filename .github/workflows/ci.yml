@@ -58,6 +58,35 @@ jobs:
       - name: Tests through the database gateway (SQLCipher behind it)
         run: TEST_DB_BACKEND=remote TEST_DB_KEY="$(python -c 'print("ab" * 32)')" pytest -q
 
+  server-scripts-as-root:
+    # The server scripts refuse to run without root, so their tests skip on the
+    # normal runner (about 180 tests). Here they run as root inside a throwaway
+    # container, with the same stand-in binaries as everywhere else.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: python:3.11-bookworm
+    env:
+      SECRETS_DIR: /nonexistent
+    steps:
+      - uses: actions/checkout@v4
+      - name: System tools the scripts call (age for the backup tests)
+        run: |
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends age
+      - run: pip install -r requirements-dev.txt
+      - name: Root-only script tests
+        shell: bash  # -eo pipefail: the pytest result survives the tee
+        run: |
+          test "$(id -u)" = 0
+          pytest -q -rs -p no:cacheprovider \
+            tests/test_ssh_hardening.py tests/test_db_gateway_install.py \
+            tests/test_db_cutover.py tests/test_ru_firewall.py tests/test_db_tunnel.py \
+            tests/test_server_update.py tests/test_ru_integrity.py \
+            tests/test_retire_payment_edge.py tests/test_backup.py | tee pytest.out
+          # Nothing may skip for want of root here: that is what this job is for.
+          if grep -q "without root" pytest.out; then exit 1; fi
+
   frontends:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

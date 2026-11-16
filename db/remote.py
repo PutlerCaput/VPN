@@ -28,6 +28,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import logging
 import sqlite3
 import time
 import uuid
@@ -43,8 +44,12 @@ from db.database import Database, PendingPaymentLimitError
 from db.endpoint import MIN_TOKEN_LENGTH, PROTOCOL_VERSION, validate_gateway_url
 from db.gateway import api_shapes, remote_methods
 
-# Pauses before the second and third attempt of one call.
-RETRY_DELAYS = (0.2, 0.6)
+logger = logging.getLogger(__name__)
+
+# Pauses before the second, third and fourth attempt of one call. The link
+# between the servers loses a few percent of packets in bursts: a short connect
+# timeout and one more attempt ride over a lost SYN instead of failing the call.
+RETRY_DELAYS = (0.2, 0.5, 1.0)
 # Some timestamps come from the caller and some from the gateway's clock;
 # beyond this difference the two servers need their time fixed.
 MAX_CLOCK_SKEW_SECONDS = 30
@@ -70,10 +75,10 @@ class RemoteDatabase(Database):
         base_url: str,
         token: str,
         *,
-        timeout: float = 10.0,
-        connect_timeout: float = 3.0,
-        retries: int = 2,
-        cooldown: float = 3.0,
+        timeout: float = 8.0,
+        connect_timeout: float = 1.5,
+        retries: int = 3,
+        cooldown: float = 2.0,
     ) -> None:
         # Database.__init__ is not called on purpose: there is no local file,
         # key or connection on this side.
@@ -223,6 +228,14 @@ class RemoteDatabase(Database):
                 continue
             return status, payload
         self._down_until = time.monotonic() + self._cooldown
+        # The class of the last failure only (connect timeout, reset, 503...).
+        logger.warning(
+            "database_gateway_unreachable",
+            extra={
+                "failure": type(last).__name__ if last else "unknown",
+                "attempt": self._retries + 1,
+            },
+        )
         raise DatabaseUnavailableError("database gateway is unavailable") from last
 
     async def _call(self, method: str, args: dict[str, Any]) -> Any:

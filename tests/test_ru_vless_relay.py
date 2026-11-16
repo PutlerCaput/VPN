@@ -63,6 +63,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
         "BACKUP_DIR": str(tmp_path / "backup"),
         "IP_BIN": str(write_exe(tmp_path / "ip", "#!/bin/sh\nexit 0\n")),
         "RELAY_SYSCTL_CONF": str(tmp_path / "sysctl.d" / "91-vpn-relay.conf"),
+        "RELAY_MODULES_CONF": str(tmp_path / "modules-load.d" / "vpn-relay.conf"),
     }
 
 
@@ -414,6 +415,12 @@ def test_spare_hysteria2_port_and_conntrack(tmp_path: Path) -> None:
     conf = Path(env["RELAY_SYSCTL_CONF"])
     assert "net.netfilter.nf_conntrack_max = 65536" in conf.read_text(encoding="utf-8")
     assert "conntrack max 65536" in result.stdout
+    # The module loads before systemd-sysctl, so the limit survives a reboot.
+    modules = Path(env["RELAY_MODULES_CONF"]).read_text(encoding="utf-8")
+    assert "nf_conntrack" in modules.splitlines()
+    before = Path(env["RELAY_MODULES_CONF"]).stat().st_mtime_ns
+    assert run(env, "--apply").returncode == 0
+    assert Path(env["RELAY_MODULES_CONF"]).stat().st_mtime_ns == before
 
 
 def test_spare_port_can_be_left_out(tmp_path: Path) -> None:

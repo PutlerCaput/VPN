@@ -36,7 +36,11 @@ from handlers import build_root_router
 from handlers.payments import PAYCHECK_LIMIT
 from handlers.profile import REVOKE_LIMITER
 from logging_setup import setup_logging
-from middlewares import BannedMiddleware, ThrottlingMiddleware
+from middlewares import (
+    BannedMiddleware,
+    ThrottlingMiddleware,
+    register_error_handler,
+)
 from services.awg import AwgAgent, AwgService
 from services.billing import BillingService
 from services.container import Services
@@ -210,6 +214,8 @@ def build_dispatcher(services: Services) -> Dispatcher:
         observer.outer_middleware(throttling)
         observer.outer_middleware(BannedMiddleware(services.db))
     dp.include_router(build_root_router())
+    # A failing handler answers the user instead of leaving them in silence.
+    register_error_handler(dp)
     return dp
 
 
