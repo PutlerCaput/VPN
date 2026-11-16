@@ -93,13 +93,14 @@ unhealthy_containers() {
 # What the doctor reads (scripts/auto_update_status.sh).
 state_write() {  # state_write <ok|skipped|failed> <note>
   ((DRY)) && return 0
-  local note="${2//$'\n'/ }" last_ok
+  local note="${2//$'\n'/ }" last_ok now
   mkdir -p "$STATE_DIR" 2>/dev/null || return 0
   # A skipped run keeps the time of the last run that finished.
+  now="$(date +%s)"
   last_ok="$(sed -n 's/^last_ok=//p' "$STATE_DIR/last-run" 2>/dev/null | head -n1)"
-  [[ "$1" == ok ]] && last_ok="$(date +%s)"
+  [[ "$1" == ok ]] && last_ok="$now"
   printf 'time=%s\nlast_ok=%s\nresult=%s\npackages=%s\nimages=%s\nreboot=%s\nnote=%s\n' \
-    "$(date +%s)" "$last_ok" "$1" "$packages" "$images" "$reboot" "$note" >"$STATE_DIR/last-run.tmp" 2>/dev/null \
+    "$now" "$last_ok" "$1" "$packages" "$images" "$reboot" "$note" >"$STATE_DIR/last-run.tmp" 2>/dev/null \
     && mv -f "$STATE_DIR/last-run.tmp" "$STATE_DIR/last-run" 2>/dev/null
   return 0
 }
