@@ -2,6 +2,11 @@
 
 Актуально на 14 ноября 2026 года.
 
+> **16 ноября 2026: Marzban удалён, VLESS работает на Hiddify Manager (DE:2443).** Входы
+> Marzban на DE:2096–2099 и шаги ниже, где они настраиваются, — история. Сейчас RU
+> пробрасывает TCP 443, 2087, 8443, 2083 и 2085 на `89.125.210.172:2443`; см. раздел
+> «Проброс VLESS на RU». AmneziaWG (UDP 39051 и 44877) не менялся.
+
 ## Как было
 
 Опись 14 ноября (`scripts/entry_inventory.py`, вывод владельца): один вход Xray, VLESS + TCP +
@@ -125,10 +130,9 @@ REALITY заканчивается в DE), порт входа на DE откр�
      bash /root/vpn-src/scripts/vless_transport.sh --apply ИМЯ 2098
    ```
 
-3. RU. Порт 2083 пробрасывается на этот вход. На действующем сервере это уже
-   входит в `scripts/ru_vless_relay.sh` (вместе с 443/2087/8443 и зажимом MSS);
-   после переустановки их возвращает `--apply` того скрипта, раздел «Проброс VLESS
-   на RU». Вручную те же два правила выглядят так:
+3. RU. Порт 2083 пробрасывался на этот вход (история: с 16.11.2026 `scripts/ru_vless_relay.sh`
+   ведёт 2083, как и остальные порты, на Hiddify DE:2443, раздел «Проброс VLESS на RU»).
+   Вручную те же два правила для Marzban выглядели так:
 
    ```bash
    iptables -t nat -A PREROUTING -p tcp --dport 2083 -j DNAT --to-destination DE_SERVER_IP:2098
@@ -213,21 +217,28 @@ docker exec -i node-rental-bot-1 python3 - --fingerprint chrome < /root/vpn-src/
 `de-ru` — вход на DE через RU (ProxyJump), когда прямой SSH с телефона не проходит.
 `install_awg.sh` при переустановке сохраняет выбранный адрес и копирует `deploy/awg/dns`.
 
-## Проброс VLESS на RU (15 ноября 2026)
+## Проброс VLESS на RU (обновлено 16 ноября 2026, Hiddify)
 
-RU пересылает TCP на DE и ничего не расшифровывает: REALITY заканчивается в DE.
-Так правила стоят на сервере сейчас. После переустановки RU их возвращает одна
-команда, `scripts/ru_vless_relay.sh`:
+RU пересылает TCP на DE и ничего не расшифровывает: REALITY заканчивается в DE, в
+Hiddify Manager. Так правила стоят на сервере сейчас. После переустановки RU их
+возвращает одна команда, `scripts/ru_vless_relay.sh`:
 
-- nat PREROUTING: TCP 443, 2087 и 8443 → `89.125.210.172:2096`; TCP 2083 → `:2098`
-- nat POSTROUTING: MASQUERADE для TCP 2096 и 2098 на `89.125.210.172`
+- nat PREROUTING: TCP 443, 2087, 8443, 2083 и 2085 → `89.125.210.172:2443` (Hiddify)
+- nat POSTROUTING: MASQUERADE для TCP 2443 на `89.125.210.172`
 - mangle FORWARD: `TCPMSS --clamp-mss-to-pmtu` на SYN, чтобы большие пакеты не
   зависали в мобильных сетях
 
+Старые правила Marzban (→ `:2096` и `:2098` и их MASQUERADE) `--apply` убирает сам,
+уже после того, как новые на месте, так что проброс не пропадает ни на секунду.
+`--check` показывает их строками `obsolete:`. Перед любым изменением скрипт сохраняет
+текущие правила (`iptables-save`) в `/etc/iptables/rules.v4.before-ru-vless-relay-<время>`;
+вернуть: `iptables-restore < этот_файл` и `netfilter-persistent save`.
+
+Правила AmneziaWG (UDP 39051 и 44877) скрипт не трогает ни в `--apply`, ни в `--remove`.
 Политика FORWARD на RU — ACCEPT, отдельных правил filter FORWARD скрипт не
 добавляет. Нужен `net.ipv4.ip_forward=1`. Входящий файрвол (`ru_firewall.sh`) не
 меняется. Секретов в выводе нет. Правила сохраняются (`netfilter-persistent save`).
-Повторный `--apply` ничего не добавляет. Убрать проброс: `--remove`.
+Повторный `--apply` ничего не добавляет и копию не делает. Убрать проброс: `--remove`.
 
 Скрипт берётся с DE, где лежит подписанный выпуск:
 
