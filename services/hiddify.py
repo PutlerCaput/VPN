@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 RETRY_ATTEMPTS = 3
 BACKOFF_BASE = 0.5
+# A subscription is a few kilobytes; anything far bigger is not one.
+SUBSCRIPTION_MAX_BYTES = 2 * 1024 * 1024
 # Hiddify has no "unlimited" usage_limit_GB; this sentinel is treated as
 # unlimited when converting back to the bot's 0-byte convention.
 UNLIMITED_USAGE_GB = 10_000.0
@@ -155,6 +157,10 @@ class HiddifyClient:
             subscription_base_url.rstrip("/") if subscription_base_url else None
         )
         self._origin = base_url.rstrip("/")
+        self._timeout = timeout
+        self._verify_tls = verify_tls
+        self._transport = transport
+        self._sub_client: httpx.AsyncClient | None = None
         self._client = httpx.AsyncClient(
             base_url=self._origin,
             timeout=timeout,
@@ -168,6 +174,42 @@ class HiddifyClient:
 
     async def close(self) -> None:
         await self._client.aclose()
+        if self._sub_client is not None:
+            await self._sub_client.aclose()
+
+    def subscription_url_for(self, user_uuid: str) -> str | None:
+        """Hiddify's own subscription URL of a user (for the sharding proxy)."""
+        self._validate(user_uuid)
+        return self._subscription_url(user_uuid)
+
+    async def fetch_subscription(
+        self, user_uuid: str, user_agent: str
+    ) -> tuple[int, str, dict[str, str]]:
+        """Downloads the user's Hiddify subscription the way their app would.
+
+        A separate client: the admin API key is never sent to the public
+        subscription address. Returns (status, body, headers).
+        """
+        url = self.subscription_url_for(user_uuid)
+        if url is None:
+            raise HiddifyError("subscription URL is not HTTPS")
+        if self._sub_client is None:
+            self._sub_client = httpx.AsyncClient(
+                timeout=self._timeout,
+                verify=self._verify_tls,
+                transport=self._transport,
+                follow_redirects=False,
+            )
+        try:
+            response = await self._sub_client.get(
+                url, headers={"User-Agent": user_agent[:200] or "v2rayNG/1.9"}
+            )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            HIDDIFY_ERRORS.labels(operation="fetch_subscription").inc()
+            raise HiddifyError(f"fetch_subscription failed: {exc}") from None
+        if len(response.content) > SUBSCRIPTION_MAX_BYTES:
+            raise HiddifyError("fetch_subscription: body too large")
+        return response.status_code, response.text, dict(response.headers)
 
     def _admin(self, *segments: str) -> str:
         parts = [self._admin_proxy_path, "api/v2/admin", *segments]

@@ -271,6 +271,34 @@ class Settings(BaseSettings):
     # Display name of the server that runs the Hiddify Manager core itself.
     main_location_name: str = Field("Основной сервер", min_length=1, max_length=64)
 
+    # --- Entry sharding (docs/ARCHITECTURE.md) ------------------------------
+    # Off: the subscription URL is Hiddify's own, unchanged. On: the bot hands
+    # out {entry_sharding_base_url}/api/v1/sub/<uuid>/ and serves the Hiddify
+    # subscription filtered to the user's segment (services/sharding.py).
+    # Needs config_delivery=subscription and at least one segment.
+    entry_sharding_enabled: bool = False
+    # JSON: segment name -> entry hosts (IP or domain), for example
+    # {"ru-a": ["45.138.157.65"], "ru-b": ["203.0.113.20"]}.
+    entry_segments: dict[str, list[str]] = Field(default_factory=dict)
+    # Hosts every segment gets (for example the direct exit address).
+    entry_shared_hosts: list[str] = Field(default_factory=list)
+    # True: only listed hosts reach anyone; an entry on an unlisted host is
+    # dropped. False: unlisted hosts pass, other segments' hosts never do.
+    entry_sharding_strict: bool = True
+    # Public origin of the filtered subscription; unset = public_base_url.
+    entry_sharding_base_url: str | None = None
+    # Set fp=<name> on every TLS/REALITY link of the filtered subscription
+    # (the panel-wide setting is scripts/vpn_entries.py --fingerprint chrome).
+    subscription_fingerprint: (
+        Literal["chrome", "firefox", "safari", "ios", "edge", "random", "randomized"]
+        | None
+    ) = None
+    # Anti-parsing limits of /api/v1/sub (in memory, per process).
+    sub_rate_per_ip_10min: int = Field(30, ge=1, le=10_000)
+    sub_rate_per_user_hour: int = Field(20, ge=1, le=10_000)
+    sub_misses_per_ip_hour: int = Field(10, ge=1, le=10_000)
+    sub_sources_per_user_day: int = Field(12, ge=1, le=10_000)
+
     # --- AmneziaWG: second protocol, one key per device ----------------------
     # Requires the separate cyberdefency-awg container (scripts/install_awg.sh).
     awg_enabled: bool = False
@@ -416,7 +444,7 @@ class Settings(BaseSettings):
             )
         return value
 
-    @field_validator("subscription_base_url")
+    @field_validator("subscription_base_url", "entry_sharding_base_url")
     @classmethod
     def _subscription_origin(cls, value: str | None) -> str | None:
         if value is None:
@@ -438,6 +466,18 @@ class Settings(BaseSettings):
             valid = False
         if not valid:
             raise ValueError("subscription_base_url must be an HTTPS origin, no path")
+        return value
+
+    @field_validator("entry_segments")
+    @classmethod
+    def _segment_names(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        for name, hosts in value.items():
+            if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,31}", name):
+                raise ValueError(
+                    "entry_segments names are 1-32 chars of a-z, 0-9, _ and -"
+                )
+            if not any(h.strip() for h in hosts):
+                raise ValueError(f"entry segment {name!r} has no hosts")
         return value
 
     @field_validator("awg_agent_url")
@@ -597,6 +637,13 @@ class Settings(BaseSettings):
             problems.append("yookassa_proxy_url is required for ru_gateway")
         if self.yookassa_egress == "direct" and self.yookassa_proxy_url:
             problems.append("yookassa_proxy_url requires yookassa_egress=ru_gateway")
+        if self.entry_sharding_enabled:
+            if not self.entry_segments:
+                problems.append("entry_sharding_enabled needs entry_segments")
+            if self.config_delivery != "subscription":
+                problems.append(
+                    "entry_sharding_enabled needs config_delivery=subscription"
+                )
         if self.db_key and not DB_KEY_RE.fullmatch(self.db_key.get_secret_value()):
             problems.append("db_key must be 64 hex characters")
         if self.database_url and (

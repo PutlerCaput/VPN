@@ -29,6 +29,7 @@ from services.metrics import (
     TRIALS_PROVISIONED,
 )
 from services.notifier import Notifier
+from services.sharding import sharded_subscription_url
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,15 @@ class ProvisioningService:
                 data, self.settings.subscription_base_url
             )
             if url is not None:
+                node = str(data.get("uuid") or "")
+                if self.settings.entry_sharding_enabled and _is_uuid(node):
+                    # The same Hiddify subscription, filtered to the user's
+                    # entry segment by the bot (api/routes.py, /sub).
+                    return sharded_subscription_url(
+                        self.settings.entry_sharding_base_url
+                        or self.settings.public_base_url,
+                        node,
+                    )
                 return url
             logger.warning("subscription_url_unavailable")
         return HiddifyClient.extract_vless_link(data)

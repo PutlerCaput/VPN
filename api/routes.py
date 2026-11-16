@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from typing import Any
 
 from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
@@ -53,11 +54,33 @@ from services.hiddify import HiddifyError
 from services.mailer import MailError
 from services.provisioning import ProvisioningError
 from services.security import sanitize_username
+from services.sharding import (
+    FanoutGuard,
+    derive_key,
+    filter_subscription,
+    plan_from_settings,
+    resolve_segment,
+)
 from services.yookassa import is_valid_email
 
 logger = logging.getLogger("api")
 routes = web.RouteTableDef()
 REPLAY_KEY = web.AppKey("replay_guard", ReplayGuard)
+SUB_FANOUT_KEY = web.AppKey("sub_fanout", FanoutGuard)
+# What the panel is asked for when the app's own format cannot be filtered
+# (Clash YAML and the like): a plain link list every app also understands.
+LINKS_USER_AGENT = "v2rayNG/1.9.0"
+# Headers of the panel's answer that apps read (traffic, title, refresh period).
+# Not profile-web-page-url: Hiddify points it at the user's own panel page
+# (panel host, client path, UUID), where the unfiltered subscription and the
+# whole entry pool can be read, which would undo the sharding.
+SUB_PASS_HEADERS = (
+    "subscription-userinfo",
+    "profile-update-interval",
+    "profile-title",
+    "support-url",
+    "content-disposition",
+)
 
 
 def _days_remaining(expires_at: int | None) -> int:
@@ -368,6 +391,110 @@ async def config(request: web.Request) -> web.Response:
             # v2rayNG gets "Russian sites directly" with the subscription.
             "ru_direct_auto": services.settings.ru_direct_subscription,
         },
+    )
+
+
+def _sub_not_found() -> web.Response:
+    return web.Response(status=404, text="not found")
+
+
+def _node_uuid(value: str) -> str | None:
+    try:
+        parsed = uuid.UUID(value)
+    except ValueError:
+        return None
+    return str(parsed) if str(parsed) == value.lower() else None
+
+
+@routes.get("/sub/{node}")
+@routes.get("/sub/{node}/")
+async def sharded_subscription(request: web.Request) -> web.Response:
+    """The user's Hiddify subscription with only their entry segment in it.
+
+    Anti-parsing: the address is throttled (middleware), wrong UUIDs lock the
+    address out for a while, each subscription has its own rate and a cap on
+    distinct sources per day. Nothing about the request is stored: no IP, no
+    UUID in the logs.
+    """
+    services = request.app[SERVICES_KEY]
+    settings = services.settings
+    if not settings.entry_sharding_enabled:
+        return _sub_not_found()
+    limits = request.app[LIMITS_KEY]
+    ip = request[CLIENT_IP_KEY]
+    misses = limits["sub_miss_ip"]
+    if misses.retry_after(ip) > 0:
+        return json_error(429, "rate_limited", {"Retry-After": "3600"})
+    node = _node_uuid(request.match_info["node"])
+    user = await services.db.get_user_by_node(node) if node else None
+    if node is None or user is None:
+        misses.hit(ip)
+        return _sub_not_found()
+    if user["status"] != "active":
+        # A real subscription whose rental ended: same answer as an unknown
+        # one, but not a guess. Its app keeps refreshing, and counting that
+        # would lock out everyone behind the same carrier NAT address.
+        return _sub_not_found()
+    if not limits["sub_user"].hit(node):
+        retry = str(max(1, int(limits["sub_user"].retry_after(node)) + 1))
+        return json_error(429, "rate_limited", {"Retry-After": retry})
+    if not request.app[SUB_FANOUT_KEY].allow(node, ip):
+        logger.warning("sub_fanout_blocked")
+        return json_error(429, "rate_limited", {"Retry-After": "3600"})
+
+    plan = plan_from_settings(settings)
+    segment = await resolve_segment(
+        services.db,
+        plan,
+        int(user["telegram_id"]),
+        derive_key(settings.jwt_secret.get_secret_value()),
+    )
+    agent = request.headers.get("User-Agent", "")
+    try:
+        status, body, headers = await services.hiddify.fetch_subscription(node, agent)
+        filtered = (
+            filter_subscription(
+                body, plan, segment, fingerprint=settings.subscription_fingerprint
+            )
+            if status == 200
+            else None
+        )
+        if status == 200 and filtered is None:
+            status, body, headers = await services.hiddify.fetch_subscription(
+                node, LINKS_USER_AGENT
+            )
+            filtered = (
+                filter_subscription(
+                    body, plan, segment, fingerprint=settings.subscription_fingerprint
+                )
+                if status == 200
+                else None
+            )
+    except HiddifyError:
+        logger.warning("sub_upstream_error")
+        return json_error(502, "upstream_unavailable")
+    if status in (403, 404):
+        return _sub_not_found()
+    if filtered is None:
+        logger.warning("sub_unreadable", extra={"upstream_status": status})
+        return json_error(502, "upstream_unavailable")
+    if filtered.kept == 0:
+        # An empty profile would wipe the app's working one: an error keeps it.
+        logger.warning("sub_segment_empty", extra={"segment": segment})
+        return json_error(503, "no_entries", {"Retry-After": "600"})
+    lowered = {k.lower(): v for k, v in headers.items()}
+    passed = {k: lowered[k] for k in SUB_PASS_HEADERS if k in lowered}
+    logger.info(
+        "sub_served",
+        extra={"segment": segment, "kind": filtered.kind, "removed": filtered.removed},
+    )
+    return web.Response(
+        text=filtered.body,
+        content_type="application/json"
+        if filtered.kind in ("singbox", "xray")
+        else "text/plain",
+        charset="utf-8",
+        headers=passed,
     )
 
 
