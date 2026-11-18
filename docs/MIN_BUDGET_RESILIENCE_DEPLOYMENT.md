@@ -18,25 +18,25 @@
 | --- | --- | --- | --- | --- |
 | RU-1 | Есть | Вход и relay к DE-1 | текущий RU-1; публичные BGP-источники расходятся по origin ASN | без изменений |
 | DE-1 | Есть | Hiddify parent, основной выход | HOSTKEY, AS57043 | без изменений |
-| RU-2 | Заказать | Stateless relay к DE-2 | Selectel, AS49505 | VDS 1-2-25: 1 vCPU, 2 GB RAM, 25 GB NVMe |
-| DE-2 | Заказать | Hiddify child node и второй выход | OVHcloud, AS16276 / AS35540 (проверить фактический origin после выдачи IP) | VPS-1: 2 vCPU, 4 GB RAM, 40 GB NVMe |
+| RU-2 | Заказать | Stateless relay к DE-2 | Selectel Cloud Server, AS49505 | 1 vCPU, 2 GB RAM |
+| DE-2 | Заказать | Hiddify child node и второй выход | NODED.CLOUD, AS60982 | VPS II: 2 vCPU, 4 GB RAM, 40 GB SSD, 140 Mbps |
 
-Публичная BGP-проверка текущего RU-1 IP 45.138.157.65 не согласована: IPinfo указывает AS33993, другой источник с RIPE route origin — AS48347. Selectel AS49505 отличается от обоих. DE-1 89.125.210.172 относится к AS57043; OVHcloud указывает собственные AS16276 и AS35540. После заказа проверить origin ASN именно выданных IP через RIPEstat/BGP перед оплатой следующего месяца.
+Публичная BGP-проверка текущего RU-1 IP 45.138.157.65 не согласована: IPinfo указывает AS33993, другой источник с RIPE route origin — AS48347. Selectel AS49505 отличается от обоих. DE-1 89.125.210.172 относится к AS57043; NODED указывает собственную сеть AS60982. После заказа проверить origin ASN именно выданных IP через RIPEstat/BGP.
 
 ### Ориентир дополнительных расходов
 
-- RU-2 Selectel VDS 1-2-25: **250 ₽/мес.** по опубликованному тарифу.
-- DE-2 OVHcloud VPS-1: **€4,61/мес. с НДС** на сайте OVHcloud Netherlands (цена «от», финальная сумма зависит от checkout/налогового статуса).
+- RU-2 Selectel Cloud Server 1 vCPU / 2 GB: **1 269,87 ₽/мес.** по калькулятору; публичный IPv4 — от **3,67 ₽/день** (около 110 ₽/мес.).
+- DE-2 NODED.CLOUD VPS II: **€6/мес.** (2 vCPU, 4 GB, 40 GB, 140 Mbps, unmetered traffic). Условия прямо разрешают коммерческие VPN-подписки.
 - Отдельный пятый VPS не нужен.
 - Hiddify Manager — open source.
 - Дополнительный Worker/CDN не включать в обязательный бюджет. Cloudflare Workers Free ограничен 100 000 запросов/день; Paid начинается с $5/мес. Это можно добавить только как дополнительный edge, не как единственный маршрут из РФ.
 
-**Итого ориентир: 250 ₽ + €4,61 в месяц**, без учёта налогового статуса, курса валют, доменов, превышения трафика и возможных дополнительных услуг.
+**Итого ориентир: около 1 380 ₽ + €6 в месяц**, без учёта курса валют, доменов, превышения трафика и возможных дополнительных услуг.
 
 ### Важные ограничения тарифов
 
-Selectel VDS включает один публичный IP, 3 TB внешнего трафика в месяц на аккаунт облачной платформы и L3/L4 DDoS-защиту. Превышение трафика оплачивается отдельно; трафик общий на проекты аккаунта. У VDS нет автоматических резервных копий, нельзя выбрать IP/подсеть, и VDS не предназначен для хранения персональных данных с требованиями 152-ФЗ. Поэтому RU-2 — только stateless relay: никаких БД, Telegram ID, платёжных данных, пользовательских профилей или приватных ключей. Его можно восстановить скриптами.
-OVHcloud VPS-1 на опубликованной странице включает 2 vCores, 4 GB RAM, 40 GB NVMe, ежедневный backup, unlimited traffic и 500 Mbps public bandwidth. «Unlimited» не означает гарантированную скорость или отсутствие fair-use ограничений: проверить условия заказа.
+Selectel Cloud Server для VPN включает 3 TB внешнего трафика на аккаунт, сеть от 1 Gbps, DDoS L3/L4, API/Terraform и поддержку 24/7; превышение трафика тарифицируется отдельно. Для RU-2 берём именно Cloud Server из линейки «VPS для VPN», а не дешёвый VDS 250 ₽: это отдельный продукт с иными условиями. RU-2 остаётся stateless relay: не размещать там базу и платёжные данные.
+NODED VPS II имеет 2 vCPU, 4 GB RAM, 40 GB SSD, 140 Mbps и unmetered traffic на собственном AS60982. В условиях NODED прямо разрешены коммерческие VPN-сервисы при условии аутентификации пользователей (open proxy запрещён) и обработки abuse-жалоб. Это более подходящие договорные условия, чем у OVHcloud, чьи VPS Terms запрещают публичные VPN/proxy.
 
 ## Целевая схема
 
@@ -46,7 +46,7 @@ OVHcloud VPS-1 на опубликованной странице включае
  RU-1 (AS текущего RU)     RU-2 (Selectel AS49505)
    | wg-vpn                 | wg-vpn2
    v                         v
- DE-1 (HOSTKEY AS57043)    DE-2 (OVH AS16276/AS35540)
+ DE-1 (HOSTKEY AS57043)    DE-2 (NODED AS60982)
  Hiddify parent            Hiddify child node
  основной выход            второй выход
    \                         /
@@ -72,7 +72,7 @@ RU-2 не запускает Hiddify и не расшифровывает VPN. �
 
 ### RU-2 — Selectel
 
-- VDS 1-2-25, Москва или Санкт-Петербург, Ubuntu 24.04 LTS, один IPv4.
+- Selectel Cloud Server из раздела «VPS для VPN», 1 vCPU / 2 GB RAM, Ubuntu 24.04 LTS, один IPv4.
 - Использовать только как DNAT/WireGuard relay.
 - Не ставить Docker с ботом, Hiddify Manager, БД, веб-панель, платёжные сервисы.
 - Не включать журналы пользовательских соединений; системные журналы ограничить и регулярно проверять.
@@ -80,8 +80,9 @@ RU-2 не запускает Hiddify и не расшифровывает VPN. �
 
 ### DE-2 — OVHcloud
 
-- VPS-1, Ubuntu 24.04 LTS, 2 vCPU / 4 GB / 40 GB NVMe.
-- Выбрать доступную европейскую локацию; после создания проверить origin ASN (AS16276 или AS35540) и доступность из нескольких сетей.
+- VPS II, Ubuntu 24.04 LTS, 2 vCPU / 4 GB / 40 GB SSD, 140 Mbps.
+- Выбрать Frankfurt (или Amsterdam при отсутствии), после создания проверить origin ASN AS60982 и доступность из нескольких сетей.
+- В условиях провайдера прямо разрешены коммерческие VPN-подписки; подключения должны быть аутентифицированы, open proxy запрещён.
 - Установить ту же стабильную версию Hiddify Manager, что на DE-1. В GitHub releases на дату проверки latest stable — v14.2.0.
 - Не использовать prerelease/nightly на production.
 
@@ -175,10 +176,11 @@ bash ru_vless_relay.sh --check
 
 ## Источники
 
-- Selectel VDS: https://selectel.ru/services/cloud/vps-vds/
-- Selectel VDS — состав тарифа, 3 TB, ограничения, отсутствие автоматических backup: https://docs.selectel.ru/en/vds-servers/about/about-vds-server/
-- OVHcloud Netherlands VPS: https://www.ovhcloud.com/nl/vps/
-- OVHcloud ASN: https://peering.ovh.net/
+- Selectel VPS для VPN и включённый трафик/сеть/API: https://selectel.ru/services/cloud/servers/vps-vpn/
+- Selectel Cloud Server pricing: https://selectel.ru/prices/calculator/
+- Selectel ASN: https://bgp.he.net/AS49505
+- NODED VPS pricing and AS60982: https://noded.cloud/vps-hosting
+- NODED Terms (commercial VPN allowed): https://noded.cloud/terms-and-conditions
 - Hiddify Multi-server nodes: https://hiddify.com/manager/configuration-and-advanced-settings/Multi-server-with-nodes-on-HiddifyManager/
 - Hiddify relay domains: https://hiddify.com/manager/domain-worker-cdn-and-tunneling/How-to-add-relay-domain-to-Hiddify-manager/
 - Hiddify domain types: https://hiddify.com/manager/domain-worker-cdn-and-tunneling/Domain-types-and-how-to-register-them/
