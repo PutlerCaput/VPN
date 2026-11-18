@@ -43,3 +43,25 @@ deploy/xray/registry/*.dat
 /diagnostics/
 .env.before-*
 .env.bak-*
+
+# Production backups and recovery material: never track in Git.
+*.age
+*.tar
+*.tar.gz
+*.tgz
+*.sqlite
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.sql
+*.sql.gz
+*.dump
+*.backup
+age-key.txt
+AGE-SECRET-KEY-*
+/server-backups/
+/DE-rescue-*/
+/restore-*/
+/restore-check/
+/de-rescue/
+**/docker-inspect*.json
