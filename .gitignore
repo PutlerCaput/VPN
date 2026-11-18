@@ -26,3 +26,20 @@ tma/dist/
 *.tsbuildinfo
 # Third-party geosite snapshot (~38 MB): download with deploy/xray/update_registry.py
 deploy/xray/registry/*.dat
+
+# Never commit production diagnostics or private server backups.
+# docker inspect contains credentials in Config.Env even for healthy containers.
+/docker-inspect.json
+/docker-containers.txt
+/docker-compose.txt
+/docker-networks.txt
+/docker-volumes.txt
+/network.txt
+/ports.txt
+/routes.txt
+/services.txt
+/system.txt
+/vpn-project-backup.tar.gz
+/diagnostics/
+.env.before-*
+.env.bak-*
