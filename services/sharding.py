@@ -238,8 +238,7 @@ def _filter_xray_servers(
             if plan.keeps(
                 segment,
                 entry.get("address")
-                if isinstance(entry, dict)
-                and isinstance(entry.get("address"), str)
+                if isinstance(entry, dict) and isinstance(entry.get("address"), str)
                 else None,
             )
         ]
