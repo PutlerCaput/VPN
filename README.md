@@ -1,6 +1,10 @@
-# Узел: Telegram-бот, PWA и Mini App для аренды технических узлов
+# Cyberdefency — Telegram-бот, PWA, Mini App и VPN-инфраструктура
 
-Код сервиса аренды персональных узлов VLESS + XTLS-Reality (через панель Hiddify Manager) для защищённого подключения в публичных сетях. Этот README описывает возможности кода, а не подтверждённое состояние production. По последнему выводу владельца `SBP_PROVIDER=manual`, `YOOKASSA_CONFIGURED=false`; Crypto Pay настроен, но реальная оплата отдельно не проверялась. ЮKassa, Cloudflare Tunnel и платёжный relay ещё не внедрены на серверах.
+Исходный код сервиса на базе VLESS/REALITY, Hiddify Manager, Telegram-бота, PWA и Mini App. Этот README описывает репозиторий, а не подтверждённое состояние production.
+
+**Навигация:** [индекс документации](docs/README.md) · [архитектура](docs/ARCHITECTURE.md) · [состояние развёртывания](docs/DEPLOYMENT_STATE.md) · [план полного переноса на VPSVILLE](docs/VPSVILLE_FULL_MIGRATION.md).
+
+**Безопасность:** репозиторий публичный. Здесь хранятся только исходники, шаблоны и документация. Не добавляйте production `.env`, `secrets/`, базы, Docker inspect, SSH/age private keys и архивы резервных копий. Правила хранения копий — [docs/BACKUPS.md](docs/BACKUPS.md). Изменение документа миграции не означает, что серверы уже перенесены.
 
 ## Состав
 
