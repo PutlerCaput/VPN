@@ -225,9 +225,7 @@ def test_xray_multi_target_drops_empty_and_unparseable_outbounds() -> None:
     assert result is not None
     assert result.kept == 0
     assert result.removed == 2
-    assert [item["tag"] for item in json.loads(result.body)["outbounds"]] == [
-        "direct"
-    ]
+    assert [item["tag"] for item in json.loads(result.body)["outbounds"]] == ["direct"]
 
 
 def test_unreadable_formats_are_refused() -> None:
