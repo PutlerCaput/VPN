@@ -46,13 +46,12 @@ def audit(containers: list[dict[str, Any]], ports: str = "") -> list[Finding]:
     """Return only findings, never runtime credential values or connection URLs."""
     findings: list[Finding] = []
     active = [c for c in containers if isinstance(c, dict) and _running(c)]
-    bot = next(
-        (c for c in active if c.get("Name") == "/node-rental-bot-1"), None
-    )
+    bot = next((c for c in active if c.get("Name") == "/node-rental-bot-1"), None)
     if bot is None:
         findings.append(
             Finding(
-                "HIGH", "BOT_NOT_RUNNING",
+                "HIGH",
+                "BOT_NOT_RUNNING",
                 "Main bot absent from running Docker containers.",
             )
         )
@@ -69,7 +68,8 @@ def audit(containers: list[dict[str, Any]], ports: str = "") -> list[Finding]:
     if exposed_count:
         findings.append(
             Finding(
-                "HIGH", "CREDENTIALS_IN_DOCKER_ENV",
+                "HIGH",
+                "CREDENTIALS_IN_DOCKER_ENV",
                 f"{exposed_count} credential variable(s) visible in Docker inspect; "
                 "move to mounted secrets and rotate exposed credentials.",
             )
@@ -78,7 +78,8 @@ def audit(containers: list[dict[str, Any]], ports: str = "") -> list[Finding]:
     if env.get("ENTRY_SHARDING_ENABLED", "false").lower() != "true":
         findings.append(
             Finding(
-                "WARN", "ENTRY_SHARDING_OFF",
+                "WARN",
+                "ENTRY_SHARDING_OFF",
                 "Subscribers may receive all entry hosts. Enable sharding only "
                 "after independent entry hosts and client-side tests exist.",
             )
@@ -86,7 +87,8 @@ def audit(containers: list[dict[str, Any]], ports: str = "") -> list[Finding]:
     if env.get("CONFIG_DELIVERY", "link").lower() != "subscription":
         findings.append(
             Finding(
-                "WARN", "SINGLE_LINK_DELIVERY",
+                "WARN",
+                "SINGLE_LINK_DELIVERY",
                 "A single imported link cannot receive new backup entries.",
             )
         )
@@ -96,7 +98,8 @@ def audit(containers: list[dict[str, Any]], ports: str = "") -> list[Finding]:
         if not awg_local:
             findings.append(
                 Finding(
-                    "HIGH", "AWG_AGENT_UNVERIFIED",
+                    "HIGH",
+                    "AWG_AGENT_UNVERIFIED",
                     "AWG is enabled but no local cyberdefency-awg container "
                     "is running; verify the configured agent and UDP endpoint.",
                 )
@@ -104,7 +107,8 @@ def audit(containers: list[dict[str, Any]], ports: str = "") -> list[Finding]:
         if ports and not re.search(r"(?m)^udp\s+\S+.*[:*]39051\s", ports):
             findings.append(
                 Finding(
-                    "WARN", "AWG_UDP_UNVERIFIED",
+                    "WARN",
+                    "AWG_UDP_UNVERIFIED",
                     "No UDP :39051 listener in port snapshot; check the "
                     "configured AWG port and external connectivity.",
                 )
@@ -116,21 +120,24 @@ def audit(containers: list[dict[str, Any]], ports: str = "") -> list[Finding]:
     ):
         findings.append(
             Finding(
-                "HIGH", "PUBLIC_BOT_PORT",
+                "HIGH",
+                "PUBLIC_BOT_PORT",
                 "Bot HTTP port 8080 is listening on a public interface.",
             )
         )
 
     findings.append(
         Finding(
-            "INFO", "RU_CLIENT_PROBES_REQUIRED",
+            "INFO",
+            "RU_CLIENT_PROBES_REQUIRED",
             "Container health is not an ISP/DPI test; test real VPN tunnels "
             "over multiple Russian mobile and wired operators.",
         )
     )
     findings.append(
         Finding(
-            "INFO", "EXIT_REDUNDANCY_UNVERIFIED",
+            "INFO",
+            "EXIT_REDUNDANCY_UNVERIFIED",
             "This snapshot does not prove independent exit ASNs or a separate "
             "subscription origin. Verify both before claiming redundancy.",
         )
@@ -150,9 +157,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         source = (
-            sys.stdin.read()
-            if args.inspect == "-"
-            else Path(args.inspect).read_text()
+            sys.stdin.read() if args.inspect == "-" else Path(args.inspect).read_text()
         )
         parsed = json.loads(source)
         if not isinstance(parsed, list):
