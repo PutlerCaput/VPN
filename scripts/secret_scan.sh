@@ -8,6 +8,28 @@ PATTERN='(?i)(password|token|secret|key)=(?:"(?!\$\{|/)[^"\s]{6,}"|'"'"'(?!\$\{|
 
 if [[ $# -eq 0 ]]; then
   cd "$(dirname "$0")/.."
+  # Even if force-added despite .gitignore, a production Docker dump is not
+  # safe to publish. Check paths only: never echo captured credential values.
+  tracked_sensitive="$(git ls-files | grep -E '(^|/)(docker-inspect\\.json|vpn-project-backup\\.tar\\.gz|\\.env\\.before-[^/]*)    -not -path './.venv/*' -not -path './venv/*' -not -path './.pytest_cache/*' \
+    -not -path './.git/*' -not -path '*/node_modules/*' -not -path '*/dist/*' \
+    -not -path './secrets/*' -not -path './data/*' -not -path './logs/*' -not -path './backups/*' \
+    -not -path '*/__pycache__/*' -not -path './.mypy_cache/*' -not -path './.ruff_cache/*' \
+    -not -name 'package-lock.json' -not -name '.env')
+  set -- "${files[@]}"
+fi
+
+if matches="$(grep -HnIP "$PATTERN" "$@" 2>/dev/null)"; then
+  # Print only file:line, never the matched value.
+  echo "$matches" | cut -d: -f1,2 | sed 's/^/  /' >&2
+  echo "SECRET LEAK DETECTED" >&2
+  exit 1
+fi
+echo "secret scan: clean"
+ || true)"
+  if [[ -n "$tracked_sensitive" ]]; then
+    printf 'PRIVATE RUNTIME DUMP TRACKED (filenames only):\\n%s\\n' "$tracked_sensitive" >&2
+    exit 1
+  fi
   mapfile -t files < <(find . -type f \
     -not -path './.venv/*' -not -path './venv/*' -not -path './.pytest_cache/*' \
     -not -path './.git/*' -not -path '*/node_modules/*' -not -path '*/dist/*' \
