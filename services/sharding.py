@@ -216,6 +216,38 @@ def _is_proxy(outbound: Mapping[str, Any]) -> bool:
     return kind not in GROUP_TYPES and _outbound_host(outbound) is not None
 
 
+def _filter_xray_servers(
+    outbound: dict[str, Any], plan: SegmentPlan, segment: str
+) -> tuple[bool, int] | None:
+    """Filter every Xray endpoint, not just the first one in an outbound.
+
+    An Xray vnext/servers outbound can contain addresses from several segments.
+    Checking only its first address leaks every remaining address to the user.
+    Unknown or malformed entries are dropped in strict mode (fail closed).
+    """
+    settings = outbound.get("settings")
+    if not isinstance(settings, dict):
+        return None
+    for key in ("vnext", "servers"):
+        endpoints = settings.get(key)
+        if not isinstance(endpoints, list):
+            continue
+        allowed = [
+            entry
+            for entry in endpoints
+            if plan.keeps(
+                segment,
+                entry.get("address")
+                if isinstance(entry, dict)
+                and isinstance(entry.get("address"), str)
+                else None,
+            )
+        ]
+        settings[key] = allowed
+        return bool(allowed), len(endpoints) - len(allowed)
+    return None
+
+
 def _set_outbound_fingerprint(outbound: dict[str, Any], fp: str) -> None:
     tls = outbound.get("tls")
     if isinstance(tls, dict) and tls.get("enabled"):  # sing-box
@@ -241,15 +273,29 @@ def _filter_config(
     result: list[Any] = []
     kept = removed = 0
     for outbound in outbounds:
-        if isinstance(outbound, dict) and _is_proxy(outbound):
-            if not plan.keeps(segment, _outbound_host(outbound)):
-                removed += 1
-                if isinstance(outbound.get("tag"), str):
-                    removed_tags.add(outbound["tag"])
+        if isinstance(outbound, dict):
+            xray = _filter_xray_servers(outbound, plan, segment)
+            if xray is not None:
+                has_endpoints, dropped = xray
+                removed += dropped
+                if not has_endpoints:
+                    if isinstance(outbound.get("tag"), str):
+                        removed_tags.add(outbound["tag"])
+                    continue
+                kept += 1
+                if fp:
+                    _set_outbound_fingerprint(outbound, fp)
+                result.append(outbound)
                 continue
-            kept += 1
-            if fp:
-                _set_outbound_fingerprint(outbound, fp)
+            if _is_proxy(outbound):
+                if not plan.keeps(segment, _outbound_host(outbound)):
+                    removed += 1
+                    if isinstance(outbound.get("tag"), str):
+                        removed_tags.add(outbound["tag"])
+                    continue
+                kept += 1
+                if fp:
+                    _set_outbound_fingerprint(outbound, fp)
         result.append(outbound)
     for outbound in result:
         members = outbound.get("outbounds") if isinstance(outbound, dict) else None
