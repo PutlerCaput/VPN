@@ -52,7 +52,7 @@ from services.billing import BillingError
 from services.email_login import is_site_account, mask_email, normalize_email
 from services.hiddify import HiddifyError
 from services.mailer import MailError
-from services.provisioning import ProvisioningError
+from services.provisioning import ProvisioningError, safe_cached_link
 from services.security import sanitize_username
 from services.sharding import (
     FanoutGuard,
@@ -60,7 +60,6 @@ from services.sharding import (
     filter_subscription,
     plan_from_settings,
     resolve_segment,
-    sharded_subscription_url,
 )
 from services.yookassa import is_valid_email
 
@@ -381,21 +380,7 @@ async def config(request: web.Request) -> web.Response:
     try:
         link = await services.provisioning.fresh_config(telegram_id)
     except (HiddifyError, ProvisioningError):
-        if services.settings.entry_sharding_enabled:
-            # Stored links may predate sharding and expose unfiltered hosts.
-            # Recover only the filtered local subscription URL from the UUID.
-            node = _node_uuid(str(user.get("node_username") or ""))
-            link = (
-                sharded_subscription_url(
-                    services.settings.entry_sharding_base_url
-                    or services.settings.public_base_url,
-                    node,
-                )
-                if node
-                else None
-            )
-        else:
-            link = user["config_link"]
+        link = safe_cached_link(user, services.settings)
     if not link:
         return json_error(503, "node_unavailable")
     return web.json_response(
