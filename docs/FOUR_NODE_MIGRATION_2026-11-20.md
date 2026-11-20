@@ -12,8 +12,8 @@ Prior hostnames/IPs in older documents, scripts and backups are **retired**. No 
 
 - NL-1: primary Xray VLESS/REALITY exit.
 - NL-2: secondary Xray VLESS/REALITY exit.
-- RU-1: public TCP pass-through to a vetted NL backend, optionally with health-based backend switching.
-- RU-2: second TCP ingress; avoid a single DNS address as the only failover mechanism.
+- RU-1: TCP pass-through **only to NL-1**, preserving NL-1 REALITY keys.
+- RU-2: TCP pass-through **only to NL-2**; both ingress routes require separate client profiles. Do not switch across independent REALITY keypairs.
 - Control plane (bot, database, payments, subscriptions) remains **unassigned** until its backups, personal-data requirements, and secret rotation are reviewed.
 
 **Failure domains:** Two machines at the same provider / ASN and two NL addresses in the same subnet are not independent of provider/network outage. A second provider/ASN is preferable for a real geographic failover design. TCP reachability or a process check does not prove a usable VPN connection through Russian ISP filtering.
@@ -44,11 +44,11 @@ For each host, separately verify:
 
 ## Phase 2 — staged provisioning (requires SSH + backups)
 
-1. Install only one NL node, with per-host key material generated on that host; test Xray config syntax before starting.
+1. Generate independent per-node key material on a trusted staging host and transfer privately to NL-1; test Xray config syntax before starting. Never publish generated bundles to GitHub.
 2. Conduct a real client handshake, egress-IP check, DNS-leak check and throughput sanity check. Verify selected REALITY cover target actually meets protocol requirements from the node's location.
 3. Provision NL-2 separately with independent key material and client record.
-4. Add RU-1 and RU-2 as *TCP passthrough* paths, preserving end-to-end transport. Verify routing rules, forwarding, and strict health probes; an open TCP port alone is not sufficient.
-5. Exercise failover from actual client applications and from multiple networks; record test result, source network type and date. Keep a direct NL route as possible fallback if appropriate.
+4. Add RU-1→NL-1 and RU-2→NL-2 as fixed *TCP passthrough* paths, preserving end-to-end transport. Verify routing rules and actual authenticated handshakes; a basic TCP health probe does not validate REALITY.
+5. Exercise profile switching or automatic failover **only in clients known to support it** using four independent connection entries; record test result, source network type and date. Keep direct NL routes as optional fallback.
 6. Only after validated data restore, secrets rotation, legal review and backups, migrate bot, subscribers, billing and monitoring to a control-plane host.
 
 ## Release gates and rollback
