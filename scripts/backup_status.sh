@@ -34,7 +34,7 @@ fi
 if [[ "$SEND_TELEGRAM" == 1 ]]; then
   sent="$(find "$BACKUP_DIR" -maxdepth 1 -name .last-sent -printf '%T@\n' 2>/dev/null | head -n1)"
   if [[ -z "$sent" ]] || (($(date +%s) - ${sent%.*} > MAX_SENT_DAYS * 86400)); then
-    echo "WARN the newest backup is $hours h old, but no copy reached Telegram in $MAX_SENT_DAYS days: bash scripts/backup_all.sh"
+    echo "WARN the newest backup is $hours h old, but no recent successful Telegram send was recorded in $MAX_SENT_DAYS days: bash scripts/backup_all.sh"
     exit 0
   fi
 fi
