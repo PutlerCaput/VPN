@@ -74,6 +74,20 @@ def _is_uuid(value: str) -> bool:
         return False
 
 
+def safe_cached_link(user: dict[str, Any], settings: Settings) -> str | None:
+    """Never return a pre-sharding unfiltered link in segmented mode."""
+    if settings.entry_sharding_enabled:
+        node = str(user.get("node_username") or "")
+        if not _is_uuid(node):
+            return None
+        return sharded_subscription_url(
+            settings.entry_sharding_base_url or settings.public_base_url,
+            node.lower(),
+        )
+    stored = user.get("config_link")
+    return stored if isinstance(stored, str) and stored else None
+
+
 def _ts() -> int:
     return int(time.time())
 
@@ -180,7 +194,7 @@ class ProvisioningService:
                 return TrialResult(
                     True,
                     "already_used",
-                    user["config_link"],
+                    safe_cached_link(user, self.settings),
                     user["expires_at"],
                 )
             if self.trial_gate is not None and self.trial_gate():
