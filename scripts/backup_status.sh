@@ -27,6 +27,10 @@ if ((hours > MAX_AGE_HOURS)); then
   echo "WARN the newest backup is $hours h old: systemctl status node-backup.timer node-backup.service"
   exit 0
 fi
+if [[ "$SEND_TELEGRAM" != 1 ]]; then
+  echo "WARN encrypted local backup is $hours h old; offsite dispatch is disabled, recovery not verified"
+  exit 0
+fi
 if [[ "$SEND_TELEGRAM" == 1 ]]; then
   sent="$(find "$BACKUP_DIR" -maxdepth 1 -name .last-sent -printf '%T@\n' 2>/dev/null | head -n1)"
   if [[ -z "$sent" ]] || (($(date +%s) - ${sent%.*} > MAX_SENT_DAYS * 86400)); then
@@ -34,4 +38,4 @@ if [[ "$SEND_TELEGRAM" == 1 ]]; then
     exit 0
   fi
 fi
-echo "OK backup: the newest is $hours h old, a copy is off the server"
+echo "OK local encrypted backup: $hours h old; Telegram send recorded (delivery and restore not verified)"
