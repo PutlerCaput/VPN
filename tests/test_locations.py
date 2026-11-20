@@ -109,9 +109,10 @@ async def test_health_lists_core_and_enabled_nodes(hiddify: Any) -> None:
     )
     assert not report.all_online
     text = servers_text(report, subscription=True)
-    assert "🟢 🇩🇪 Германия — работает" in text
-    assert "🔴 🇳🇱 Нидерланды — недоступен" in text
+    assert "🟢 🇩🇪 Германия — запущен по данным панели" in text
+    assert "🔴 🇳🇱 Нидерланды — сбой по данным панели" in text
     assert "Резерв" not in text
+    assert "не проверка VPN-подключения из РФ" in text
 
 
 async def test_alert_after_two_failures_and_recovery_once(hiddify: Any) -> None:
@@ -170,6 +171,9 @@ async def test_servers_api(services: Any, hiddify: Any) -> None:
         headers = {"Authorization": f"Bearer {(await auth.json())['access_token']}"}
         body = await (await client.get("/api/v1/servers", headers=headers)).json()
         assert body["panel_ok"] is True
+        assert body["status_source"] == "hiddify_panel"
+        assert body["vpn_verified"] is False
+        assert body["failover_mode"] == "client_dependent"
         assert body["locations"] == [{"name": "🇩🇪 Германия", "online": True}]
         assert (await client.get("/api/v1/servers")).status == 401
 
