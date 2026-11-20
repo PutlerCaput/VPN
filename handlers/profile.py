@@ -20,7 +20,7 @@ from keyboards.main_menu import (
 from services.container import Services
 from services.health import OUTAGE_NOTICE, servers_text
 from services.hiddify import HiddifyError
-from services.provisioning import ProvisioningError
+from services.provisioning import ProvisioningError, safe_cached_link
 from services.security import SlidingWindowLimiter
 
 logger = logging.getLogger(__name__)
@@ -116,7 +116,7 @@ async def config_access(owner_id: int, services: Services) -> ConfigAccess:
         logger.warning(
             "fresh_config_failed", extra={"telegram_id": user["telegram_id"]}
         )
-        link = user["config_link"]
+        link = safe_cached_link(user, services.settings)
     if not link:
         return ConfigAccess(
             problem="⚠️ Узел временно недоступен. Попробуйте через несколько минут."
