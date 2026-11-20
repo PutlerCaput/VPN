@@ -13,11 +13,11 @@ import json
 import os
 import re
 import shutil
-import subprocess  # noqa: S404  # nosec B404
+import subprocess  # nosec B404
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlencode, quote
+from urllib.parse import quote, urlencode
 
 XRAY_IMAGE = (
     "ghcr.io/xtls/xray-core:26.11.9@"
@@ -77,7 +77,7 @@ def load_inventory(path: Path) -> dict[str, str]:
 
 def x25519(xray: str) -> tuple[str, str]:
     """Use the official Xray binary; do not expose its private key in logs."""
-    completed = subprocess.run(  # noqa: S603,S607  # nosec B603,B607
+    completed = subprocess.run(  # noqa: S603  # nosec B603
         [xray, "x25519"],
         check=True,
         capture_output=True,
@@ -117,7 +117,7 @@ def xray_config(inv: dict[str, str], creds: Credentials) -> dict[str, object]:
         "inbounds": [
             {
                 "tag": "vless-reality",
-                "listen": "0.0.0.0",
+                "listen": "0.0.0.0",  # noqa: S104  # nosec B104
                 "port": 443,
                 "protocol": "vless",
                 "settings": {
