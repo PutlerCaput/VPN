@@ -285,6 +285,52 @@ def test_strict_xray_malformed_endpoints_fail_closed(settings: Any) -> None:
     assert json.loads(result.body) == {}
 
 
+def test_sharding_never_falls_back_to_unfiltered_link(services: Any) -> None:
+    """An incomplete panel reply must not bypass the per-segment policy."""
+    services.settings = services.settings.model_copy(
+        update={
+            "config_delivery": "subscription",
+            "entry_sharding_enabled": True,
+            "entry_segments": {"ru-a": [RU_A], "ru-b": [RU_B]},
+            "subscription_base_url": "https://sub.example.org",
+            "entry_sharding_base_url": "https://app.example.org",
+        }
+    )
+    services.provisioning.settings = services.settings
+    unfiltered = _vless(RU_A)
+    for data in (
+        {"uuid": NODE, "vless_link": unfiltered},
+        {"uuid": "malformed", "subscription_url": "https://sub.example.org/x"},
+        {
+            "uuid": NODE,
+            "subscription_url": "http://sub.example.org/x",
+            "vless_link": unfiltered,
+        },
+    ):
+        with pytest.raises(HiddifyError, match="sharded subscription unavailable"):
+            services.provisioning._config_from(data)
+
+
+def test_sharding_returns_only_the_filtered_api_url(services: Any) -> None:
+    services.settings = services.settings.model_copy(
+        update={
+            "config_delivery": "subscription",
+            "entry_sharding_enabled": True,
+            "subscription_base_url": "https://sub.example.org",
+            "entry_sharding_base_url": "https://app.example.org",
+        }
+    )
+    services.provisioning.settings = services.settings
+    result = services.provisioning._config_from(
+        {
+            "uuid": NODE,
+            "subscription_url": "https://sub.example.org/x",
+            "vless_link": _vless(RU_B),
+        }
+    )
+    assert result == f"https://app.example.org/api/v1/sub/{NODE}/"
+
+
 def test_unreadable_formats_are_refused() -> None:
     assert filter_subscription("proxies:\n  - name: a\n", PLAN, "ru-a") is None
     assert filter_subscription("<html>hi</html>", PLAN, "ru-a") is None
@@ -455,6 +501,84 @@ async def _client(services: Any) -> TestClient:
     from api import create_api_app
 
     return TestClient(TestServer(create_api_app(services)))
+
+
+async def test_telegram_config_fallback_never_leaks_old_unfiltered_link(
+    services: Any, monkeypatch: Any
+) -> None:
+    from handlers.profile import config_access
+
+    services.settings = _sharded_settings(
+        entry_sharding_base_url="https://cfg.example.org"
+    )
+    services.provisioning.settings = services.settings
+    user_id = 720024
+    await _user(services.db, user_id)
+    await services.db.accept_offer(user_id)
+    await services.db.set_config_link(user_id, _vless(RU_B))
+
+    async def unavailable(telegram_id: int) -> str:
+        raise HiddifyError("panel offline")
+
+    monkeypatch.setattr(services.provisioning, "fresh_config", unavailable)
+    access = await config_access(user_id, services)
+    assert access.link == f"https://cfg.example.org/api/v1/sub/{NODE}/"
+    assert RU_B not in (access.link or "")
+
+
+def test_safe_cached_link_refuses_non_uuid_sharded_fallback() -> None:
+    from services.provisioning import safe_cached_link
+
+    settings = _sharded_settings(entry_sharding_base_url="https://cfg.example.org")
+    assert (
+        safe_cached_link(
+            {"node_username": "not-a-uuid", "config_link": _vless(RU_B)},
+            settings,
+        )
+        is None
+    )
+    assert (
+        safe_cached_link(
+            {"node_username": NODE, "config_link": _vless(RU_B)},
+            settings,
+        )
+        == f"https://cfg.example.org/api/v1/sub/{NODE}/"
+    )
+
+
+async def test_config_fallback_cannot_leak_legacy_unfiltered_link(
+    services: Any, monkeypatch: Any
+) -> None:
+    """Old stored config links must not bypass newly enabled segmentation."""
+    from tests.conftest import make_init_data
+    from webhook_server import create_webhook_app
+
+    services.settings = _sharded_settings(
+        entry_sharding_base_url="https://cfg.example.org"
+    )
+    services.provisioning.settings = services.settings
+    user_id = 720021
+    await _user(services.db, user_id)
+    await services.db.set_config_link(user_id, _vless(RU_B))
+
+    async def unavailable(telegram_id: int) -> str:
+        raise HiddifyError("panel offline")
+
+    monkeypatch.setattr(services.provisioning, "fresh_config", unavailable)
+    app = create_webhook_app(services.bot, None, services)  # type: ignore[arg-type]
+    token = services.settings.bot_token.get_secret_value()
+    async with TestClient(TestServer(app)) as client:
+        auth = await client.post(
+            "/api/v1/auth/telegram",
+            json={"initData": make_init_data(token, user_id)},
+        )
+        assert auth.status == 200
+        headers = {"Authorization": f"Bearer {(await auth.json())['access_token']}"}
+        response = await client.get("/api/v1/config", headers=headers)
+        assert response.status == 200
+        body = await response.json()
+        assert body["config_link"] == f"https://cfg.example.org/api/v1/sub/{NODE}/"
+        assert RU_B not in body["config_link"]
 
 
 async def test_endpoint_is_off_by_default(services: Any) -> None:

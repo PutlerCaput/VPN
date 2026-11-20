@@ -52,7 +52,7 @@ from services.billing import BillingError
 from services.email_login import is_site_account, mask_email, normalize_email
 from services.hiddify import HiddifyError
 from services.mailer import MailError
-from services.provisioning import ProvisioningError
+from services.provisioning import ProvisioningError, safe_cached_link
 from services.security import sanitize_username
 from services.sharding import (
     FanoutGuard,
@@ -377,10 +377,11 @@ async def config(request: web.Request) -> web.Response:
     user = request[USER_KEY]
     if user["status"] != "active":
         return json_error(403, "inactive")
+    link: str | None
     try:
         link = await services.provisioning.fresh_config(telegram_id)
     except (HiddifyError, ProvisioningError):
-        link = user["config_link"]
+        link = safe_cached_link(user, services.settings)
     if not link:
         return json_error(503, "node_unavailable")
     return web.json_response(
@@ -510,6 +511,9 @@ async def servers(request: web.Request) -> web.Response:
             "checked_at": report.checked_at,
             "panel_ok": report.panel_ok,
             "subscription": services.settings.config_delivery == "subscription",
+            "status_source": "hiddify_panel",
+            "vpn_verified": False,
+            "failover_mode": "client_dependent",
             "locations": [
                 {"name": item.name, "online": item.online} for item in report.locations
             ],

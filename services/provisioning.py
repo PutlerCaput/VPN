@@ -74,6 +74,20 @@ def _is_uuid(value: str) -> bool:
         return False
 
 
+def safe_cached_link(user: dict[str, Any], settings: Settings) -> str | None:
+    """Never return a pre-sharding unfiltered link in segmented mode."""
+    if settings.entry_sharding_enabled:
+        node = str(user.get("node_username") or "")
+        if not _is_uuid(node):
+            return None
+        return sharded_subscription_url(
+            settings.entry_sharding_base_url or settings.public_base_url,
+            node.lower(),
+        )
+    stored = user.get("config_link")
+    return stored if isinstance(stored, str) and stored else None
+
+
 def _ts() -> int:
     return int(time.time())
 
@@ -122,16 +136,20 @@ class ProvisioningService:
             url = HiddifyClient.extract_subscription_url(
                 data, self.settings.subscription_base_url
             )
-            if url is not None:
+            if self.settings.entry_sharding_enabled:
                 node = str(data.get("uuid") or "")
-                if self.settings.entry_sharding_enabled and _is_uuid(node):
-                    # The same Hiddify subscription, filtered to the user's
-                    # entry segment by the bot (api/routes.py, /sub).
-                    return sharded_subscription_url(
-                        self.settings.entry_sharding_base_url
-                        or self.settings.public_base_url,
-                        node,
-                    )
+                if url is None or not _is_uuid(node):
+                    # Never hand out an unfiltered panel link or the single
+                    # default VLESS link when entry isolation is enabled.
+                    # Both would bypass the subscription segmentation policy.
+                    logger.warning("sharded_subscription_unavailable")
+                    raise HiddifyError("sharded subscription unavailable")
+                return sharded_subscription_url(
+                    self.settings.entry_sharding_base_url
+                    or self.settings.public_base_url,
+                    node,
+                )
+            if url is not None:
                 return url
             logger.warning("subscription_url_unavailable")
         return HiddifyClient.extract_vless_link(data)
@@ -176,7 +194,7 @@ class ProvisioningService:
                 return TrialResult(
                     True,
                     "already_used",
-                    user["config_link"],
+                    safe_cached_link(user, self.settings),
                     user["expires_at"],
                 )
             if self.trial_gate is not None and self.trial_gate():

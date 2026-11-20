@@ -44,6 +44,8 @@ jobs:
       - name: Ruff
         run: |
           ruff check .
+          # Show exact formatting changes on failure; never modify the checkout.
+          ruff format --diff . || true
           ruff format --check .
       - name: Mypy
         run: mypy .

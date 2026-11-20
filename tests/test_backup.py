@@ -537,10 +537,12 @@ def test_status_follows_the_age_of_the_archive_and_of_the_copy_sent(
 
     archive = backups / "backup-20260101T000000Z.tar.gz.age"
     archive.write_text("x", encoding="utf-8")
-    assert "no copy reached Telegram" in status(env, tmp_path)
+    assert "no recent successful Telegram send was recorded" in status(env, tmp_path)
 
     (backups / ".last-sent").write_text("", encoding="utf-8")
-    assert status(env, tmp_path).startswith("OK backup: the newest is 0 h old")
+    line = status(env, tmp_path)
+    assert line.startswith("OK local encrypted backup: 0 h old")
+    assert "delivery and restore not verified" in line
 
     old = time.time() - 3 * 86400
     os.utime(archive, (old, old))
@@ -549,8 +551,10 @@ def test_status_follows_the_age_of_the_archive_and_of_the_copy_sent(
     os.utime(archive, None)
     stale = time.time() - 5 * 86400
     os.utime(backups / ".last-sent", (stale, stale))
-    assert "no copy reached Telegram" in status(env, tmp_path)
-    assert status(env, tmp_path, SEND_TELEGRAM="0").startswith("OK")
+    assert "no recent successful Telegram send was recorded" in status(env, tmp_path)
+    assert status(env, tmp_path, SEND_TELEGRAM="0").startswith(
+        "WARN encrypted local backup"
+    )
 
 
 def test_the_doctor_shows_the_status_line_and_the_bot_image_has_the_sender() -> None:

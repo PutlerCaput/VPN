@@ -171,15 +171,18 @@ def servers_text(report: HealthReport, *, subscription: bool) -> str:
     lines = ["📡 <b>Серверы</b>", ""]
     for location in report.locations:
         mark = "🟢" if location.online else "🔴"
-        state = "работает" if location.online else "недоступен"
+        state = (
+            "запущен по данным панели" if location.online else "сбой по данным панели"
+        )
         lines.append(f"{mark} {html_escape(location.name)} — {state}")
     checked = time.strftime("%H:%M UTC", time.gmtime(report.checked_at))
     lines.append("")
     lines.append(f"Проверено: {checked}.")
+    lines.append("ℹ️ Данные панели, не проверка VPN-подключения из РФ.")
     if subscription and len(report.locations) > 1:
         lines.append(
-            "Все серверы уже есть в вашей ссылке-подписке: выберите сервер "
-            "в клиенте или включите автовыбор, если клиент его поддерживает."
+            "Проверьте список маршрутов в клиенте; выбор и резервирование "
+            "зависят от возможностей клиента."
         )
     elif not subscription:
         lines.append("Ваша ссылка подключения ведёт на основной сервер.")
