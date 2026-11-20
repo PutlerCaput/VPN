@@ -22,7 +22,7 @@ export function ServersCard() {
       )}
       <p className="small muted">Статус по данным панели; подключение из России не проверено.</p>
       {data.subscription && data.locations.length > 1 && (
-        <p className="small muted">Доступные маршруты смотрите в VPN-клиенте. Автопереключение зависит от клиента.</p>
+        <p className="small muted">Доступные маршруты смотрите в приложении подключения. Автопереключение зависит от клиента.</p>
       )}
     </section>
   );
