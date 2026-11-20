@@ -77,7 +77,7 @@ def load_inventory(path: Path) -> dict[str, str]:
 
 def x25519(xray: str) -> tuple[str, str]:
     """Use the official Xray binary; do not expose its private key in logs."""
-    completed = subprocess.run(  # noqa: S603  # nosec B603
+    completed = subprocess.run(  # noqa: S603,S607  # nosec B603,B607
         [xray, "x25519"],
         check=True,
         capture_output=True,
@@ -90,8 +90,9 @@ def x25519(xray: str) -> tuple[str, str]:
     if not private_match or not public_match:
         raise ValueError("Unexpected output from xray x25519")
     private, public = private_match.group(1), public_match.group(1)
-    if any(not re.fullmatch(r"[A-Za-z0-9_-]{43}", value) for value in (private, public)):
-        raise ValueError("Invalid X25519 key encoding from Xray")
+    for value in (private, public):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{43}", value):
+            raise ValueError("Invalid X25519 key encoding from Xray")
     return private, public
 
 
@@ -157,9 +158,7 @@ def haproxy_config(backend_ip: str) -> str:
     )
 
 
-def vless_link(
-    ip: str, title: str, inv: dict[str, str], creds: Credentials
-) -> str:
+def vless_link(ip: str, title: str, inv: dict[str, str], creds: Credentials) -> str:
     params = {
         "encryption": "none",
         "security": "reality",
