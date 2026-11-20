@@ -1,5 +1,7 @@
 """Offline tests: no SSH, external Xray, Docker daemon or server access."""
 
+# ruff: noqa: PT009, PT027  -- stdlib unittest is intentional here.
+
 from __future__ import annotations
 
 import json
