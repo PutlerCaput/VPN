@@ -38,7 +38,8 @@ def test_isolated_pairs_never_expose_other_pair() -> None:
     )
     first = filter_subscription(links, segments, "ru-one")
     second = filter_subscription(links, segments, "ru-two")
-    assert first is not None and second is not None
+    assert first is not None
+    assert second is not None
     assert first.kept == second.kept == 2
     assert INVENTORY["ru2"] not in first.body
     assert INVENTORY["nl2"] not in first.body
