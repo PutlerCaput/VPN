@@ -530,14 +530,20 @@ def test_safe_cached_link_refuses_non_uuid_sharded_fallback() -> None:
     from services.provisioning import safe_cached_link
 
     settings = _sharded_settings(entry_sharding_base_url="https://cfg.example.org")
-    assert safe_cached_link(
-        {"node_username": "not-a-uuid", "config_link": _vless(RU_B)},
-        settings,
-    ) is None
-    assert safe_cached_link(
-        {"node_username": NODE, "config_link": _vless(RU_B)},
-        settings,
-    ) == f"https://cfg.example.org/api/v1/sub/{NODE}/"
+    assert (
+        safe_cached_link(
+            {"node_username": "not-a-uuid", "config_link": _vless(RU_B)},
+            settings,
+        )
+        is None
+    )
+    assert (
+        safe_cached_link(
+            {"node_username": NODE, "config_link": _vless(RU_B)},
+            settings,
+        )
+        == f"https://cfg.example.org/api/v1/sub/{NODE}/"
+    )
 
 
 async def test_config_fallback_cannot_leak_legacy_unfiltered_link(
