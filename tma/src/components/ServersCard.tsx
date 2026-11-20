@@ -22,6 +22,7 @@ export function ServersCard() {
           ))}
         </ul>
       )}
+      <p className={`${ui.small} ${ui.muted}`}>{ru.servers.panelScope}</p>
       {data.subscription && data.locations.length > 1 && (
         <p className={`${ui.small} ${ui.muted}`}>{ru.servers.pickInClient}</p>
       )}
