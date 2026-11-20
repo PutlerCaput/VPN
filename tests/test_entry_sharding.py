@@ -230,6 +230,61 @@ def test_xray_multi_target_drops_empty_and_unparseable_outbounds() -> None:
     assert json.loads(result.body) == {}
 
 
+@pytest.mark.parametrize("first", [RU_A, RU_B])
+def test_xray_two_endpoint_fields_do_not_leak(first: str) -> None:
+    """Filter both address-bearing lists, not only the first one."""
+    other = RU_B if first == RU_A else RU_A
+    config = {
+        "outbounds": [
+            {
+                "protocol": "vless",
+                "tag": "two-fields",
+                "settings": {
+                    "vnext": [{"address": first, "port": 443}],
+                    "servers": [{"address": other, "port": 443}],
+                },
+            },
+            {"protocol": "freedom", "tag": "direct"},
+        ]
+    }
+    result = filter_subscription(json.dumps(config), PLAN, "ru-a")
+    assert result is not None
+    assert result.kept == 1
+    assert result.removed == 1
+    parsed = json.loads(result.body)
+    outbound = next(o for o in parsed["outbounds"] if o["tag"] == "two-fields")
+    addresses = [
+        item["address"]
+        for key in ("vnext", "servers")
+        for item in outbound["settings"][key]
+    ]
+    assert addresses == [RU_A]
+    assert RU_B not in result.body
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"vnext": "undecodable-string", "servers": [{"address": RU_A}]},
+        {"vnext": [{"address": RU_A}], "servers": {"address": RU_B}},
+        None,
+        {},
+    ],
+)
+def test_strict_xray_malformed_endpoints_fail_closed(settings: Any) -> None:
+    config = {
+        "outbounds": [
+            {"protocol": "vless", "tag": "malformed", "settings": settings},
+            {"protocol": "freedom", "tag": "direct"},
+        ]
+    }
+    result = filter_subscription(json.dumps(config), PLAN, "ru-a")
+    assert result is not None
+    assert result.kept == 0
+    assert result.removed >= 1
+    assert json.loads(result.body) == {}
+
+
 def test_unreadable_formats_are_refused() -> None:
     assert filter_subscription("proxies:\n  - name: a\n", PLAN, "ru-a") is None
     assert filter_subscription("<html>hi</html>", PLAN, "ru-a") is None
