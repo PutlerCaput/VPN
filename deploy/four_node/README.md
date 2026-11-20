@@ -23,26 +23,26 @@ REALITY handshake or successful internet traffic.
 ## Prepare once, offline (requires trusted Xray CLI)
 
 Use **Python 3.11** and a trusted recent **Xray CLI** capable of
-\`xray x25519\`. Choose a REALITY target after checking its TLS behavior
+`xray x25519`. Choose a REALITY target after checking its TLS behavior
 from **both** NL locations. This generator intentionally **does not**
 auto-select a cover domain or perform external TLS tests.
 
 1. Create a **private** folder outside the Git repository (permissions 0700).
-2. Create an \`inventory.json\` file in that folder, with the schema below.
+2. Create an `inventory.json` file in that folder, with the schema below.
    Replace every placeholder with the real public IPv4. The example values
    are not valid input and cannot be deployed.
 3. Run:
 
-\`\`\`sh
+```sh
 python3 deploy/four_node/generate.py \
   --inventory /private-path/inventory.json \
   --output /private-path/four-node-generated \
   --xray /trusted-path/xray
-\`\`\`
+```
 
 Private inventory **format** (not a usable configuration):
 
-\`\`\`json
+```json
 {
   "ru1": "<RU-1 public IPv4>",
   "ru2": "<RU-2 public IPv4>",
@@ -51,11 +51,11 @@ Private inventory **format** (not a usable configuration):
   "server_name": "<verified real TLS server name>",
   "target": "<same name>:443"
 }
-\`\`\`
+```
 
 Output structure:
 
-\`\`\`text
+```text
 four-node-generated/      # 0700; only outside the public repository
   nl1/config.json          # 0600; Xray REALITY private key + UUID
   nl1/compose.yaml
@@ -65,11 +65,11 @@ four-node-generated/      # 0700; only outside the public repository
   ru2/haproxy.cfg          # fixed NL-2 TCP forwarding
   vless-links.txt          # sensitive client credentials; 0600
   README.txt
-\`\`\`
+```
 
 The official Xray container version is **26.11.9**, pinned with a GHCR image
 digest. Review upstream security notices and client compatibility before
-production. The generator requires the real \`xray x25519\` command, which
+production. The generator requires the real `xray x25519` command, which
 creates fresh independent keypairs; it never logs them. If Xray is missing,
 the generator exits without deploying.
 
@@ -77,21 +77,21 @@ the generator exits without deploying.
 
 Before running any install commands, independently identify all four VPS
 using trusted **SSH host key fingerprints** from the provider. Check disk,
-memory, existing services and port 443 with \`preflight.sh\`; it only reads.
+memory, existing services and port 443 with `preflight.sh`; it only reads.
 
 Check REALITY target viability on each NL VPS using the same Xray version
-(e.g. \`xray tls ping <chosen-host>\`) and inspect HTTP/2, certificate,
+(e.g. `xray tls ping <chosen-host>`) and inspect HTTP/2, certificate,
 response size and routing. Avoid using an unsafe shared CDN target as
 an unauthenticated forward-proxy destination. Ordinary TCP success is
 insufficient.
 
-Before starting Xray: verify Docker version, \`docker compose config -q\`,
-\`xray run -test -c /etc/xray/config.json\` with the **same pinned image**,
+Before starting Xray: verify Docker version, `docker compose config -q`,
+`xray run -test -c /etc/xray/config.json` with the **same pinned image**,
 firewall rules, and exclusive ownership of port 443. Never reset UFW/nftables
 or blindly stop services. Ensure private config permissions on each VPS
 allow the Xray container to read it.
 
-Before starting RU relays: validate \`haproxy -c -f haproxy.cfg\`. Install
+Before starting RU relays: validate `haproxy -c -f haproxy.cfg`. Install
 each config to the correct VPS only after verifying its role. Enable
 only the required TCP 443 ingress, with NL egress firewall/rate limits
 reviewed separately. These configs do not include Docker/HAProxy install
