@@ -33,6 +33,24 @@ enables manual choice but exposes the four host addresses. A client list
 does not, by itself, provide automatic failover. Confirm selected policy
 and tested client app behavior before asserting redundancy.
 
+## Offline subscription policy helper
+
+Run after obtaining a trusted private four-node inventory, from the
+repository root. Do not upload filled inventory or generated links:
+
+    python3 -m deploy.four_node.plan_subscriptions --inventory /private/inventory.json --policy all-routes
+
+Alternative for intentionally restricted address disclosure:
+
+    python3 -m deploy.four_node.plan_subscriptions --inventory /private/inventory.json --policy isolated-pairs
+
+The tool prints a **proposal only**, not production configuration. All-routes
+exposes four eligible addresses to the subscriber only if the underlying
+per-user Hiddify subscription actually has those entries; client auto-switch
+must be tested. Isolated-pairs produces strict entry segments, but a subscriber
+does **not** receive the other pair as fallback. Operator approval, per-user
+provisioning on both NL exits, and monitoring are still required.
+
 ## Evidence and offline release gate
 
 - The owner confirmed TCP port 22 was reachable on four VPS.
