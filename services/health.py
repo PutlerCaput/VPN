@@ -171,7 +171,9 @@ def servers_text(report: HealthReport, *, subscription: bool) -> str:
     lines = ["📡 <b>Серверы</b>", ""]
     for location in report.locations:
         mark = "🟢" if location.online else "🔴"
-        state = "запущен по данным панели" if location.online else "сбой по данным панели"
+        state = (
+            "запущен по данным панели" if location.online else "сбой по данным панели"
+        )
         lines.append(f"{mark} {html_escape(location.name)} — {state}")
     checked = time.strftime("%H:%M UTC", time.gmtime(report.checked_at))
     lines.append("")
