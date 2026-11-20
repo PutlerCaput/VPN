@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from deploy.four_node.release_gate import (
     GLOBAL_CHECKS,
@@ -11,7 +11,7 @@ from deploy.four_node.release_gate import (
     required_evidence,
 )
 
-NOW = datetime(2026, 11, 20, 14, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 20, 14, 0, tzinfo=UTC)
 
 
 def approved() -> dict[str, object]:
