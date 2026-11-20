@@ -110,6 +110,7 @@ async def config_access(owner_id: int, services: Services) -> ConfigAccess:
                 "аренде. Продлить — «💳 Оплата»."
             )
         )
+    link: str | None
     try:
         link = await services.provisioning.fresh_config(user["telegram_id"])
     except (HiddifyError, ProvisioningError):
