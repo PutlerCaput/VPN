@@ -503,6 +503,45 @@ async def _client(services: Any) -> TestClient:
     return TestClient(TestServer(create_api_app(services)))
 
 
+async def test_config_fallback_cannot_leak_legacy_unfiltered_link(
+    services: Any, monkeypatch: Any
+) -> None:
+    """Old stored config links must not bypass newly enabled segmentation."""
+    from tests.conftest import make_init_data
+    from webhook_server import create_webhook_app
+
+    services.settings = _sharded_settings(
+        entry_sharding_base_url="https://cfg.example.org"
+    )
+    services.provisioning.settings = services.settings
+    user_id = 720021
+    await _user(services.db, user_id)
+    await services.db.set_config_link(user_id, _vless(RU_B))
+
+    async def unavailable(telegram_id: int) -> str:
+        raise HiddifyError("panel offline")
+
+    monkeypatch.setattr(services.provisioning, "fresh_config", unavailable)
+    app = create_webhook_app(services.bot, None, services)  # type: ignore[arg-type]
+    token = services.settings.bot_token.get_secret_value()
+    async with TestClient(TestServer(app)) as client:
+        auth = await client.post(
+            "/api/v1/auth/telegram",
+            json={"initData": make_init_data(token, user_id)},
+        )
+        assert auth.status == 200
+        headers = {
+            "Authorization": f"Bearer {(await auth.json())['access_token']}"
+        }
+        response = await client.get("/api/v1/config", headers=headers)
+        assert response.status == 200
+        body = await response.json()
+        assert body["config_link"] == (
+            f"https://cfg.example.org/api/v1/sub/{NODE}/"
+        )
+        assert RU_B not in body["config_link"]
+
+
 async def test_endpoint_is_off_by_default(services: Any) -> None:
     async with await _client(services) as client:
         response = await client.get(f"/sub/{NODE}/")
