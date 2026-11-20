@@ -19,6 +19,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import time
@@ -26,7 +27,7 @@ from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
 # Link schemes whose host is the authority part of the URI.
 URI_SCHEMES = ("vless", "trojan", "hysteria2", "hy2", "hysteria", "tuic", "ss")
@@ -36,7 +37,234 @@ FINGERPRINTS = ("chrome", "firefox", "safari", "ios", "edge", "random", "randomi
 
 
 def normalize_host(host: str) -> str:
-    return host.strip().strip("[]").rstrip(".").lower()
+    host = host.strip().strip("[]").rstrip(".").lower()
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return host
+
+
+# These are deliberately bounded schemas, not an attempt to accept every
+# Xray/sing-box extension. Unknown JSON asks the caller for ordinary links.
+# Adding a transport requires auditing all its destinations and regression tests.
+PROXY_TYPES = frozenset(
+    {
+        "vless",
+        "vmess",
+        "trojan",
+        "shadowsocks",
+        "socks",
+        "http",
+        "hysteria",
+        "hysteria2",
+        "tuic",
+        "anytls",
+    }
+)
+USER_FIELDS = dict.fromkeys(
+    ("id", "encryption", "flow", "security", "alterId", "level", "email")
+)
+SERVER_FIELDS: dict[str, Any] = dict.fromkeys(
+    ("address", "port", "method", "password", "ota")
+)
+SERVER_FIELDS["users"] = [USER_FIELDS]
+TLS_FIELDS: dict[str, Any] = {
+    **dict.fromkeys(
+        (
+            "serverName",
+            "fingerprint",
+            "allowInsecure",
+            "publicKey",
+            "shortId",
+            "spiderX",
+            "password",
+        )
+    ),
+    "alpn": [None],
+}
+XRAY_FIELDS: dict[str, Any] = {
+    **dict.fromkeys(("protocol", "tag")),
+    "settings": {"vnext": [SERVER_FIELDS], "servers": [SERVER_FIELDS]},
+    "streamSettings": {
+        "network": None,
+        "security": None,
+        "realitySettings": TLS_FIELDS,
+        "tlsSettings": TLS_FIELDS,
+    },
+}
+SINGBOX_FIELDS: dict[str, Any] = {
+    **dict.fromkeys(
+        (
+            "type",
+            "tag",
+            "server",
+            "server_port",
+            "uuid",
+            "password",
+            "method",
+            "flow",
+            "security",
+            "alter_id",
+            "username",
+            "version",
+            "network",
+            "udp_over_tcp",
+        )
+    ),
+    "tls": {
+        **dict.fromkeys(("enabled", "server_name", "insecure")),
+        "alpn": [None],
+        "utls": dict.fromkeys(("enabled", "fingerprint")),
+        "reality": dict.fromkeys(("enabled", "public_key", "short_id")),
+    },
+}
+GROUP_FIELDS: dict[str, Any] = {
+    **dict.fromkeys(
+        (
+            "type",
+            "tag",
+            "default",
+            "url",
+            "interval",
+            "tolerance",
+            "interrupt_exist_connections",
+        )
+    ),
+    "outbounds": [None],
+}
+LINK_QUERY_FIELDS = frozenset(
+    {
+        "security",
+        "encryption",
+        "flow",
+        "sni",
+        "fp",
+        "pbk",
+        "sid",
+        "spx",
+        "type",
+        "headerType",
+        "host",
+        "path",
+        "serviceName",
+        "alpn",
+        "allowInsecure",
+        "insecure",
+        "obfs",
+        "obfs-password",
+        "upmbps",
+        "downmbps",
+    }
+)
+LINK_TRANSPORTS = frozenset(
+    {"", "tcp", "raw", "ws", "grpc", "http", "h2", "httpupgrade"}
+)
+
+
+def _matches_schema(value: Any, schema: Any) -> bool:
+    if isinstance(schema, dict):
+        return isinstance(value, dict) and all(
+            key in schema and _matches_schema(item, schema[key])
+            for key, item in value.items()
+        )
+    if isinstance(schema, list):
+        return isinstance(value, list) and all(
+            _matches_schema(item, schema[0]) for item in value
+        )
+    return value is None or isinstance(value, str | int | float | bool)
+
+
+def _supported_outbound(outbound: dict[str, Any]) -> bool:
+    kind = outbound.get("type") or outbound.get("protocol")
+    if not isinstance(kind, str):
+        return False
+    if "type" in outbound:
+        if kind in GROUP_TYPES:
+            return _matches_schema(outbound, GROUP_FIELDS) and all(
+                isinstance(member, str) for member in outbound.get("outbounds", [])
+            )
+        if kind in {"direct", "block", "dns"}:
+            return _matches_schema(outbound, dict.fromkeys(("type", "tag")))
+        return kind in PROXY_TYPES and _matches_schema(outbound, SINGBOX_FIELDS)
+    if kind in {"freedom", "blackhole"}:
+        return _matches_schema(
+            outbound, {"protocol": None, "tag": None, "settings": {}}
+        )
+    if kind not in PROXY_TYPES or not _matches_schema(outbound, XRAY_FIELDS):
+        return False
+    stream = outbound.get("streamSettings", {})
+    return stream.get("network", "tcp") in {"tcp", "raw"}
+
+
+def _mentions_other_segment(value: Any, plan: SegmentPlan, segment: str) -> bool:
+    """Also protect tags, SNI and other supported text fields from pool leaks."""
+    if isinstance(value, dict):
+        return any(
+            _mentions_other_segment(item, plan, segment)
+            for pair in value.items()
+            for item in pair
+        )
+    if isinstance(value, list):
+        return any(_mentions_other_segment(item, plan, segment) for item in value)
+    if not isinstance(value, str):
+        return False
+    text = unquote(value).lower()
+    forbidden = plan.pool - plan.allowed(segment)
+    return normalize_host(text) in forbidden or any(host in text for host in forbidden)
+
+
+def _safe_link(line: str, plan: SegmentPlan, segment: str) -> str | None:
+    """Do not let JSON fallback reintroduce opaque transports or metadata."""
+    scheme, _, rest = line.partition("://")
+    if scheme.lower() == "vmess":
+        try:
+            encoded = rest.split("#", 1)[0]
+            data = json.loads(base64.b64decode(encoded + "=" * (-len(encoded) % 4)))
+            fields = dict.fromkeys(
+                (
+                    "v",
+                    "ps",
+                    "add",
+                    "port",
+                    "id",
+                    "aid",
+                    "scy",
+                    "net",
+                    "type",
+                    "host",
+                    "path",
+                    "tls",
+                    "sni",
+                    "alpn",
+                    "fp",
+                )
+            )
+            if not _matches_schema(data, fields):
+                return None
+            if not isinstance(data.get("add"), str) or not data["add"].strip():
+                return None
+            data.pop("ps", None)
+            if data.get("net", "") not in LINK_TRANSPORTS:
+                return None
+            if _mentions_other_segment(data, plan, segment):
+                return None
+            return "vmess://" + base64.b64encode(json.dumps(data).encode()).decode()
+        except (ValueError, binascii.Error):
+            return None
+    if scheme.lower() not in URI_SCHEMES:
+        return None
+    try:
+        parts = urlsplit(line)
+        query = parse_qsl(parts.query, keep_blank_values=True)
+        if any(key not in LINK_QUERY_FIELDS for key, _ in query):
+            return None
+        if any(key == "type" and val not in LINK_TRANSPORTS for key, val in query):
+            return None
+        clean = urlunsplit(parts._replace(fragment=""))
+        metadata = [clean, *[value for _, value in query]]
+        return None if _mentions_other_segment(metadata, plan, segment) else clean
+    except ValueError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -190,9 +418,15 @@ def _filter_lines(
         if "://" not in line:
             removed += 1
             continue
-        if not plan.keeps(segment, link_host(line)):
+        host = link_host(line)
+        if host is None or not plan.keeps(segment, host):
             removed += 1
             continue
+        safe = _safe_link(line, plan, segment)
+        if safe is None:
+            removed += 1
+            continue
+        line = safe
         kept.append(with_link_fingerprint(line, fp) if fp else line)
     return kept, removed
 
@@ -240,12 +474,10 @@ def _filter_xray_servers(
         allowed = [
             entry
             for entry in endpoints
-            if plan.keeps(
-                segment,
-                entry.get("address")
-                if isinstance(entry, dict) and isinstance(entry.get("address"), str)
-                else None,
-            )
+            if isinstance(entry, dict)
+            and isinstance(entry.get("address"), str)
+            and bool(entry["address"].strip())
+            and plan.keeps(segment, entry["address"])
         ]
         settings[key] = allowed
         kept += len(allowed)
@@ -270,14 +502,32 @@ def _set_outbound_fingerprint(outbound: dict[str, Any], fp: str) -> None:
 
 def _filter_config(
     config: dict[str, Any], plan: SegmentPlan, segment: str, fp: str | None
-) -> tuple[int, int]:
+) -> tuple[int, int] | None:
+    # DNS, routing, endpoints and arbitrary extensions may carry other entries
+    # or credentials. Do not try to repair a schema we cannot fully account for.
+    if config.keys() - {"outbounds", "remarks"}:
+        return None
     outbounds = config.get("outbounds")
     if not isinstance(outbounds, list):
-        return 0, 0
+        return None
+    if "remarks" in config:
+        config["remarks"] = segment
     removed_tags: set[str] = set()
     result: list[Any] = []
     kept = removed = 0
     for outbound in outbounds:
+        if not isinstance(outbound, dict):
+            return None
+        # Reject hybrid schemas before either parser gets a chance to accept
+        # an allowed endpoint and bypass the other format's destination.
+        if (
+            "type" in outbound
+            and any(
+                field in outbound
+                for field in ("protocol", "settings", "streamSettings")
+            )
+        ) or ("protocol" in outbound and "server" in outbound):
+            return None
         if isinstance(outbound, dict):
             xray = _filter_xray_servers(outbound, plan, segment)
             if xray is not None:
@@ -301,7 +551,7 @@ def _filter_config(
                 kept += 1
                 if fp:
                     _set_outbound_fingerprint(outbound, fp)
-            elif plan.strict and str(
+            elif str(
                 outbound.get("protocol") or outbound.get("type") or ""
             ).lower() in {
                 "vless",
@@ -310,7 +560,6 @@ def _filter_config(
                 "shadowsocks",
                 "socks",
                 "http",
-                "wireguard",
                 "hysteria",
                 "hysteria2",
                 "tuic",
@@ -323,29 +572,35 @@ def _filter_config(
                     removed_tags.add(outbound["tag"])
                 continue
         result.append(outbound)
+    # Validate survivors before serialization. Unknown protocols/transports
+    # return None so the API retries a bounded link format instead.
+    if any(not _supported_outbound(outbound) for outbound in result):
+        return None
     for outbound in result:
         members = outbound.get("outbounds") if isinstance(outbound, dict) else None
         if isinstance(members, list):
             outbound["outbounds"] = [m for m in members if m not in removed_tags]
             if outbound.get("default") in removed_tags:
                 outbound.pop("default", None)
-    # A group left empty would make the client reject the whole profile.
-    empty = {
-        o.get("tag")
-        for o in result
-        if isinstance(o, dict)
-        and str(o.get("type") or "") in GROUP_TYPES
-        and not o.get("outbounds")
-    }
-    result = [
-        o
-        for o in result
-        if not (isinstance(o, dict) and o.get("tag") in empty and o.get("tag"))
-    ]
-    for outbound in result:
-        members = outbound.get("outbounds") if isinstance(outbound, dict) else None
-        if isinstance(members, list):
-            outbound["outbounds"] = [m for m in members if m not in empty]
+    # Prune groups to a fixed point: nested groups/defaults must not refer to
+    # entries (or other groups) removed during filtering.
+    while True:
+        tags = {o["tag"] for o in result if isinstance(o.get("tag"), str)}
+        for outbound in result:
+            if outbound.get("type") in GROUP_TYPES:
+                outbound["outbounds"] = [
+                    m for m in outbound.get("outbounds", []) if m in tags
+                ]
+                if outbound.get("default") not in outbound["outbounds"]:
+                    outbound.pop("default", None)
+        pruned = [
+            o for o in result if o.get("type") not in GROUP_TYPES or o.get("outbounds")
+        ]
+        if len(pruned) == len(result):
+            break
+        result = pruned
+    if _mentions_other_segment(result, plan, segment):
+        return None
     config["outbounds"] = result
     return kept, removed
 
@@ -355,16 +610,15 @@ def filter_subscription(
 ) -> Filtered | None:
     """The subscription with only ``segment``'s entries, or None if unreadable.
 
-    Readable formats: plain link lists, base64 link lists, sing-box JSON and
-    Xray JSON (one config or a list of configs). Anything else (Clash YAML,
-    HTML) returns None: the caller asks the panel for a link list instead and
-    never forwards a format it cannot filter.
+    Readable formats: bounded plain/base64 link lists and a conservative
+    TCP/TLS/REALITY JSON subset. JSON DNS/routing/endpoints, XHTTP and unknown
+    extensions return None: the caller asks for links and filters those too.
     """
     text = body.strip()
     if text.startswith(("{", "[")):
         try:
             data = json.loads(text)
-        except ValueError:
+        except (ValueError, RecursionError):
             return None
         configs = data if isinstance(data, list) else [data]
         if not configs or not all(
@@ -374,7 +628,10 @@ def filter_subscription(
         kept = removed = 0
         survivors = []
         for config in configs:
-            k, r = _filter_config(config, plan, segment, fingerprint)
+            counts = _filter_config(config, plan, segment, fingerprint)
+            if counts is None:
+                return None
+            k, r = counts
             kept += k
             removed += r
             if k or not r:

@@ -171,7 +171,7 @@ def test_filter_xray_config_list() -> None:
     assert result is not None
     assert result.kind == "xray"
     data = json.loads(result.body)
-    assert [c["remarks"] for c in data] == [RU_A]
+    assert [c["remarks"] for c in data] == ["ru-a"]
     reality = data[0]["outbounds"][0]["streamSettings"]["realitySettings"]
     assert reality["fingerprint"] == "chrome"
 

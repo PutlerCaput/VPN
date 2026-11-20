@@ -2,7 +2,7 @@
 
 Исходный код сервиса на базе VLESS/REALITY, Hiddify Manager, Telegram-бота, PWA и Mini App. Этот README описывает репозиторий, а не подтверждённое состояние production.
 
-**Навигация:** [индекс документации](docs/README.md) · [архитектура](docs/ARCHITECTURE.md) · [состояние развёртывания](docs/DEPLOYMENT_STATE.md) · [план полного переноса на VPSVILLE](docs/VPSVILLE_FULL_MIGRATION.md).
+**Навигация:** [индекс документации](docs/README.md) · [архитектура](docs/ARCHITECTURE.md) · [состояние развёртывания](docs/DEPLOYMENT_STATE.md) · [восстановление и запуск четырёх узлов](docs/FOUR_NODE_MIGRATION_2026-11-20.md).
 
 **Безопасность:** репозиторий публичный. Здесь хранятся только исходники, шаблоны и документация. Не добавляйте production `.env`, `secrets/`, базы, Docker inspect, SSH/age private keys и архивы резервных копий. Правила хранения копий — [docs/BACKUPS.md](docs/BACKUPS.md). Изменение документа миграции не означает, что серверы уже перенесены.
 

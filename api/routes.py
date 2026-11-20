@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 from typing import Any
@@ -70,16 +71,14 @@ SUB_FANOUT_KEY = web.AppKey("sub_fanout", FanoutGuard)
 # What the panel is asked for when the app's own format cannot be filtered
 # (Clash YAML and the like): a plain link list every app also understands.
 LINKS_USER_AGENT = "v2rayNG/1.9.0"
-# Headers of the panel's answer that apps read (traffic, title, refresh period).
+# Only numeric usage/refresh metadata may cross the sharding boundary.
+# Free-form titles, support URLs and filenames can expose other entry hosts.
 # Not profile-web-page-url: Hiddify points it at the user's own panel page
 # (panel host, client path, UUID), where the unfiltered subscription and the
 # whole entry pool can be read, which would undo the sharding.
 SUB_PASS_HEADERS = (
     "subscription-userinfo",
     "profile-update-interval",
-    "profile-title",
-    "support-url",
-    "content-disposition",
 )
 
 
@@ -484,7 +483,17 @@ async def sharded_subscription(request: web.Request) -> web.Response:
         logger.warning("sub_segment_empty", extra={"segment": segment})
         return json_error(503, "no_entries", {"Retry-After": "600"})
     lowered = {k.lower(): v for k, v in headers.items()}
-    passed = {k: lowered[k] for k in SUB_PASS_HEADERS if k in lowered}
+    passed = {
+        k: lowered[k]
+        for k in SUB_PASS_HEADERS
+        if k in lowered
+        and re.fullmatch(
+            r"(?:upload|download|total|expire)=\d+(?:;\s*(?:upload|download|total|expire)=\d+)*"
+            if k == "subscription-userinfo"
+            else r"\d{1,5}",
+            lowered[k],
+        )
+    }
     logger.info(
         "sub_served",
         extra={"segment": segment, "kind": filtered.kind, "removed": filtered.removed},

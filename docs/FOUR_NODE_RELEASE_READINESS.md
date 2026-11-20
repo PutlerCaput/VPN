@@ -2,6 +2,12 @@
 
 **Status: not deployed and not ready for paid service.** Four new VPS: RU-1→NL-1, RU-2→NL-2, optional direct NL routes. Retired DE/RU IPs and their old instructions are not applicable.
 
+Use the current [recovery/cutover runbook](FOUR_NODE_MIGRATION_2026-11-20.md)
+and [security boundaries](SUBSCRIPTION_SECURITY_BOUNDARY.md). The release gate
+also requires verified recovery mode/source, single-writer payment cutover,
+post-write rollback and closure of the raw subscription bypass. Old evidence
+without these checks is BLOCKED; do not copy old true values without testing.
+
 ## Seven workstreams: code versus deployment
 
 | Workstream | Available or prepared code | What still requires operator access |

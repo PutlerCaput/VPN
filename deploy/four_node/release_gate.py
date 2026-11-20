@@ -26,6 +26,10 @@ GLOBAL_CHECKS = (
     "encrypted_offsite_backup_verified",
     "isolated_restore_verified",
     "rollback_tested",
+    "recovery_mode_and_source_verified",
+    "single_writer_and_payment_cutover_verified",
+    "post_write_rollback_tested",
+    "raw_subscription_bypass_closed",
     "legal_and_provider_terms_reviewed",
 )
 
