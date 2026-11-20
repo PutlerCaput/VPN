@@ -100,20 +100,23 @@ class FourNodeTests(unittest.TestCase):
             generate.render(output, INV, NL1, NL2)
             links = (output / "vless-links.txt").read_text()
             plan = SegmentPlan.build(
-                {"ru-one": [INV["ru1"]], "ru-two": [INV["ru2"]]},
-                shared=[INV["nl1"], INV["nl2"]],
+                {
+                    "ru-one": [INV["ru1"], INV["nl1"]],
+                    "ru-two": [INV["ru2"], INV["nl2"]],
+                }
             )
-            for segment, blocked_ip in (
-                ("ru-one", INV["ru2"]),
-                ("ru-two", INV["ru1"]),
+            for segment, allowed, blocked in (
+                ("ru-one", ("ru1", "nl1"), ("ru2", "nl2")),
+                ("ru-two", ("ru2", "nl2"), ("ru1", "nl1")),
             ):
                 result = filter_subscription(links, plan, segment)
                 assert result is not None
-                assert result.kept == 3
-                assert result.removed == 1
-                assert f"@{blocked_ip}:443" not in result.body
-                assert f"@{INV['nl1']}:443" in result.body
-                assert f"@{INV['nl2']}:443" in result.body
+                assert result.kept == 2
+                assert result.removed == 2
+                for item in allowed:
+                    assert f"@{INV[item]}:443" in result.body
+                for item in blocked:
+                    assert f"@{INV[item]}:443" not in result.body
 
     def test_xray_output_parser_accepts_password_label(self) -> None:
         from subprocess import CompletedProcess
