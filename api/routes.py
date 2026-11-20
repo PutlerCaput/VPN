@@ -377,6 +377,7 @@ async def config(request: web.Request) -> web.Response:
     user = request[USER_KEY]
     if user["status"] != "active":
         return json_error(403, "inactive")
+    link: str | None
     try:
         link = await services.provisioning.fresh_config(telegram_id)
     except (HiddifyError, ProvisioningError):
