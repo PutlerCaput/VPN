@@ -32,8 +32,7 @@ def test_isolated_pairs_never_expose_other_pair() -> None:
     assert plan["entry_shared_hosts"] == []
     segments = SegmentPlan.build(plan["entry_segments"])
     links = "\n".join(
-        f"vless://00000000-0000-4000-8000-000000000001@{host}:443"
-        "?security=reality"
+        f"vless://00000000-0000-4000-8000-000000000001@{host}:443" "?security=reality"
         for host in INVENTORY.values()
     )
     first = filter_subscription(links, segments, "ru-one")
