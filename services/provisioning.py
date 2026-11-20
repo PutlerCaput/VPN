@@ -122,16 +122,20 @@ class ProvisioningService:
             url = HiddifyClient.extract_subscription_url(
                 data, self.settings.subscription_base_url
             )
-            if url is not None:
+            if self.settings.entry_sharding_enabled:
                 node = str(data.get("uuid") or "")
-                if self.settings.entry_sharding_enabled and _is_uuid(node):
-                    # The same Hiddify subscription, filtered to the user's
-                    # entry segment by the bot (api/routes.py, /sub).
-                    return sharded_subscription_url(
-                        self.settings.entry_sharding_base_url
-                        or self.settings.public_base_url,
-                        node,
-                    )
+                if url is None or not _is_uuid(node):
+                    # Never hand out an unfiltered panel link or the single
+                    # default VLESS link when entry isolation is enabled.
+                    # Both would bypass the subscription segmentation policy.
+                    logger.warning("sharded_subscription_unavailable")
+                    raise HiddifyError("sharded subscription unavailable")
+                return sharded_subscription_url(
+                    self.settings.entry_sharding_base_url
+                    or self.settings.public_base_url,
+                    node,
+                )
+            if url is not None:
                 return url
             logger.warning("subscription_url_unavailable")
         return HiddifyClient.extract_vless_link(data)
