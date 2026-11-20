@@ -285,6 +285,52 @@ def test_strict_xray_malformed_endpoints_fail_closed(settings: Any) -> None:
     assert json.loads(result.body) == {}
 
 
+def test_sharding_never_falls_back_to_unfiltered_link(services: Any) -> None:
+    """An incomplete panel reply must not bypass the per-segment policy."""
+    services.settings = services.settings.model_copy(
+        update={
+            "config_delivery": "subscription",
+            "entry_sharding_enabled": True,
+            "entry_segments": {"ru-a": [RU_A], "ru-b": [RU_B]},
+            "subscription_base_url": "https://sub.example.org",
+            "entry_sharding_base_url": "https://app.example.org",
+        }
+    )
+    services.provisioning.settings = services.settings
+    unfiltered = _vless(RU_A)
+    for data in (
+        {"uuid": NODE, "vless_link": unfiltered},
+        {"uuid": "malformed", "subscription_url": "https://sub.example.org/x"},
+        {
+            "uuid": NODE,
+            "subscription_url": "http://sub.example.org/x",
+            "vless_link": unfiltered,
+        },
+    ):
+        with pytest.raises(HiddifyError, match="sharded subscription unavailable"):
+            services.provisioning._config_from(data)
+
+
+def test_sharding_returns_only_the_filtered_api_url(services: Any) -> None:
+    services.settings = services.settings.model_copy(
+        update={
+            "config_delivery": "subscription",
+            "entry_sharding_enabled": True,
+            "subscription_base_url": "https://sub.example.org",
+            "entry_sharding_base_url": "https://app.example.org",
+        }
+    )
+    services.provisioning.settings = services.settings
+    result = services.provisioning._config_from(
+        {
+            "uuid": NODE,
+            "subscription_url": "https://sub.example.org/x",
+            "vless_link": _vless(RU_B),
+        }
+    )
+    assert result == f"https://app.example.org/api/v1/sub/{NODE}/"
+
+
 def test_unreadable_formats_are_refused() -> None:
     assert filter_subscription("proxies:\n  - name: a\n", PLAN, "ru-a") is None
     assert filter_subscription("<html>hi</html>", PLAN, "ru-a") is None
