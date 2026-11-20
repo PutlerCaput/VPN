@@ -15,13 +15,14 @@ export function ServersCard() {
         <ul className="servers">
           {data.locations.map((location) => (
             <li key={location.name}>
-              {location.online ? "🟢" : "🔴"} {location.name} — {location.online ? "работает" : "недоступен"}
+              {location.online ? "🟢" : "🔴"} {location.name} — {location.online ? "запущен в панели" : "сбой в панели"}
             </li>
           ))}
         </ul>
       )}
+      <p className="small muted">Статус по данным панели; подключение из России не проверено.</p>
       {data.subscription && data.locations.length > 1 && (
-        <p className="small muted">Все серверы уже в вашей ссылке-подписке: выберите сервер в клиенте.</p>
+        <p className="small muted">Доступные маршруты смотрите в VPN-клиенте. Автопереключение зависит от клиента.</p>
       )}
     </section>
   );
