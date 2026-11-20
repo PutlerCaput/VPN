@@ -228,10 +228,15 @@ def _filter_xray_servers(
     settings = outbound.get("settings")
     if not isinstance(settings, dict):
         return None
-    for key in ("vnext", "servers"):
-        endpoints = settings.get(key)
+    keys = [key for key in ("vnext", "servers") if key in settings]
+    if not keys:
+        return None
+    kept = removed = 0
+    for key in keys:
+        endpoints = settings[key]
+        # A malformed address-bearing field must never be sent unchanged.
         if not isinstance(endpoints, list):
-            continue
+            return False, removed + kept + 1
         allowed = [
             entry
             for entry in endpoints
@@ -243,8 +248,9 @@ def _filter_xray_servers(
             )
         ]
         settings[key] = allowed
-        return bool(allowed), len(endpoints) - len(allowed)
-    return None
+        kept += len(allowed)
+        removed += len(endpoints) - len(allowed)
+    return bool(kept), removed
 
 
 def _set_outbound_fingerprint(outbound: dict[str, Any], fp: str) -> None:
@@ -295,6 +301,27 @@ def _filter_config(
                 kept += 1
                 if fp:
                     _set_outbound_fingerprint(outbound, fp)
+            elif plan.strict and str(
+                outbound.get("protocol") or outbound.get("type") or ""
+            ).lower() in {
+                "vless",
+                "vmess",
+                "trojan",
+                "shadowsocks",
+                "socks",
+                "http",
+                "wireguard",
+                "hysteria",
+                "hysteria2",
+                "tuic",
+                "anytls",
+            }:
+                # Strict subscriptions must not return a malformed proxy whose
+                # address could not be parsed. Preserve harmless direct outbounds.
+                removed += 1
+                if isinstance(outbound.get("tag"), str):
+                    removed_tags.add(outbound["tag"])
+                continue
         result.append(outbound)
     for outbound in result:
         members = outbound.get("outbounds") if isinstance(outbound, dict) else None
