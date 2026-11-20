@@ -1,0 +1,67 @@
+name: Four-node configuration smoke test
+
+on:
+  pull_request:
+    paths:
+      - "deploy/four_node/**"
+      - "tests/test_four_node_generator.py"
+      - ".github/workflows/four-node.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Offline unit tests
+        run: python -m unittest discover -s tests -p test_four_node_generator.py -v
+      - name: Generate test-only keys; verify REALITY syntax using pinned Xray
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/xtls/xray-core:26.11.9@sha256:d42420dca2014cbd06e24daad8a039b455b7d9e905cda1cf871254cfffda2149"
+          docker pull "$IMAGE"
+          cat > "$RUNNER_TEMP/xray-cli" <<'EOF'
+          #!/bin/sh
+          exec docker run --rm --entrypoint /usr/local/bin/xray "ghcr.io/xtls/xray-core:26.11.9@sha256:d42420dca2014cbd06e24daad8a039b455b7d9e905cda1cf871254cfffda2149" "$@"
+          EOF
+          chmod 700 "$RUNNER_TEMP/xray-cli"
+          mkdir -m 700 -p "$RUNNER_TEMP/four-vps-test"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          directory = Path(os.environ["RUNNER_TEMP"]) / "four-vps-test"
+          (directory / "inventory.json").write_text(json.dumps({
+              "ru1": "1.1.1.1", "ru2": "8.8.8.8",
+              "nl1": "9.9.9.9", "nl2": "4.2.2.2",
+              "server_name": "www.example.org",
+              "target": "www.example.org:443"
+          }))
+          PY
+          python3 deploy/four_node/generate.py \
+            --inventory "$RUNNER_TEMP/four-vps-test/inventory.json" \
+            --output "$RUNNER_TEMP/four-vps-test/bundle" \
+            --xray "$RUNNER_TEMP/xray-cli"
+          for node in nl1 nl2; do
+            docker run --rm --user 0:0 --network none \
+              --mount "type=bind,src=$RUNNER_TEMP/four-vps-test/bundle/$node/config.json,dst=/etc/xray/config.json,readonly" \
+              "$IMAGE" run -test -c /etc/xray/config.json
+          done
+      - name: Validate both HAProxy configs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for node in ru1 ru2; do
+            docker run --rm --user 0:0 \
+              --mount "type=bind,src=$RUNNER_TEMP/four-vps-test/bundle/$node/haproxy.cfg,dst=/usr/local/etc/haproxy/haproxy.cfg,readonly" \
+              haproxy:3.2-alpine haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
+          done
