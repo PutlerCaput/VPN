@@ -13,7 +13,7 @@ import json
 import os
 import re
 import shutil
-import subprocess
+import subprocess  # noqa: S404  # nosec B404
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +21,7 @@ from urllib.parse import urlencode, quote
 
 XRAY_IMAGE = (
     "ghcr.io/xtls/xray-core:26.11.9@"
-    "sha256:9c24f6df417179d4ec9dfa8a35e40ab13065b0fc66f2843813718602c5f3dd18"
+    "sha256:d42420dca2014cbd06e24daad8a039b455b7d9e905cda1cf871254cfffda2149"
 )
 FIELDS = ("ru1", "ru2", "nl1", "nl2", "server_name", "target")
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -209,6 +209,7 @@ def render(
                     f"    image: {XRAY_IMAGE}\n"
                     '    network_mode: "host"\n'
                     "    restart: unless-stopped\n"
+                    '    user: "0:0"\n'
                     "    read_only: true\n"
                     "    cap_drop: [ALL]\n"
                     "    cap_add: [NET_BIND_SERVICE]\n"
