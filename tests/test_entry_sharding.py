@@ -503,6 +503,45 @@ async def _client(services: Any) -> TestClient:
     return TestClient(TestServer(create_api_app(services)))
 
 
+async def test_telegram_config_fallback_never_leaks_old_unfiltered_link(
+    services: Any, monkeypatch: Any
+) -> None:
+    from handlers.profile import config_access
+
+    services.settings = _sharded_settings(
+        entry_sharding_base_url="https://cfg.example.org"
+    )
+    services.provisioning.settings = services.settings
+    user_id = 720024
+    await _user(services.db, user_id)
+    await services.db.accept_offer(user_id)
+    await services.db.set_config_link(user_id, _vless(RU_B))
+
+    async def unavailable(telegram_id: int) -> str:
+        raise HiddifyError("panel offline")
+
+    monkeypatch.setattr(services.provisioning, "fresh_config", unavailable)
+    access = await config_access(user_id, services)
+    assert access.link == f"https://cfg.example.org/api/v1/sub/{NODE}/"
+    assert RU_B not in (access.link or "")
+
+
+def test_safe_cached_link_refuses_non_uuid_sharded_fallback() -> None:
+    from services.provisioning import safe_cached_link
+
+    settings = _sharded_settings(
+        entry_sharding_base_url="https://cfg.example.org"
+    )
+    assert safe_cached_link(
+        {"node_username": "not-a-uuid", "config_link": _vless(RU_B)},
+        settings,
+    ) is None
+    assert safe_cached_link(
+        {"node_username": NODE, "config_link": _vless(RU_B)},
+        settings,
+    ) == f"https://cfg.example.org/api/v1/sub/{NODE}/"
+
+
 async def test_config_fallback_cannot_leak_legacy_unfiltered_link(
     services: Any, monkeypatch: Any
 ) -> None:
