@@ -85,8 +85,11 @@ def x25519(xray: str) -> tuple[str, str]:
         timeout=20,
     )
     result = completed.stdout
-    private_match = re.search(r"(?m)^PrivateKey:\s*(\S+)\s*$", result)
-    public_match = re.search(r"(?m)^(?:Password|PublicKey):\s*(\S+)\s*$", result)
+    private_match = re.search(r"(?mi)^Private(?:Key| key):\s*(\S+)\s*$", result)
+    public_match = re.search(
+        r"(?mi)^(?:Password(?: \(PublicKey\))?|Public(?:Key| key)):\s*(\S+)\s*$",
+        result,
+    )
     if not private_match or not public_match:
         raise ValueError("Unexpected output from xray x25519")
     private, public = private_match.group(1), public_match.group(1)
