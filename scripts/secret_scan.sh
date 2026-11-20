@@ -8,6 +8,13 @@ PATTERN='(?i)(password|token|secret|key)=(?:"(?!\$\{|/)[^"\s]{6,}"|'"'"'(?!\$\{|
 
 if [[ $# -eq 0 ]]; then
   cd "$(dirname "$0")/.."
+  # A Docker inspect dump contains unredacted credentials even if the project
+  # source itself is clean. Reject these tracked files before scanning content.
+  tracked_sensitive="$(git ls-files | grep -E '(^|/)(docker-inspect[^/]*\.json|vpn-project-backup[^/]*\.(tar\.gz|age)|\.env($|\.before-|\.bak-)|age-key\.txt|AGE-SECRET-KEY-[^/]+)|(^|/)(secrets|diagnostics|server-backups)/' || true)"
+  if [[ -n "$tracked_sensitive" ]]; then
+    printf 'PRIVATE RUNTIME DUMP TRACKED (filenames only):\n%s\n' "$tracked_sensitive" >&2
+    exit 1
+  fi
   mapfile -t files < <(find . -type f \
     -not -path './.venv/*' -not -path './venv/*' -not -path './.pytest_cache/*' \
     -not -path './.git/*' -not -path '*/node_modules/*' -not -path '*/dist/*' \

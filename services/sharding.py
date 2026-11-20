@@ -216,6 +216,43 @@ def _is_proxy(outbound: Mapping[str, Any]) -> bool:
     return kind not in GROUP_TYPES and _outbound_host(outbound) is not None
 
 
+def _filter_xray_servers(
+    outbound: dict[str, Any], plan: SegmentPlan, segment: str
+) -> tuple[bool, int] | None:
+    """Filter every Xray endpoint, not just the first one in an outbound.
+
+    An Xray vnext/servers outbound can contain addresses from several segments.
+    Checking only its first address leaks every remaining address to the user.
+    Unknown or malformed entries are dropped in strict mode (fail closed).
+    """
+    settings = outbound.get("settings")
+    if not isinstance(settings, dict):
+        return None
+    keys = [key for key in ("vnext", "servers") if key in settings]
+    if not keys:
+        return None
+    kept = removed = 0
+    for key in keys:
+        endpoints = settings[key]
+        # A malformed address-bearing field must never be sent unchanged.
+        if not isinstance(endpoints, list):
+            return False, removed + kept + 1
+        allowed = [
+            entry
+            for entry in endpoints
+            if plan.keeps(
+                segment,
+                entry.get("address")
+                if isinstance(entry, dict) and isinstance(entry.get("address"), str)
+                else None,
+            )
+        ]
+        settings[key] = allowed
+        kept += len(allowed)
+        removed += len(endpoints) - len(allowed)
+    return bool(kept), removed
+
+
 def _set_outbound_fingerprint(outbound: dict[str, Any], fp: str) -> None:
     tls = outbound.get("tls")
     if isinstance(tls, dict) and tls.get("enabled"):  # sing-box
@@ -241,15 +278,50 @@ def _filter_config(
     result: list[Any] = []
     kept = removed = 0
     for outbound in outbounds:
-        if isinstance(outbound, dict) and _is_proxy(outbound):
-            if not plan.keeps(segment, _outbound_host(outbound)):
+        if isinstance(outbound, dict):
+            xray = _filter_xray_servers(outbound, plan, segment)
+            if xray is not None:
+                has_endpoints, dropped = xray
+                removed += dropped
+                if not has_endpoints:
+                    if isinstance(outbound.get("tag"), str):
+                        removed_tags.add(outbound["tag"])
+                    continue
+                kept += 1
+                if fp:
+                    _set_outbound_fingerprint(outbound, fp)
+                result.append(outbound)
+                continue
+            if _is_proxy(outbound):
+                if not plan.keeps(segment, _outbound_host(outbound)):
+                    removed += 1
+                    if isinstance(outbound.get("tag"), str):
+                        removed_tags.add(outbound["tag"])
+                    continue
+                kept += 1
+                if fp:
+                    _set_outbound_fingerprint(outbound, fp)
+            elif plan.strict and str(
+                outbound.get("protocol") or outbound.get("type") or ""
+            ).lower() in {
+                "vless",
+                "vmess",
+                "trojan",
+                "shadowsocks",
+                "socks",
+                "http",
+                "wireguard",
+                "hysteria",
+                "hysteria2",
+                "tuic",
+                "anytls",
+            }:
+                # Strict subscriptions must not return a malformed proxy whose
+                # address could not be parsed. Preserve harmless direct outbounds.
                 removed += 1
                 if isinstance(outbound.get("tag"), str):
                     removed_tags.add(outbound["tag"])
                 continue
-            kept += 1
-            if fp:
-                _set_outbound_fingerprint(outbound, fp)
         result.append(outbound)
     for outbound in result:
         members = outbound.get("outbounds") if isinstance(outbound, dict) else None
