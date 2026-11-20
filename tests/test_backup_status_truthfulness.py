@@ -31,7 +31,9 @@ def status(tmp_path: Path, send: int, sent_marker: bool) -> str:
 
 
 @pytest.mark.parametrize("sent_marker", [False, True])
-def test_disabled_dispatch_cannot_claim_offsite(sent_marker: bool, tmp_path: Path) -> None:
+def test_disabled_dispatch_cannot_claim_offsite(
+    sent_marker: bool, tmp_path: Path
+) -> None:
     result = status(tmp_path, 0, sent_marker)
     assert result.startswith("WARN")
     assert "offsite dispatch is disabled" in result
