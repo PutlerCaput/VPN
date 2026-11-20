@@ -10,7 +10,7 @@ if [[ $# -eq 0 ]]; then
   cd "$(dirname "$0")/.."
   # A Docker inspect dump contains unredacted credentials even if the project
   # source itself is clean. Reject these tracked files before scanning content.
-  tracked_sensitive="$(git ls-files | grep -E '(^|/)(docker-inspect\.json|vpn-project-backup\.tar\.gz|\.env\.before-[^/]*)$' || true)"
+  tracked_sensitive="$(git ls-files | grep -E '(^|/)(docker-inspect[^/]*\.json|vpn-project-backup[^/]*\.(tar\.gz|age)|\.env($|\.before-|\.bak-)|age-key\.txt|AGE-SECRET-KEY-[^/]+)|(^|/)(secrets|diagnostics|server-backups)/' || true)"
   if [[ -n "$tracked_sensitive" ]]; then
     printf 'PRIVATE RUNTIME DUMP TRACKED (filenames only):\n%s\n' "$tracked_sensitive" >&2
     exit 1
