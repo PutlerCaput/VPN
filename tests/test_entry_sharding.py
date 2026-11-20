@@ -529,9 +529,7 @@ async def test_telegram_config_fallback_never_leaks_old_unfiltered_link(
 def test_safe_cached_link_refuses_non_uuid_sharded_fallback() -> None:
     from services.provisioning import safe_cached_link
 
-    settings = _sharded_settings(
-        entry_sharding_base_url="https://cfg.example.org"
-    )
+    settings = _sharded_settings(entry_sharding_base_url="https://cfg.example.org")
     assert safe_cached_link(
         {"node_username": "not-a-uuid", "config_link": _vless(RU_B)},
         settings,
@@ -569,15 +567,11 @@ async def test_config_fallback_cannot_leak_legacy_unfiltered_link(
             json={"initData": make_init_data(token, user_id)},
         )
         assert auth.status == 200
-        headers = {
-            "Authorization": f"Bearer {(await auth.json())['access_token']}"
-        }
+        headers = {"Authorization": f"Bearer {(await auth.json())['access_token']}"}
         response = await client.get("/api/v1/config", headers=headers)
         assert response.status == 200
         body = await response.json()
-        assert body["config_link"] == (
-            f"https://cfg.example.org/api/v1/sub/{NODE}/"
-        )
+        assert body["config_link"] == f"https://cfg.example.org/api/v1/sub/{NODE}/"
         assert RU_B not in body["config_link"]
 
 
