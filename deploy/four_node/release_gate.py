@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -77,7 +77,7 @@ def _checked_at(value: object) -> datetime | None:
         return None
     if parsed.tzinfo is None:
         return None
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)
 
 
 def evaluate(
@@ -86,10 +86,10 @@ def evaluate(
     """Return (ready, missing checks), printing no values from the evidence."""
     if not isinstance(evidence, dict) or evidence.get("schema") != SCHEMA:
         return False, ["schema"]
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if now.tzinfo is None:
         raise ValueError("now must have a timezone")
-    now = now.astimezone(timezone.utc)
+    now = now.astimezone(UTC)
     checked = _checked_at(evidence.get("checked_at"))
     issues: list[str] = []
     if checked is None or not -FUTURE_TOLERANCE <= now - checked <= MAX_AGE:
