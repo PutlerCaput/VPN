@@ -107,7 +107,11 @@ class FourNodeTests(unittest.TestCase):
     def test_xray_26_password_publickey_label(self) -> None:
         from subprocess import CompletedProcess
 
-        output = f"PrivateKey: {'A' * 43}\nPassword (PublicKey): {'B' * 43}\nHash32: test\n"
+        output = (
+            f"PrivateKey: {'A' * 43}\n"
+            f"Password (PublicKey): {'B' * 43}\n"
+            "Hash32: test\n"
+        )
         with patch(
             "deploy.four_node.generate.subprocess.run",
             return_value=CompletedProcess(["xray", "x25519"], 0, output),
