@@ -101,6 +101,16 @@ class FourNodeTests(unittest.TestCase):
             mocked.assert_called_once()
             self.assertFalse(mocked.call_args.kwargs.get("shell", False))
 
+    def test_xray_26_password_publickey_label(self) -> None:
+        from subprocess import CompletedProcess
+
+        output = f"PrivateKey: {'A' * 43}\\nPassword (PublicKey): {'B' * 43}\\nHash32: test\\n"
+        with patch(
+            "deploy.four_node.generate.subprocess.run",
+            return_value=CompletedProcess(["xray", "x25519"], 0, output),
+        ):
+            self.assertEqual(generate.x25519("xray"), ("A" * 43, "B" * 43))
+
     def test_no_implicit_cross_node_failover(self) -> None:
         self.assertNotIn("server nl2", generate.haproxy_config(INV["nl1"]))
         self.assertNotIn("send-proxy", generate.haproxy_config(INV["nl1"]))
