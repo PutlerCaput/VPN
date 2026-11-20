@@ -510,6 +510,9 @@ async def servers(request: web.Request) -> web.Response:
             "checked_at": report.checked_at,
             "panel_ok": report.panel_ok,
             "subscription": services.settings.config_delivery == "subscription",
+            "status_source": "hiddify_panel",
+            "vpn_verified": False,
+            "failover_mode": "client_dependent",
             "locations": [
                 {"name": item.name, "online": item.online} for item in report.locations
             ],
