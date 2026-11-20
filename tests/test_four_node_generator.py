@@ -92,6 +92,29 @@ class FourNodeTests(unittest.TestCase):
             path.write_text(json.dumps(INV))
             self.assertEqual(generate.load_inventory(path), INV)
 
+    def test_generated_links_can_be_sharded_without_cross_entry_leak(self) -> None:
+        from services.sharding import SegmentPlan, filter_subscription
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "private-bundle"
+            generate.render(output, INV, NL1, NL2)
+            links = (output / "vless-links.txt").read_text()
+            plan = SegmentPlan.build(
+                {"ru-one": [INV["ru1"]], "ru-two": [INV["ru2"]]},
+                shared=[INV["nl1"], INV["nl2"]],
+            )
+            for segment, blocked_ip in (
+                ("ru-one", INV["ru2"]),
+                ("ru-two", INV["ru1"]),
+            ):
+                result = filter_subscription(links, plan, segment)
+                assert result is not None
+                assert result.kept == 3
+                assert result.removed == 1
+                assert f"@{blocked_ip}:443" not in result.body
+                assert f"@{INV['nl1']}:443" in result.body
+                assert f"@{INV['nl2']}:443" in result.body
+
     def test_xray_output_parser_accepts_password_label(self) -> None:
         from subprocess import CompletedProcess
 
