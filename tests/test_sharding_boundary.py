@@ -166,6 +166,7 @@ def test_link_and_vmess_display_metadata_cannot_expose_other_entries() -> None:
         (_vless(RU_A), 200),
         (_vless(RU_B), 503),
         ('{"endpoints": []}', 502),
+        (json.dumps(_xray()), 502),
     ],
 )
 async def test_http_unknown_json_retries_and_filters_links(
@@ -236,3 +237,86 @@ def test_expanded_ipv6_sni_cannot_disclose_other_segment() -> None:
     result = filter_subscription(_vless(RU_A, sni="2001:0db8:0:0:0:0:0:2"), plan, "a")
     assert result is not None
     assert result.kept == 0
+
+
+@pytest.mark.parametrize(
+    ("agent", "dialect", "wrapped", "expect_links"),
+    [
+        ("v2rayNG/2.3.15", "xray", False, True),
+        ("v2rayNG/2.3.15", "singbox", False, True),
+        ("NekoBox/Android/1.4.2 (Prefer ClashMeta Format)", "xray", True, True),
+        ("NekoBox/Android/1.4.2", "xray", False, True),
+        ("NekoBox/Android/1.4.2", "singbox", False, False),
+        ("NekoBox/Android/1.4.2", "singbox", True, False),
+        ("HiddifyNext/5.5.5", "xray", False, False),
+        ("HiddifyNext/5.5.5", "singbox", True, True),
+        ("HiddifyNext/5.5.5", "singbox", False, False),
+    ],
+)
+async def test_client_receives_an_importable_format(
+    services: Any, agent: str, dialect: str, wrapped: bool, expect_links: bool
+) -> None:
+    services.settings = _sharded_settings(entry_shared_hosts=[])
+    await _user(services.db, 4210)
+    await services.db.set_entry_segment(4210, "ru-a", "admin")
+    config = _xray()
+    if dialect == "singbox":
+        config = {
+            "outbounds": [
+                {"type": "vless", "server": host, "server_port": 443, "uuid": NODE}
+                for host in (RU_A, RU_B)
+            ]
+        }
+    else:
+        config["outbounds"][0]["settings"]["vnext"].append({"address": RU_B})
+    links = base64.b64encode(f"{_vless(RU_A)}\n{_vless(RU_B)}".encode()).decode()
+    link_agent = "v2rayNG/1.9.0"
+    upstream = Upstream(
+        {agent: json.dumps([config] if wrapped else config), link_agent: links}
+    )
+    services.hiddify.fetch_subscription = upstream
+    async with await _client(services) as client:
+        response = await client.get(f"/sub/{NODE}/", headers={"User-Agent": agent})
+        assert response.status == 200
+        body = await response.text()
+        if expect_links:
+            assert response.content_type == "text/plain"
+            assert upstream.agents == [agent, link_agent]
+            body = base64.b64decode(body, validate=True).decode()
+        else:
+            assert response.content_type == "application/json"
+            assert upstream.agents == [agent]
+            assert isinstance(json.loads(body), list if wrapped else dict)
+        assert RU_A in body
+        assert RU_B not in body
+
+
+async def test_links_user_agent_cannot_receive_json_or_retry_itself(
+    services: Any,
+) -> None:
+    services.settings = _sharded_settings()
+    await _user(services.db, 4211)
+    await services.db.set_entry_segment(4211, "ru-a", "admin")
+    upstream = Upstream({"*": json.dumps(_xray())})
+    services.hiddify.fetch_subscription = upstream
+    async with await _client(services) as client:
+        response = await client.get(
+            f"/sub/{NODE}/", headers={"User-Agent": "v2rayNG/1.9.0"}
+        )
+        assert response.status == 502
+        assert "outbounds" not in await response.text()
+    assert upstream.agents == ["v2rayNG/1.9.0"]
+
+
+@pytest.mark.parametrize("separate_profiles", [True, False])
+def test_surviving_outbounds_of_different_dialects_request_links(
+    separate_profiles: bool,
+) -> None:
+    xray = _xray()
+    sing = {"type": "vless", "server": RU_A, "server_port": 443, "uuid": NODE}
+    if separate_profiles:
+        body = json.dumps([xray, {"outbounds": [sing]}])
+    else:
+        xray["outbounds"].append(sing)
+        body = json.dumps(xray)
+    assert filter_subscription(body, PLAN, "ru-a") is None

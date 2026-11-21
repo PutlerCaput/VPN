@@ -53,6 +53,18 @@ jobs:
         run: bandit -r . -c pyproject.toml -q
       - name: Dependency audit (pip-audit, runtime + dev)
         run: pip-audit -r requirements-dev.txt
+      - name: Import filtered subscriptions with Hiddify Core 5.5.5
+        shell: bash
+        run: |
+          set -euo pipefail
+          work_dir="$(mktemp -d)"
+          archive=hiddify-core-linux-amd64.tar.gz
+          curl --fail --silent --show-error --location --retry 3 --max-time 120 \
+            "https://github.com/hiddify/hiddify-core/releases/download/v5.5.5/$archive" \
+            -o "$work_dir/$archive"
+          (cd "$work_dir" && echo "74dffa46e97c80aabfde35097be53dda922ba75118b944f3b31dfaa917780c79  $archive" | sha256sum -c -)
+          tar -xzf "$work_dir/$archive" -C "$work_dir" hiddify-core-linux-amd64/hiddify-core
+          PATH="$work_dir/hiddify-core-linux-amd64:$PATH" pytest -q tests/interop/hiddify_import.py
       - name: Pytest
         run: pytest -q
       - name: Tests on SQLCipher

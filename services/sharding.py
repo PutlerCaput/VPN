@@ -627,6 +627,7 @@ def filter_subscription(
             return None
         kept = removed = 0
         survivors = []
+        dialects: set[str] = set()
         for config in configs:
             counts = _filter_config(config, plan, segment, fingerprint)
             if counts is None:
@@ -636,10 +637,18 @@ def filter_subscription(
             removed += r
             if k or not r:
                 survivors.append(config)
+                dialects.update(
+                    "xray" if "protocol" in outbound else "singbox"
+                    for outbound in config["outbounds"]
+                )
+        if len(dialects) > 1:
+            return None
         result: Any = (
             survivors if isinstance(data, list) else survivors[0] if survivors else {}
         )
-        kind = "xray" if isinstance(data, list) else "singbox"
+        # Both clients can receive an object or an array. The outbound keys
+        # identify the dialect. An empty result is never served by the API.
+        kind = next(iter(dialects), "xray" if isinstance(data, list) else "singbox")
         return Filtered(json.dumps(result, ensure_ascii=False), kept, removed, kind)
     if "://" in text:
         lines, removed = _filter_lines(text, plan, segment, fingerprint)

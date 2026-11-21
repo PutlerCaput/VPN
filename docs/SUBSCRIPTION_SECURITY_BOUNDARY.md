@@ -22,6 +22,26 @@ profiles may receive an error until a tested supported route exists. Verify
 Hiddify/v2rayNG/NekoBox behavior on the exact supported client versions before
 rollout; do not imply that a server-side test proves client profile retention.
 
+The API uses the requesting app's default User-Agent to negotiate the first
+response. The sharding rules apply to every response, including the second
+request for plain or base64 links. If the panel sends JSON on that second
+request, the API returns 502. A filtered link list with zero entries returns
+503. A custom User-Agent may change format negotiation.
+
+| Client version checked | Behavior relevant to the subscription response |
+|---|---|
+| [v2rayNG 2.3.15](https://github.com/2dust/v2rayNG/blob/2.3.15/V2rayNG/app/src/main/java/com/v2ray/ang/handler/AngConfigManager.kt) | The importer tries base64 and plain links. Its custom JSON importer also requires `inbounds` and `routing`, which our bounded JSON excludes. For this client the API retries JSON as links. |
+| [NekoBox for Android 1.4.2](https://github.com/MatsuriDayo/NekoBoxForAndroid/blob/1.4.2/app/src/main/java/io/nekohasekai/sagernet/group/RawUpdater.kt) | The JSON importer selects proxies by sing-box `type`. Xray's `protocol` can produce an empty group. The API preserves supported sing-box JSON and retries Xray as links. |
+| [Hiddify 5.5.5](https://github.com/hiddify/hiddify-app/blob/v5.5.5/dependencies.properties) | CI feeds native sing-box and Xray profiles and plain/base64 fallback links from the test API to the released Hiddify Core parser. It checks both authorized VLESS REALITY destinations and connection settings after import. An array of whole sing-box configs triggers link fallback because the core expects individual outbounds in such an array. [Core import rules](https://github.com/hiddify/hiddify-core/blob/v5.5.5/v2/config/parser.go) |
+
+The Android refresh workflow installs the two checksum-pinned Android APKs on a
+temporary API 30 emulator. It imports a local test subscription with two routes,
+returns 502 and 503 on successive updates, reopens each app to count the saved
+profiles, and finally supplies one route on a successful update. The device uses
+loopback with Wi-Fi and mobile data disabled. The Hiddify import test runs its
+released Linux core. Encrypted traffic, automatic failover and behavior on
+other app or OS versions require separate measurements.
+
 Known addresses of other segments are also rejected in surviving supported text
 fields such as SNI/tags. Public TLS cover names are not themselves entry routes.
 Unknown extensions need a schema, explicit destination handling and tests before
