@@ -34,10 +34,13 @@ request, the API returns 502. A filtered link list with zero entries returns
 | [NekoBox for Android 1.4.2](https://github.com/MatsuriDayo/NekoBoxForAndroid/blob/1.4.2/app/src/main/java/io/nekohasekai/sagernet/group/RawUpdater.kt) | The JSON importer selects proxies by sing-box `type`. Xray's `protocol` can produce an empty group. The API preserves supported sing-box JSON and retries Xray as links. |
 | [Hiddify 5.5.5](https://github.com/hiddify/hiddify-app/blob/v5.5.5/dependencies.properties) | CI feeds native sing-box and Xray profiles and plain/base64 fallback links from the test API to the released Hiddify Core parser. It checks both authorized VLESS REALITY destinations and connection settings after import. An array of whole sing-box configs triggers link fallback because the core expects individual outbounds in such an array. [Core import rules](https://github.com/hiddify/hiddify-core/blob/v5.5.5/v2/config/parser.go) |
 
-The Android findings above come from the released client source and server
-regressions. The Hiddify test uses the released Linux core and synthetic routes.
-A refresh on an installed mobile app and a traffic failover exercise need
-separate measurements.
+The Android refresh workflow installs the two checksum-pinned Android APKs on a
+temporary API 30 emulator. It imports a local test subscription with two routes,
+returns 502 and 503 on successive updates, and finally supplies one route on a
+successful update to check that the visible count changes. The device uses
+loopback with Wi-Fi and mobile data disabled. The Hiddify import test runs its
+released Linux core. Encrypted traffic, automatic failover and behavior on
+other app or OS versions require separate measurements.
 
 Known addresses of other segments are also rejected in surviving supported text
 fields such as SNI/tags. Public TLS cover names are not themselves entry routes.
