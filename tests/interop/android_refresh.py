@@ -74,11 +74,18 @@ def tap_node(node: Node) -> None:
 
 def tap(attribute: str, value: str) -> None:
     def find_button(nodes: list[Node]) -> bool:
-        for node in nodes:
-            if node.get(attribute, "").casefold() == value.casefold():
-                tap_node(node)
-                return True
-        return False
+        matches = [
+            node
+            for node in nodes
+            if node.get(attribute, "").casefold() == value.casefold()
+        ]
+        if not matches:
+            return False
+        # The top bar and profile rows can both have a "More options" button.
+        tap_node(
+            min(matches, key=lambda node: int(re.findall(r"\d+", node["bounds"])[1]))
+        )
+        return True
 
     wait_ui(find_button, value)
 
@@ -114,6 +121,9 @@ def refresh(app: str) -> None:
         tap("resource-id", f"{app}:id/group_update")
         tap("text", "Yes")
     else:
+        # The menu refreshes the selected group. A cold launch can select
+        # the empty Default group even while the subscription tab has entries.
+        tap("text", "import sub")
         tap("content-desc", "More options")
         tap("text", "Update subscription")
 
@@ -156,11 +166,14 @@ async def test_installed_app_refresh(services: Any, app: str) -> None:
     )
     services.hiddify.fetch_subscription = upstream
     expected_status = 200
+    observed_statuses: list[int] = []
     received = asyncio.Event()
 
     async def record(request: web.Request, response: web.StreamResponse) -> None:
-        if request.path == f"/sub/{NODE}/" and response.status == expected_status:
-            received.set()
+        if request.path == f"/sub/{NODE}/":
+            observed_statuses.append(response.status)
+            if response.status == expected_status:
+                received.set()
 
     client = await _client(services)
     client.server.app.on_response_prepare.append(record)
@@ -184,9 +197,15 @@ async def test_installed_app_refresh(services: Any, app: str) -> None:
             ):
                 expected_status = status
                 received.clear()
+                observed_statuses.clear()
                 upstream.bodies[LINK_AGENT] = payload
                 await asyncio.to_thread(refresh, app)
-                await asyncio.wait_for(received.wait(), timeout=45)
+                try:
+                    await asyncio.wait_for(received.wait(), timeout=45)
+                except TimeoutError:
+                    pytest.fail(
+                        f"Expected refresh HTTP {status}, got {observed_statuses}"
+                    )
                 if app == NEKOBOX and status == 200:
                     await asyncio.to_thread(tap, "text", "OK")
                 await asyncio.to_thread(wait_count, app, count)
