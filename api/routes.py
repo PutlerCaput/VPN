@@ -398,6 +398,18 @@ def _sub_not_found() -> web.Response:
     return web.Response(status=404, text="not found")
 
 
+def _sub_accepts_format(agent: str, kind: str) -> bool:
+    if kind in ("links", "base64"):
+        return True
+    product = agent.partition("/")[0].strip().casefold()
+    if product == "v2rayng":
+        # Its custom JSON importer requires inbounds and routing, which the
+        # bounded subscription schema deliberately excludes.
+        return False
+    # NekoBox reads sing-box outbound types. Xray's protocol key is ignored.
+    return product != "nekobox" or kind == "singbox"
+
+
 def _node_uuid(value: str) -> str | None:
     try:
         parsed = uuid.UUID(value)
@@ -450,26 +462,22 @@ async def sharded_subscription(request: web.Request) -> web.Response:
         derive_key(settings.jwt_secret.get_secret_value()),
     )
     agent = request.headers.get("User-Agent", "")
+    filtered = None
     try:
-        status, body, headers = await services.hiddify.fetch_subscription(node, agent)
-        filtered = (
-            filter_subscription(
+        for panel_agent in dict.fromkeys((agent, LINKS_USER_AGENT)):
+            status, body, headers = await services.hiddify.fetch_subscription(
+                node, panel_agent
+            )
+            if status != 200:
+                break
+            candidate = filter_subscription(
                 body, plan, segment, fingerprint=settings.subscription_fingerprint
             )
-            if status == 200
-            else None
-        )
-        if status == 200 and filtered is None:
-            status, body, headers = await services.hiddify.fetch_subscription(
-                node, LINKS_USER_AGENT
-            )
-            filtered = (
-                filter_subscription(
-                    body, plan, segment, fingerprint=settings.subscription_fingerprint
-                )
-                if status == 200
-                else None
-            )
+            if candidate is not None and _sub_accepts_format(
+                panel_agent, candidate.kind
+            ):
+                filtered = candidate
+                break
     except HiddifyError:
         logger.warning("sub_upstream_error")
         return json_error(502, "upstream_unavailable")
@@ -479,7 +487,7 @@ async def sharded_subscription(request: web.Request) -> web.Response:
         logger.warning("sub_unreadable", extra={"upstream_status": status})
         return json_error(502, "upstream_unavailable")
     if filtered.kept == 0:
-        # An empty profile would wipe the app's working one: an error keeps it.
+        # A successful empty response can replace the client's installed profiles.
         logger.warning("sub_segment_empty", extra={"segment": segment})
         return json_error(503, "no_entries", {"Retry-After": "600"})
     lowered = {k.lower(): v for k, v in headers.items()}
