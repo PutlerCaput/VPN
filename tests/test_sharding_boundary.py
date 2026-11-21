@@ -248,7 +248,9 @@ def test_expanded_ipv6_sni_cannot_disclose_other_segment() -> None:
         ("NekoBox/Android/1.4.2", "xray", False, True),
         ("NekoBox/Android/1.4.2", "singbox", False, False),
         ("NekoBox/Android/1.4.2", "singbox", True, False),
-        ("Hiddify/5.5.5", "xray", False, False),
+        ("HiddifyNext/5.5.5", "xray", False, False),
+        ("HiddifyNext/5.5.5", "singbox", True, True),
+        ("HiddifyNext/5.5.5", "singbox", False, False),
     ],
 )
 async def test_client_receives_an_importable_format(

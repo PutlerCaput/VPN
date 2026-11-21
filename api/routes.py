@@ -57,6 +57,7 @@ from services.provisioning import ProvisioningError, safe_cached_link
 from services.security import sanitize_username
 from services.sharding import (
     FanoutGuard,
+    Filtered,
     derive_key,
     filter_subscription,
     plan_from_settings,
@@ -398,16 +399,21 @@ def _sub_not_found() -> web.Response:
     return web.Response(status=404, text="not found")
 
 
-def _sub_accepts_format(agent: str, kind: str) -> bool:
-    if kind in ("links", "base64"):
+def _sub_accepts_format(agent: str, profile: Filtered) -> bool:
+    if profile.kind in ("links", "base64"):
         return True
     product = agent.partition("/")[0].strip().casefold()
-    if product == "v2rayng":
-        # Its custom JSON importer requires inbounds and routing, which the
-        # bounded subscription schema deliberately excludes.
+    if agent == LINKS_USER_AGENT or product == "v2rayng":
+        # v2rayNG's custom JSON importer requires inbounds and routing.
         return False
-    # NekoBox reads sing-box outbound types. Xray's protocol key is ignored.
-    return product != "nekobox" or kind == "singbox"
+    if product == "nekobox":
+        # Its JSON importer skips Xray outbounds without a sing-box type.
+        return profile.kind == "singbox"
+    if product == "hiddifynext" and profile.kind == "singbox":
+        # A top-level array here contains whole configs. Hiddify expects an
+        # array of individual sing-box outbounds or a single config object.
+        return not profile.body.startswith("[")
+    return True
 
 
 def _node_uuid(value: str) -> str | None:
@@ -473,9 +479,7 @@ async def sharded_subscription(request: web.Request) -> web.Response:
             candidate = filter_subscription(
                 body, plan, segment, fingerprint=settings.subscription_fingerprint
             )
-            if candidate is not None and _sub_accepts_format(
-                panel_agent, candidate.kind
-            ):
+            if candidate is not None and _sub_accepts_format(panel_agent, candidate):
                 filtered = candidate
                 break
     except HiddifyError:

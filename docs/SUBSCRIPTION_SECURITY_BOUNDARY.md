@@ -32,7 +32,7 @@ request, the API returns 502. A filtered link list with zero entries returns
 |---|---|
 | [v2rayNG 2.3.15](https://github.com/2dust/v2rayNG/blob/2.3.15/V2rayNG/app/src/main/java/com/v2ray/ang/handler/AngConfigManager.kt) | The importer tries base64 and plain links. Its custom JSON importer also requires `inbounds` and `routing`, which our bounded JSON excludes. For this client the API retries JSON as links. |
 | [NekoBox for Android 1.4.2](https://github.com/MatsuriDayo/NekoBoxForAndroid/blob/1.4.2/app/src/main/java/io/nekohasekai/sagernet/group/RawUpdater.kt) | The JSON importer selects proxies by sing-box `type`. Xray's `protocol` can produce an empty group. The API preserves supported sing-box JSON and retries Xray as links. |
-| [Hiddify 5.5.5](https://github.com/hiddify/hiddify-app/blob/v5.5.5/dependencies.properties) | CI feeds plain and base64 responses from the test API to this release's Hiddify Core `parse` command. It checks the two authorized VLESS REALITY destinations and their connection settings after import. |
+| [Hiddify 5.5.5](https://github.com/hiddify/hiddify-app/blob/v5.5.5/dependencies.properties) | CI feeds native sing-box and Xray profiles and plain/base64 fallback links from the test API to the released Hiddify Core parser. It checks both authorized VLESS REALITY destinations and connection settings after import. An array of whole sing-box configs triggers link fallback because the core expects individual outbounds in such an array. [Core import rules](https://github.com/hiddify/hiddify-core/blob/v5.5.5/v2/config/parser.go) |
 
 The Android findings above come from the released client source and server
 regressions. The Hiddify test uses the released Linux core and synthetic routes.
