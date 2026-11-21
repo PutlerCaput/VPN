@@ -36,8 +36,8 @@ request, the API returns 502. A filtered link list with zero entries returns
 
 The Android refresh workflow installs the two checksum-pinned Android APKs on a
 temporary API 30 emulator. It imports a local test subscription with two routes,
-returns 502 and 503 on successive updates, and finally supplies one route on a
-successful update to check that the visible count changes. The device uses
+returns 502 and 503 on successive updates, reopens each app to count the saved
+profiles, and finally supplies one route on a successful update. The device uses
 loopback with Wi-Fi and mobile data disabled. The Hiddify import test runs its
 released Linux core. Encrypted traffic, automatic failover and behavior on
 other app or OS versions require separate measurements.
