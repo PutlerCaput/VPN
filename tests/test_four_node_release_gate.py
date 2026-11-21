@@ -80,3 +80,20 @@ def test_gate_refuses_unversioned_and_naive_evidence() -> None:
     ok, missing = evaluate(evidence, now=NOW)
     assert not ok
     assert "checked_at" in missing
+
+
+def test_old_evidence_cannot_skip_recovery_and_isolation_gates() -> None:
+    evidence = approved()
+    checks = evidence["global"]
+    assert isinstance(checks, dict)
+    required = (
+        "recovery_mode_and_source_verified",
+        "single_writer_and_payment_cutover_verified",
+        "post_write_rollback_tested",
+        "raw_subscription_bypass_closed",
+    )
+    for field in required:
+        checks.pop(field)
+    ok, missing = evaluate(evidence, now=NOW)
+    assert not ok
+    assert set(missing) == {f"global.{field}" for field in required}

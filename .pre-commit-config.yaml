@@ -22,10 +22,11 @@ repos:
   - repo: local
     hooks:
       - id: secret-scan
-        name: secret scan (password=/token=/secret=/key= literals)
+        name: secret and private artifact scan
         entry: ./scripts/secret_scan.sh
         language: script
-        types: [text]
+        # Include binary databases/archives in the path policy too.
+        types: [file]
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
     hooks:
