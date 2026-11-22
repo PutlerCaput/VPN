@@ -323,7 +323,7 @@ def test_restore_opens_the_archive_into_a_new_folder_and_checks_it(
         "BOT-DATABASE-CONTENT"
     )
     assert SECRET in (dest / "bot" / ".env").read_text(encoding="utf-8")
-    assert "Nothing here" in result.stdout  # it only tells what to copy
+    assert "isolated environment" in result.stdout
 
     again = run("restore_backup.sh", env, str(archive), env["AGE_IDENTITY"], str(dest))
     assert again.returncode == 1
@@ -412,6 +412,49 @@ def test_restore_refuses_the_wrong_key_and_a_damaged_archive(
     )
     assert broken.returncode == 1
     assert not (tmp_path / "b").exists()
+
+
+@needs_age
+@pytest.mark.parametrize("kind", ["traversal", "symlink", "unlisted", "duplicate"])
+def test_restore_rejects_unsafe_or_unverified_archive(
+    env: dict[str, str], tmp_path: Path, kind: str
+) -> None:
+    assert run("backup_all.sh", env).returncode == 0
+    (original,) = archives(env)
+    packed = BytesIO()
+    with (
+        open_archive(env, original) as source,
+        tarfile.open(fileobj=packed, mode="w:gz") as target,
+    ):
+        for member in source:
+            payload = source.extractfile(member) if member.isfile() else None
+            target.addfile(member, payload)
+        name = {
+            "traversal": "./bot/../../escaped",
+            "symlink": "./bot/dangling",
+            "unlisted": "./bot/unlisted",
+            "duplicate": "./bot/bot.db",
+        }[kind]
+        member = tarfile.TarInfo(name)
+        if kind == "symlink":
+            member.type = tarfile.SYMTYPE
+            member.linkname = "../../escaped"
+        member.size = 0 if kind == "symlink" else 1
+        target.addfile(member, BytesIO(b"x") if member.size else None)
+
+    archive = tmp_path / "unsafe.age"
+    subprocess.run(  # noqa: S603
+        ["age", "-r", env["AGE_RECIPIENT"], "-o", str(archive)],  # noqa: S607
+        input=packed.getvalue(),
+        check=True,
+    )
+    dest = tmp_path / "restored"
+    result = run("restore_backup.sh", env, str(archive), env["AGE_IDENTITY"], str(dest))
+    assert result.returncode == 1
+    assert "RESTORE_FAILED" in result.stderr
+    assert "RESTORE_OK" not in result.stdout
+    assert not dest.exists()
+    assert not (tmp_path / "escaped").exists()
 
 
 # ------------------------------------------------------------------- the installer
