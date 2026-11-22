@@ -58,6 +58,6 @@ def test_probe_rejects_invalid_endpoint(
 ) -> None:
     run = Mock()
     monkeypatch.setattr(probe.subprocess, "run", run)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="egress endpoint must be an HTTPS URL"):
         probe.check_egress(url, 1087, ADDR)
     run.assert_not_called()

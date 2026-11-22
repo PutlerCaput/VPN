@@ -27,8 +27,8 @@ def check_egress(url: str, port: int, expected: str) -> bool:
     address = ipaddress.ip_address(expected)
     try:
         result = subprocess.run(  # noqa: S603  # nosec B603
-            [
-                "curl",  # noqa: S607
+            [  # noqa: S607
+                "curl",
                 "--disable",
                 "--silent",
                 "--fail",

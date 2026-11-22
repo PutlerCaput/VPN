@@ -460,7 +460,8 @@ async def test_revoke_keeps_confirmed_uuid_when_config_lookup_fails(
 
     after = await db.get_user(100103)
     new = after["node_username"]
-    assert new != old and new in hiddify.users
+    assert new != old
+    assert new in hiddify.users
     assert after["config_link"] == ""
     assert await db.get_user_by_node(old) is None
     monkeypatch.setattr(hiddify, "get_user", get_user)
