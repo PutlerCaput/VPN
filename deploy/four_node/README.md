@@ -107,9 +107,12 @@ switching unless the chosen client is verified to support auto-failover.
 
 The repository CI tests mapping of RU->NL, independence of keys, private
 file permissions, inventory validation and output overwrite protection.
-It is an **offline unit test**, not an end-to-end VPN test. A separate
-workflow can test syntax with a real Xray image; neither constitutes
-successful production deployment.
+The four-node workflow also launches a private Docker network with two
+HAProxy relays, two pinned Xray exits, an Xray client and a local TLS target.
+The test checks HTTP egress through real VLESS REALITY sessions through each paired route,
+rejects the wrong key and an unissued UUID, and stops NL-1 to verify the
+other pair still carries traffic. The test uses synthetic data in CI.
+The public VPS topology and real client failover require acceptance tests.
 
 ## Integration with the existing bot
 
