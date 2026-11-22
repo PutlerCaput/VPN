@@ -433,6 +433,40 @@ async def test_revoke_subscription_rotates_uuid(
     assert after["expires_at"] == before["expires_at"]
 
 
+async def test_revoke_keeps_confirmed_uuid_when_config_lookup_fails(
+    db: Database,
+    provisioning: Any,
+    hiddify: FakeHiddify,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _register(db, 100103)
+    await provisioning.accept_offer_and_start_trial(100103)
+    before = await db.get_user(100103)
+    old = before["node_username"]
+    rotate = hiddify.revoke_subscription
+    get_user = hiddify.get_user
+
+    async def rotate_without_link(username: str) -> dict[str, Any]:
+        data = await rotate(username)
+        return {"uuid": data["uuid"]}
+
+    async def unavailable(username: str) -> dict[str, Any]:
+        raise HiddifyError("unavailable")
+
+    monkeypatch.setattr(hiddify, "revoke_subscription", rotate_without_link)
+    monkeypatch.setattr(hiddify, "get_user", unavailable)
+    with pytest.raises(HiddifyError):
+        await provisioning.revoke_link(100103)
+
+    after = await db.get_user(100103)
+    new = after["node_username"]
+    assert new != old and new in hiddify.users
+    assert after["config_link"] == ""
+    assert await db.get_user_by_node(old) is None
+    monkeypatch.setattr(hiddify, "get_user", get_user)
+    assert new in await provisioning.fresh_config(100103)
+
+
 async def test_payment_replaces_a_marzban_era_node_username(
     db: Database, provisioning: Any
 ) -> None:

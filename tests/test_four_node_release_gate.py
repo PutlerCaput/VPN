@@ -73,8 +73,9 @@ def test_gate_refuses_missing_nodes() -> None:
 
 def test_gate_refuses_unversioned_and_naive_evidence() -> None:
     evidence = approved()
-    evidence["schema"] = 999
-    assert evaluate(evidence, now=NOW) == (False, ["schema"])
+    for old_schema in (1, 999):
+        evidence["schema"] = old_schema
+        assert evaluate(evidence, now=NOW) == (False, ["schema"])
     evidence = approved()
     evidence["checked_at"] = "2026-11-20T14:00:00"
     ok, missing = evaluate(evidence, now=NOW)
@@ -91,6 +92,9 @@ def test_old_evidence_cannot_skip_recovery_and_isolation_gates() -> None:
         "single_writer_and_payment_cutover_verified",
         "post_write_rollback_tested",
         "raw_subscription_bypass_closed",
+        "aggregate_quota_on_both_exits_verified",
+        "revocation_during_node_partition_verified",
+        "independent_egress_alerts_verified",
     )
     for field in required:
         checks.pop(field)

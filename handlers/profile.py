@@ -151,7 +151,7 @@ async def cb_revoke_ask(callback: CallbackQuery) -> None:
     await callback.answer()
     await callback.message.answer(
         "🔄 <b>Сбросить ссылку подключения?</b>\n\n"
-        "Бот выдаст новую ссылку, а все устройства со старой отключатся. "
+        "Бот выдаст новую ссылку. Серверы отключат старый доступ после синхронизации. "
         "Затем импортируйте новую ссылку на своих устройствах (не больше, "
         "чем разрешает тариф).",
         reply_markup=revoke_confirm_kb(),
@@ -190,11 +190,15 @@ async def cb_revoke(callback: CallbackQuery, services: Services) -> None:
     except HiddifyError:
         logger.warning("revoke_link_failed", extra={"telegram_id": owner_id})
         await message.answer(
-            "⚠️ Узел сейчас недоступен, ссылка не изменена. Попробуйте позже."
+            "⚠️ Не удалось получить новую ссылку. Откройте раздел подключения "
+            "и обновите конфигурацию через несколько минут."
         )
         return
     user = await services.db.get_user(owner_id)
-    await message.answer("✅ Старая ссылка отключена. Новая конфигурация:")
+    await message.answer(
+        "✅ Новая конфигурация готова. Старый доступ отключается после "
+        "синхронизации серверов."
+    )
     await send_config(
         message,
         link,

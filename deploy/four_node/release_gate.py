@@ -13,12 +13,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-SCHEMA = 1
+SCHEMA = 2
 MAX_AGE = timedelta(days=7)
 FUTURE_TOLERANCE = timedelta(minutes=5)
 
 GLOBAL_CHECKS = (
     "per_user_credentials_and_revocation_verified",
+    "aggregate_quota_on_both_exits_verified",
+    "revocation_during_node_partition_verified",
+    "independent_egress_alerts_verified",
     "subscription_routes_verified",
     "client_fallback_verified",
     "billing_webhooks_and_reconciliation_verified",
@@ -77,11 +80,11 @@ def _checked_at(value: object) -> datetime | None:
         return None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
+        if parsed.tzinfo is not None:
+            return parsed.astimezone(UTC)
+    except (OverflowError, ValueError):
         return None
-    if parsed.tzinfo is None:
-        return None
-    return parsed.astimezone(UTC)
+    return None
 
 
 def evaluate(

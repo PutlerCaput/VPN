@@ -4,17 +4,17 @@
 
 Use the current [recovery/cutover runbook](FOUR_NODE_MIGRATION_2026-11-20.md)
 and [security boundaries](SUBSCRIPTION_SECURITY_BOUNDARY.md). The release gate
-also requires verified recovery mode/source, single-writer payment cutover,
-post-write rollback and closure of the raw subscription bypass. Old evidence
-without these checks is BLOCKED; do not copy old true values without testing.
+requires verified recovery mode/source, single-writer payment cutover,
+post-write rollback, raw subscription isolation, and measured two-exit quota,
+revocation and monitoring behavior. Use a fresh schema-2 evidence template.
 
 ## Seven workstreams: code versus deployment
 
 | Workstream | Available or prepared code | What still requires operator access |
 |---|---|---|
-| Bot/subscriptions | Per-user Hiddify UUIDs, filtered subscriptions; missing sharded subscriptions now fail closed | Confirm each customer is provisioned, disabled and revoked on **both** NL exits |
+| Bot/subscriptions | Per-user Hiddify UUIDs, filtered subscriptions, UUID recovery after a lost panel response | Confirm account lifecycle and aggregate quota enforcement on both NL exits |
 | Failover | Four distinct staging routes, tested sharding | Client-specific automatic failover on several real devices; HAProxy uses fixed backends |
-| Monitoring | Panel-only health now labelled honestly in bot/API/PWA/TMA; existing mobile Termux probe | Actual REALITY handshake, egress, DNS leak and ISP-specific probe checks |
+| Monitoring | Panel health in the apps and a separate Xray SOCKS egress probe | Deploy probes from independent networks, verify DNS behavior and delivery of alert and recovery |
 | Security | Secret scanner, redacted diagnostics, protected bundle | Verify all SSH host keys, rotate exposed credentials, review firewalls |
 | Backup | Encrypted scripts; backup status no longer claims offsite dispatch when disabled | Test SQLCipher + Hiddify restore from offsite copy, keep decryption key separately |
 | Payments/website | Existing YooKassa/Stars/USDT code, PWA/TMA and their tests | Verify real provider accounts, webhook signatures, offer, tariff quotas and reconciliation without blindly creating payments |
@@ -32,6 +32,47 @@ The current bot provisions its own per-customer Hiddify account; it does
 servers. Do not put staging links into live subscriptions or payment
 receipts. Design and prove a single authoritative customer registry with
 per-user provisioning/revocation on both NL exits before going live.
+
+## Candidate control plane for staging
+
+Use Hiddify Manager on NL-1 as the parent and NL-2 as its child, running
+the same reviewed release on both. Keep the bot pointed at only the parent
+admin API. This reuses the existing per-user UUID, subscription, expiry and
+billing flows. Hiddify documents user sync and aggregate traffic reporting.
+Its nodes can serve their last known state while disconnected from the parent,
+so an accepted parent mutation does not establish data-plane revocation.
+The staging bundle's standalone Xray configs remain useful for route testing.
+For the managed topology the panel owns the Xray configuration and keys.
+
+- Use a TLS-protected management hostname and restrict panel administration
+  separately from the public subscription endpoint. Give the bot its own
+  admin credential, with only the permissions already required for provisioning.
+  Verify both nodes can authenticate to each other and that raw subscriptions
+  cannot bypass the configured segment policy.
+- Register each exit's own direct and paired relay addresses for the
+  VLESS REALITY profiles. Check the addresses, ports, flow, SNI and key
+  pairing in the actual subscription from the pinned panel version. Keep each
+  RU HAProxy backend fixed to the corresponding NL listener. Check ownership
+  of port 443 for each service and any additional ports required by TLS
+  validation, panel synchronization or the bot before writing configs.
+- With two synthetic users and isolated bot data, exercise trial/start, a test
+  renewal, usage through each exit, aggregate quota crossing, expiry, suspend,
+  resume and UUID rotation. Each user's profiles must connect only with that
+  user's active credential. After rotation, test the old and new credential
+  in fresh connections and check already-open sessions on both exits. Confirm
+  the old public subscription URL no longer returns credentials.
+- Repeat disable and rotation with the child isolated from its parent.
+  Measure how long old credentials and sessions can keep forwarding and
+  test the operator's procedure to remove the stale exit from service.
+  Treat unbounded stale access or unbounded quota enforcement lag as a
+  blocker until the owner has an enforceable policy and repeatable evidence.
+- Back up the parent user/usage database and the configuration and key material
+  needed to recover each node, as well as the bot database. Rehearse restoring
+  all components in an isolated network, with outbound Telegram/payment
+  integrations disabled, before following the single-writer cutover runbook.
+
+[Hiddify multi-node guide](https://hiddify.com/manager/configuration-and-advanced-settings/Multi-server-with-nodes-on-HiddifyManager/) ·
+[Hiddify REALITY guide](https://hiddify.com/manager/configuration-and-advanced-settings/How-to-use-Reality-on-Hiddify/)
 
 Sharding one RU+NL pair to each segment isolates entry hosts but leaves
 the subscriber without the other RU+NL backup pair. Showing all four routes
@@ -56,6 +97,23 @@ per-user Hiddify subscription actually has those entries; client auto-switch
 must be tested. Isolated-pairs produces strict entry segments, but a subscriber
 does **not** receive the other pair as fallback. Operator approval, per-user
 provisioning on both NL exits, and monitoring are still required.
+
+## Data-plane monitoring
+
+Configure four dedicated Xray client profiles on an independent probe host.
+Bind each profile to its own loopback-only SOCKS port and route to the VPN
+entry. Keep the profiles private and use synthetic credentials with no billing
+privileges or customer data. Use a controlled HTTPS endpoint whose body is the
+source IP it sees. The expected IP is the paired NL exit's observed egress.
+
+    python3 -m deploy.four_node.probe --route ru1 --socks-port 10871 --endpoint https://health.example.org/egress --expected-egress 192.0.2.10
+
+Schedule one probe per route and collect both emitted metrics. Alert on repeated
+failures, on a missing result and on a stale timestamp. Establish a separate
+probe from a Russian access network and verify the notification and recovery
+paths while deliberately interrupting a staging route. A successful probe
+demonstrates HTTPS egress via the selected SOCKS listener. Verify each
+listener's Xray outbound and test DNS and real client failover separately.
 
 ## Evidence and offline release gate
 
