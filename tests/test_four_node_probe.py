@@ -11,6 +11,7 @@ from deploy.four_node import probe
 
 URL = "https://health.example.org/egress"
 ADDR = "192.0.2.100"
+CURL = "/usr/bin/curl"
 
 
 @pytest.mark.parametrize(
@@ -27,10 +28,11 @@ def test_probe_uses_explicit_socks_and_checks_egress(
     monkeypatch: pytest.MonkeyPatch, reply: bytes, ok: bool
 ) -> None:
     run = Mock(return_value=subprocess.CompletedProcess([], 0, stdout=reply))
+    monkeypatch.setattr(probe.shutil, "which", lambda _name: CURL)
     monkeypatch.setattr(probe.subprocess, "run", run)
     assert probe.check_egress(URL, 1087, ADDR) is ok
     command = run.call_args.args[0]
-    assert command[:2] == ["curl", "--disable"]
+    assert command[:2] == [CURL, "--disable"]
     assert command[command.index("--noproxy") + 1] == ""
     assert command[command.index("--proxy") + 1] == "socks5h://127.0.0.1:1087"
     assert "--location" not in command

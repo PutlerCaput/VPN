@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import shutil
 import subprocess  # nosec B404
 import time
 from urllib.parse import urlsplit
@@ -25,10 +26,13 @@ def check_egress(url: str, port: int, expected: str) -> bool:
     if not 1 <= port <= 65535:
         raise ValueError("The local SOCKS port is out of range")
     address = ipaddress.ip_address(expected)
+    curl = shutil.which("curl")
+    if curl is None:
+        return False
     try:
         result = subprocess.run(  # noqa: S603  # nosec B603
-            [  # noqa: S607
-                "curl",
+            [
+                curl,
                 "--disable",
                 "--silent",
                 "--fail",
