@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 from deploy.four_node.generate import (
+    HAPROXY_IMAGE,
     XRAY_IMAGE,
     Credentials,
     fresh_credentials,
@@ -28,7 +29,6 @@ HOSTS = {
     "client": "172.30.239.41",
 }
 SNI = "cover.example.org"
-HAPROXY = "haproxy:3.2-alpine"
 PYTHON = "python:3.11-bookworm"
 
 FIXTURE = """
@@ -213,6 +213,24 @@ def scenario(directory: Path, xray_cli: str) -> None:
             config = xray_config(
                 {"server_name": SNI, "target": f"{HOSTS['fixture']}:443"}, creds
             )
+            # Xray blocks private egress by default. Permit only the fixture
+            # address and port in this internal test network.
+            config["outbounds"] = [
+                {
+                    "protocol": "freedom",
+                    "tag": "direct",
+                    "settings": {
+                        "finalRules": [
+                            {
+                                "action": "allow",
+                                "ip": [f"{HOSTS['fixture']}/32"],
+                                "port": "8080",
+                                "network": "tcp",
+                            }
+                        ]
+                    },
+                }
+            ]
             path.write_text(json.dumps(config), encoding="utf-8")
             start(
                 role,
@@ -228,7 +246,7 @@ def scenario(directory: Path, xray_cli: str) -> None:
             start(
                 role,
                 f"type=bind,src={path},dst=/usr/local/etc/haproxy/haproxy.cfg,readonly",
-                HAPROXY,
+                HAPROXY_IMAGE,
             )
         start(
             "client",
@@ -243,7 +261,10 @@ def scenario(directory: Path, xray_cli: str) -> None:
             exit_ip = HOSTS["nl1" if role.endswith("1") else "nl2"]
             wait_for_egress(fixture, 1080 + index, exit_ip)
             print(f"{role}: tunnel reaches paired egress", flush=True)
-        if get_egress(fixture, 1084) is not None or get_egress(fixture, 1085) is not None:
+        if (
+            get_egress(fixture, 1084) is not None
+            or get_egress(fixture, 1085) is not None
+        ):
             raise RuntimeError("Unexpected tunnel with the wrong key or unissued UUID")
 
         run("docker", "stop", "--time", "1", containers["nl1"])

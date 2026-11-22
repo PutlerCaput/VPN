@@ -62,7 +62,9 @@ four-node-generated/      # 0700; only outside the public repository
   nl2/config.json
   nl2/compose.yaml
   ru1/haproxy.cfg          # fixed NL-1 TCP forwarding
+  ru1/compose.yaml
   ru2/haproxy.cfg          # fixed NL-2 TCP forwarding
+  ru2/compose.yaml
   vless-links.txt          # sensitive client credentials; 0600
   README.txt
 ```
@@ -94,8 +96,24 @@ allow the Xray container to read it.
 Before starting RU relays: validate `haproxy -c -f haproxy.cfg`. Install
 each config to the correct VPS only after verifying its role. Enable
 only the required TCP 443 ingress, with NL egress firewall/rate limits
-reviewed separately. These configs do not include Docker/HAProxy install
-steps or automatic deployment commands.
+reviewed separately. Each RU folder includes a Compose service pinned to
+an official HAProxy image digest. On an authorized staging host, apply the
+single role's Compose project from its own private directory only after
+validating the config and preserving the previous revision for rollback.
+
+```sh
+# Example for the authorized RU-1 staging host, from its ru1 directory.
+docker compose -p cyberdefency-ru1 config --quiet
+docker compose -p cyberdefency-ru1 run --rm --no-deps haproxy \
+  haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
+docker compose -p cyberdefency-ru1 up -d
+```
+
+Verify the paired egress after applying. If that check fails, restore the
+previous private files and run the same Compose project again with
+`up -d --force-recreate`. On a first install, stop this project's service
+using `docker compose -p cyberdefency-ru1 stop haproxy`. Check that a host
+service or another Compose project does not already own TCP 443.
 
 After installation, verify separately for **each** of the four entries:
 REALITY authentication, external egress IP, DNS resolution/leaks,

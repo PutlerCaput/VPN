@@ -55,6 +55,11 @@ class FourNodeTests(unittest.TestCase):
             self.assertNotIn("4.2.2.2:443", (output / "ru1/haproxy.cfg").read_text())
             self.assertIn("4.2.2.2:443", (output / "ru2/haproxy.cfg").read_text())
             self.assertNotIn("9.9.9.9:443", (output / "ru2/haproxy.cfg").read_text())
+            for relay in ("ru1", "ru2"):
+                compose = (output / relay / "compose.yaml").read_text()
+                self.assertIn(f"image: {generate.HAPROXY_IMAGE}", compose)
+                self.assertIn("source: ./haproxy.cfg", compose)
+                self.assertIn("create_host_path: false", compose)
             links = (output / "vless-links.txt").read_text().splitlines()
             self.assertEqual(len(links), 4)
             self.assertIn("pbk=" + NL1.public, links[0])

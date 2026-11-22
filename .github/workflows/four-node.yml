@@ -57,14 +57,19 @@ jobs:
               --mount "type=bind,src=$RUNNER_TEMP/four-vps-test/bundle/$node/config.json,dst=/etc/xray/config.json,readonly" \
               "$IMAGE" run -test -c /etc/xray/config.json
           done
-      - name: Validate both HAProxy configs
+      - name: Validate Compose bundles and HAProxy configs
         shell: bash
         run: |
           set -euo pipefail
+          for node in ru1 ru2 nl1 nl2; do
+            docker compose -f "$RUNNER_TEMP/four-vps-test/bundle/$node/compose.yaml" config -q
+          done
           for node in ru1 ru2; do
+            compose="$RUNNER_TEMP/four-vps-test/bundle/$node/compose.yaml"
+            image="$(docker compose -f "$compose" config --images)"
             docker run --rm --user 0:0 \
               --mount "type=bind,src=$RUNNER_TEMP/four-vps-test/bundle/$node/haproxy.cfg,dst=/usr/local/etc/haproxy/haproxy.cfg,readonly" \
-              haproxy:3.2-alpine haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
+              "$image" haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
           done
       - name: Verify actual tunnels through a private Docker network
         shell: bash
