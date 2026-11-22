@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess  # nosec B404
+import sys
 import tempfile
 import time
 import uuid
@@ -116,8 +117,11 @@ def client_config(cases: list[tuple[str, Credentials]]) -> dict[str, object]:
     }
 
 
-def get_egress(port: int) -> str | None:
+def get_egress(client_host: str, port: int) -> str | None:
     result = run(
+        "docker",
+        "exec",
+        client_host,
         "curl",
         "--disable",
         "--silent",
@@ -134,9 +138,9 @@ def get_egress(port: int) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def wait_for_egress(port: int, exit_ip: str) -> None:
+def wait_for_egress(client_host: str, port: int, exit_ip: str) -> None:
     for _ in range(15):
-        observed = get_egress(port)
+        observed = get_egress(client_host, port)
         if observed == exit_ip:
             return
         if observed is not None:
@@ -181,6 +185,8 @@ def scenario(directory: Path, xray_cli: str) -> None:
             "-d",
             "--name",
             name,
+            "--user",
+            "0:0",
             "--network",
             network,
             "--ip",
@@ -232,18 +238,24 @@ def scenario(directory: Path, xray_cli: str) -> None:
             "-c",
             "/etc/xray/config.json",
         )
+        fixture = containers["fixture"]
         for index, (role, _) in enumerate(pairing):
             exit_ip = HOSTS["nl1" if role.endswith("1") else "nl2"]
-            wait_for_egress(1080 + index, exit_ip)
+            wait_for_egress(fixture, 1080 + index, exit_ip)
             print(f"{role}: tunnel reaches paired egress", flush=True)
-        if get_egress(1084) is not None or get_egress(1085) is not None:
+        if get_egress(fixture, 1084) is not None or get_egress(fixture, 1085) is not None:
             raise RuntimeError("Unexpected tunnel with the wrong key or unissued UUID")
 
         run("docker", "stop", "--time", "1", containers["nl1"])
-        if get_egress(1080) is not None:
+        if get_egress(fixture, 1080) is not None:
             raise RuntimeError("RU-1 still forwarded after its fixed exit stopped")
-        wait_for_egress(1081, HOSTS["nl2"])
+        wait_for_egress(fixture, 1081, HOSTS["nl2"])
         print("RU-2 remains available with NL-1 stopped", flush=True)
+    except (RuntimeError, subprocess.SubprocessError):
+        for role, container in containers.items():
+            logs = run("docker", "logs", "--tail", "12", container, check=False)
+            print(f"{role}: {logs.stdout}{logs.stderr}", file=sys.stderr)
+        raise
     finally:
         if containers:
             run("docker", "rm", "-f", *containers.values(), check=False)
@@ -251,7 +263,5 @@ def scenario(directory: Path, xray_cli: str) -> None:
 
 
 if __name__ == "__main__":
-    import sys
-
     with tempfile.TemporaryDirectory(prefix="four-node-ci-") as temp:
         scenario(Path(temp), sys.argv[1])
