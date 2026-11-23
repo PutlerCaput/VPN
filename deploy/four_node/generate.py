@@ -23,6 +23,10 @@ XRAY_IMAGE = (
     "ghcr.io/xtls/xray-core:26.11.9@"
     "sha256:d42420dca2014cbd06e24daad8a039b455b7d9e905cda1cf871254cfffda2149"
 )
+HAPROXY_IMAGE = (
+    "haproxy:3.2-alpine@"
+    "sha256:7816a9801a6846b912bc37e48529808e2fa87c3c47992441940f68e393ebcfeb"
+)
 FIELDS = ("ru1", "ru2", "nl1", "nl2", "server_name", "target")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -161,6 +165,28 @@ def haproxy_config(backend_ip: str) -> str:
     )
 
 
+def haproxy_compose() -> str:
+    return (
+        "services:\n"
+        "  haproxy:\n"
+        f"    image: {HAPROXY_IMAGE}\n"
+        '    network_mode: "host"\n'
+        "    restart: unless-stopped\n"
+        '    user: "0:0"\n'
+        "    read_only: true\n"
+        "    cap_drop: [ALL]\n"
+        "    cap_add: [NET_BIND_SERVICE]\n"
+        "    security_opt: [no-new-privileges:true]\n"
+        "    volumes:\n"
+        "      - type: bind\n"
+        "        source: ./haproxy.cfg\n"
+        "        target: /usr/local/etc/haproxy/haproxy.cfg\n"
+        "        read_only: true\n"
+        "        bind:\n"
+        "          create_host_path: false\n"
+    )
+
+
 def vless_link(ip: str, title: str, inv: dict[str, str], creds: Credentials) -> str:
     params = {
         "encryption": "none",
@@ -225,6 +251,7 @@ def render(
                 folder = destination / ingress
                 folder.mkdir(mode=0o700)
                 write_private(folder / "haproxy.cfg", haproxy_config(inv[backend]))
+                write_private(folder / "compose.yaml", haproxy_compose())
 
             links = [
                 vless_link(inv["ru1"], "RU1 via NL1", inv, nl1),
