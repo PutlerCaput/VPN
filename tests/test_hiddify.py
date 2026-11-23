@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import pytest
 
+from services import hiddify as hiddify_module
 from services.hiddify import HiddifyClient, HiddifyError, HiddifyNotFound
 
 API_KEY = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -173,3 +174,46 @@ async def test_retry_on_server_error_then_fail() -> None:
     with pytest.raises(HiddifyError, match="failed after retries"):
         await client.get_user(USER)
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_revoke_recovers_after_panel_commits_and_drops_patch_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(hiddify_module, "BACKOFF_BASE", 0)
+    new_uuid = ""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal new_uuid
+        if request.url.path.endswith(f"/user/{USER}/"):
+            assert request.method == "PATCH"
+            if new_uuid:
+                assert json.loads(request.content)["uuid"] == new_uuid
+                return httpx.Response(404)
+            new_uuid = json.loads(request.content)["uuid"]
+            raise httpx.ReadTimeout("lost response")
+        assert request.method == "GET"
+        assert request.url.path.endswith(f"/user/{new_uuid}/")
+        return httpx.Response(200, json={"uuid": new_uuid})
+
+    client = _client(handler)
+    try:
+        updated = await client.revoke_subscription(USER)
+        assert uuid.UUID(new_uuid).version == 4
+        assert updated["uuid"] == new_uuid
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_admin_errors_do_not_include_panel_payload() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"debug": request.url.path})
+
+    client = _client(handler)
+    try:
+        with pytest.raises(HiddifyError) as exc:
+            await client.get_user(USER)
+        assert str(exc.value) == "get_user: HTTP 400"
+    finally:
+        await client.close()

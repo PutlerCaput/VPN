@@ -233,20 +233,17 @@ class ProvisioningService:
 
     # ----------------------------------------------------------------- config
     async def fresh_config(self, telegram_id: int) -> str:
-        user = await self.db.get_user(telegram_id)
-        if user is None or user["status"] != "active" or not user["node_username"]:
-            raise ProvisioningError("no_active_node")
-        link = self._config_from(await self.hiddify.get_user(user["node_username"]))
-        if link != user["config_link"]:
-            await self.db.set_config_link(telegram_id, link)
-        return link
+        async with self._lock(telegram_id):
+            user = await self.db.get_user(telegram_id)
+            if user is None or user["status"] != "active" or not user["node_username"]:
+                raise ProvisioningError("no_active_node")
+            link = self._config_from(await self.hiddify.get_user(user["node_username"]))
+            if link != user["config_link"]:
+                await self.db.set_config_link(telegram_id, link)
+            return link
 
     async def revoke_link(self, telegram_id: int) -> str:
-        """Issue new credentials: copies of the old link stop working at once.
-
-        This is how a subscriber removes a device they no longer control; the
-        device limit itself is a term of the offer, not a technical control.
-        """
+        """Replace credentials on the panel and update the bot subscription."""
         async with self._lock(telegram_id):
             user = await self.db.get_user(telegram_id)
             if user is None or user["status"] != "active" or not user["node_username"]:
@@ -254,21 +251,24 @@ class ProvisioningService:
             old_uuid = str(user["node_username"])
             data = await self.hiddify.revoke_subscription(old_uuid)
             new_uuid = str(data.get("uuid") or "")
-            if not new_uuid or new_uuid == old_uuid:
+            if not _is_uuid(new_uuid) or new_uuid == old_uuid:
                 raise HiddifyError("Hiddify Manager did not rotate the user UUID")
-            try:
-                link = self._config_from(data)
-            except HiddifyError:
-                link = self._config_from(await self.hiddify.get_user(new_uuid))
+            # Commit the confirmed UUID and clear the cached old credential
+            # before generating delivery links. A later refresh can recover.
             await self.db.set_subscription(
                 telegram_id,
                 status=str(user["status"]),
                 expires_at=int(user["expires_at"] or 0),
                 node_username=new_uuid,
-                config_link=link,
+                config_link="",
             )
             self._traffic_cache.pop(old_uuid, None)
             self._traffic_cache.pop(new_uuid, None)
+            try:
+                link = self._config_from(data)
+            except HiddifyError:
+                link = self._config_from(await self.hiddify.get_user(new_uuid))
+            await self.db.set_config_link(telegram_id, link)
         await audit(self.db, telegram_id, "link_revoked", new_uuid)
         return link
 

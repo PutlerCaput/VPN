@@ -214,7 +214,9 @@ class HiddifyClient:
                 status, headers = response.status_code, dict(response.headers)
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             HIDDIFY_ERRORS.labels(operation="fetch_subscription").inc()
-            raise HiddifyError(f"fetch_subscription failed: {exc}") from None
+            raise HiddifyError(
+                f"fetch_subscription failed: {type(exc).__name__}"
+            ) from None
         return status, bytes(body).decode(encoding, errors="replace"), headers
 
     def _admin(self, *segments: str) -> str:
@@ -234,7 +236,7 @@ class HiddifyClient:
         json_body: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
     ) -> httpx.Response:
-        last_error: Exception | None = None
+        last_error = "unknown"
         for attempt in range(RETRY_ATTEMPTS):
             try:
                 response = await self._client.request(
@@ -244,18 +246,18 @@ class HiddifyClient:
                     params=params,
                 )
                 if response.status_code >= 500:
-                    last_error = HiddifyError(f"HTTP {response.status_code}")
+                    last_error = f"HTTP {response.status_code}"
                 else:
                     return response
             except (httpx.TimeoutException, httpx.TransportError) as exc:
-                last_error = exc
+                last_error = type(exc).__name__
             delay = BACKOFF_BASE * (2**attempt)
             logger.warning(
                 "hiddify_retry",
                 extra={
                     "operation": operation,
                     "attempt": attempt + 1,
-                    "error": str(last_error),
+                    "error": last_error,
                 },
             )
             await asyncio.sleep(delay)
@@ -269,9 +271,7 @@ class HiddifyClient:
         if response.status_code == 403:
             raise HiddifyForbidden(operation)
         if response.status_code >= 400:
-            raise HiddifyError(
-                f"{operation}: HTTP {response.status_code} {response.text[:200]}"
-            )
+            raise HiddifyError(f"{operation}: HTTP {response.status_code}")
         data = _json_body(response, operation)
         if not isinstance(data, dict):
             raise HiddifyError(f"{operation}: unexpected payload")
@@ -280,7 +280,7 @@ class HiddifyClient:
     @staticmethod
     def _validate(user_uuid: str) -> None:
         if not _is_uuid(user_uuid):
-            raise ValueError(f"invalid node uuid: {user_uuid!r}")
+            raise ValueError("invalid node uuid")
 
     def _subscription_url(self, user_uuid: str) -> str | None:
         """Public user-page URL that Hiddify clients import as a subscription."""
@@ -444,10 +444,26 @@ class HiddifyClient:
         return self.normalize(self._check(response, "modify_user"))
 
     async def revoke_subscription(self, username: str) -> dict[str, Any]:
-        """Rotate the user's UUID. Previous subscription links stop working."""
+        """Rotate the UUID on the panel; the data plane follows panel sync."""
         self._validate(username)
         new_uuid = str(uuid.uuid4())
-        return await self.modify_user(username, new_uuid=new_uuid)
+        try:
+            updated = await self.modify_user(username, new_uuid=new_uuid)
+            if updated.get("uuid") == new_uuid:
+                return updated
+            raise HiddifyError("Hiddify Manager did not confirm the new UUID")
+        except HiddifyForbidden:
+            raise
+        except HiddifyError as exc:
+            # A retry can get 404 after the first PATCH committed and its
+            # response was lost. Check the same randomly generated UUID.
+            try:
+                updated = await self.get_user(new_uuid)
+            except HiddifyError:
+                raise exc from None
+            if updated.get("uuid") != new_uuid:
+                raise exc from None
+            return updated
 
     async def set_user_status(self, username: str, status: str) -> dict[str, Any]:
         return await self.modify_user(username, status=status)

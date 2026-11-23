@@ -130,22 +130,21 @@ cd pwa && cp .env.example .env && npm ci && npm run dev   # http://localhost:517
 cd tma && cp .env.example .env && npm ci && npm run dev   # http://localhost:5174/tma/
 ```
 
-## Текущая production-топология: Финляндия + Россия
+## Состояние развёртывания
 
-Проверено read-only аудитом 16.11.2026 (подробности и план переезда — `docs/HIDDIFY_MIGRATION.md`).
-Основной сервер исторически называется «DE», но по задержке (1,2 мс до Hetzner Helsinki) и
-геобазам он находится в Хельсинки, Финляндия (HOSTKEY, AS57043).
+Аудит 16 ноября 2026 года описывает прежнюю топологию «Финляндия + Россия».
+История миграции и наблюдения по старым узлам сохранены в
+[HIDDIFY_MIGRATION.md](docs/HIDDIFY_MIGRATION.md) и
+[DEPLOYMENT_STATE.md](docs/DEPLOYMENT_STATE.md).
 
-| Сервер | Адрес | Роль |
-|---|---|---|
-| «DE» (Хельсинки) | `89.125.210.172` | Ubuntu 24.04, 1 vCPU, 2 ГБ RAM, диск 15 ГБ. Сейчас клиенты работают через Marzban v0.8.4 (Xray 24.12.31, VLESS Reality на портах 2096–2099). Рядом установлен Hiddify Manager 14.2.0 (пока без клиентов). Бот `node-rental-bot-1`, AmneziaWG в контейнере `cyberdefency-awg` (UDP 39051) |
-| Россия | `45.138.157.65` | DNAT TCP 443/2087/8443 → 2096, 2083 → 2098, UDP 39051/44877 на основной сервер; шлюз базы данных бота (через WireGuard `wg-db`) |
+Для новой топологии RU-1→NL-1 и RU-2→NL-2 используйте
+[runbook восстановления и запуска](docs/FOUR_NODE_MIGRATION_2026-11-20.md)
+и [проверки готовности](docs/FOUR_NODE_RELEASE_READINESS.md).
+Коммерческий запуск требует приёмки на четырёх VPS, включая индивидуальный
+доступ, квоты и отзыв на обоих NL. Подготовка отслеживается в [#57](https://github.com/PutlerCaput/VPN/issues/57).
 
-Код в `main` работает только с Hiddify Manager (`services/hiddify.py`). До переезда по
-`docs/HIDDIFY_MIGRATION.md` новую версию бота на сервер **не выкатывать**: живой бот всё ещё
-настроен на Marzban.
-
-- `docker-compose.yml` и `Caddyfile` — шаблоны приложения, а не копии конфигурации действующих серверов. Не запускайте весь compose-стек поверх существующих служб без сверки портов и reverse proxy.
+Перед применением `docker-compose.yml` или `Caddyfile` сверьте эти шаблоны
+с фактическими портами, службами и reverse proxy на целевой машине.
 
 ## Политика секретов
 
