@@ -15,15 +15,30 @@ INVENTORY = {
 }
 
 
-def test_all_routes_policy_defaults_to_no_sharding() -> None:
+def test_all_routes_policy_filters_to_four_approved_hosts() -> None:
     plan = subscription_plan(INVENTORY)
     assert plan["config_delivery"] == "subscription"
-    assert plan["entry_sharding_enabled"] is False
+    assert plan["entry_sharding_enabled"] is True
+    assert plan["entry_sharding_strict"] is True
     assert plan["requires_per_user_xray_provisioning"] is True
     assert plan["client_auto_failover_verified"] is False
     assert [route["host"] for route in plan["expected_routes"]] == [
         INVENTORY[k] for k in ("ru1", "ru2", "nl1", "nl2")
     ]
+    unlisted_host = "203.0.113.10"
+    links = "\n".join(
+        f"vless://00000000-0000-4000-8000-000000000001@{host}:443?security=reality"
+        for host in (*INVENTORY.values(), unlisted_host)
+    )
+    segments = SegmentPlan.build(
+        plan["entry_segments"],
+        plan["entry_shared_hosts"],
+        strict=plan["entry_sharding_strict"],
+    )
+    filtered = filter_subscription(links, segments, "all-routes")
+    assert filtered is not None
+    assert filtered.kept == 4
+    assert unlisted_host not in filtered.body
 
 
 def test_isolated_pairs_never_expose_other_pair() -> None:

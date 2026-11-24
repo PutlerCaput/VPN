@@ -448,7 +448,9 @@ async def sharded_subscription(request: web.Request) -> web.Response:
     if node is None or user is None:
         misses.hit(ip)
         return _sub_not_found()
-    if user["status"] != "active":
+    if user["status"] != "active" or (user["expires_at"] or 0) <= int(time.time()):
+        # Deny refresh once the entitlement ends, even if the expiry job
+        # has yet to disable the panel account or sync its state to the DB.
         # A real subscription whose rental ended: same answer as an unknown
         # one, but not a guess. Its app keeps refreshing, and counting that
         # would lock out everyone behind the same carrier NAT address.

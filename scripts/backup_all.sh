@@ -32,7 +32,6 @@ HIDDIFY_DB="${HIDDIFY_DB:-/var/lib/hiddify/db.sqlite3}"
 HIDDIFY_DIR="${HIDDIFY_DIR:-/opt/hiddify-manager}"
 XRAY_CONFIG="${XRAY_CONFIG:-/var/lib/hiddify/xray_config.json}"
 SEND_TELEGRAM="${SEND_TELEGRAM:-1}"
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 SRC="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 WARNINGS=()
 
@@ -53,9 +52,17 @@ docker inspect "$CONTAINER" >/dev/null 2>&1 || fail "container $CONTAINER not fo
 WORKDIR="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$CONTAINER")"
 [[ -n "$WORKDIR" && -d "$WORKDIR" ]] || fail "the bot's project folder was not found"
 
+# The timer and a manual run share the files mounted into the bot container.
+# Lock that directory even if the two invocations use different backup folders.
+exec 9<"$WORKDIR/data" || fail "the bot's data folder could not be opened"
+flock -n 9 || fail "could not take the backup lock; another backup may be running"
+
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$BACKUP_DIR"
+OUT="$BACKUP_DIR/backup-$STAMP.tar.gz.age"
+[[ ! -e "$OUT" ]] || fail "an archive already exists for this second"
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"; rm -f "$WORKDIR/data/.nightly-backup.db" "$WORKDIR/data/.outgoing-backup.age"' EXIT
+trap 'rm -rf "$TMP"; rm -f "$OUT.partial" "$WORKDIR/data/.nightly-backup.db" "$WORKDIR/data/.outgoing-backup.age"' EXIT
 mkdir -p "$TMP/bot" "$TMP/hiddify"
 
 # ----- the bot: database, settings, keys
@@ -106,19 +113,20 @@ done
   printf 'source: %s\n' "$(git -C "$SRC" log -1 --format='%h %s' 2>/dev/null || echo unknown)"
   for item in "${WARNINGS[@]+"${WARNINGS[@]}"}"; do printf 'WARNING: %s\n' "$item"; done
 } > "$TMP/INFO.txt"
-(cd "$TMP" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$TMP.manifest"
-mv "$TMP.manifest" "$TMP/MANIFEST.sha256"
+(cd "$TMP" && find . -type f ! -path './MANIFEST.sha256' -print0 | sort -z | xargs -0 sha256sum) > "$TMP/MANIFEST.sha256"
 
 # ----- pack, encrypt, keep the newest
-OUT="$BACKUP_DIR/backup-$STAMP.tar.gz.age"
 tar -C "$TMP" -czf - . | age -r "$AGE_RECIPIENT" -o "$OUT.partial" || fail "the archive could not be encrypted"
 [[ -s "$OUT.partial" ]] || fail "the encrypted archive is empty"
 mv "$OUT.partial" "$OUT"
-n=0
-while IFS= read -r old; do
-  n=$((n + 1))
-  ((n > KEEP_LOCAL)) && rm -f -- "$old"
-done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'backup-*.tar.gz.age' -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
+find "$BACKUP_DIR" -maxdepth 1 -type f -name 'backup-*.tar.gz.age' -printf '%T@ %p\n' \
+  | sort -rn | cut -d' ' -f2- | {
+    n=0
+    while IFS= read -r old; do
+      n=$((n + 1))
+      if ((n > KEEP_LOCAL)); then rm -f -- "$old"; fi
+    done
+  }
 SIZE="$(du -k "$OUT" | cut -f1)"
 
 # ----- a copy off this server

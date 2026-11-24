@@ -6,7 +6,9 @@ import argparse
 import ipaddress
 import shutil
 import subprocess  # nosec B404
+import tempfile
 import time
+from pathlib import Path
 from urllib.parse import urlsplit
 
 ROUTES = ("ru1", "ru2", "nl1", "nl2")
@@ -64,20 +66,39 @@ def check_egress(url: str, port: int, expected: str) -> bool:
         return False
 
 
+def _publish_metrics(directory: Path, route: str, metrics: str) -> None:
+    # The collector globs *.prom. Write in the same directory and replace the
+    # complete sample atomically so a scrape can't observe a partial file.
+    with tempfile.TemporaryDirectory(dir=directory) as staging:
+        pending = Path(staging) / "sample"
+        pending.write_text(metrics, encoding="ascii")
+        pending.chmod(0o644)
+        pending.replace(directory / f"vpn-probe-{route}.prom")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--route", choices=ROUTES, required=True)
     parser.add_argument("--socks-port", type=int, required=True)
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--expected-egress", required=True)
+    parser.add_argument("--textfile-dir", type=Path)
     args = parser.parse_args()
     try:
         ok = check_egress(args.endpoint, args.socks_port, args.expected_egress)
     except ValueError:
         parser.error("Invalid HTTPS endpoint, SOCKS port or expected egress IP")
     labels = f'{{route="{args.route}"}}'
-    print(f"vpn_probe_egress_success{labels} {int(ok)}")
-    print(f"vpn_probe_egress_checked_timestamp_seconds{labels} {int(time.time())}")
+    metrics = (
+        f"vpn_probe_egress_success{labels} {int(ok)}\n"
+        f"vpn_probe_egress_checked_timestamp_seconds{labels} {int(time.time())}\n"
+    )
+    if args.textfile_dir is not None:
+        try:
+            _publish_metrics(args.textfile_dir, args.route, metrics)
+        except OSError:
+            parser.exit(2, "ERROR: could not write probe metrics\n")
+    print(metrics, end="")
     return 0 if ok else 1
 
 
