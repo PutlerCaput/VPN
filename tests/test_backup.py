@@ -268,6 +268,7 @@ def test_a_database_on_the_other_server_is_fetched_not_copied_from_the_old_file(
     tool = [call for call in calls(env) if "db_tool.py" in call]
     assert len(tool) == 1
     assert tool[0].endswith("db_tool.py fetch /app/data/.nightly-backup.db")
+    assert len(archives(env)) == 2
 
 
 @needs_age

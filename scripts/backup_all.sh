@@ -57,10 +57,10 @@ WORKDIR="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project
 exec 9<"$WORKDIR/data" || fail "the bot's data folder could not be opened"
 flock -n 9 || fail "could not take the backup lock; another backup may be running"
 
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+STAMP="$(date -u +%Y%m%dT%H%M%S.%NZ)"
 mkdir -p "$BACKUP_DIR"
 OUT="$BACKUP_DIR/backup-$STAMP.tar.gz.age"
-[[ ! -e "$OUT" ]] || fail "an archive already exists for this second"
+[[ ! -e "$OUT" ]] || fail "an archive already exists for this timestamp"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"; rm -f "$OUT.partial" "$WORKDIR/data/.nightly-backup.db" "$WORKDIR/data/.outgoing-backup.age"' EXIT
 mkdir -p "$TMP/bot" "$TMP/hiddify"
