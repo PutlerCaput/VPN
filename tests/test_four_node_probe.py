@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess  # nosec B404
+import sys
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -63,3 +65,42 @@ def test_probe_rejects_invalid_endpoint(
     with pytest.raises(ValueError, match="egress endpoint must be an HTTPS URL"):
         probe.check_egress(url, 1087, ADDR)
     run.assert_not_called()
+
+
+@pytest.mark.parametrize(("ok", "code"), [(True, 0), (False, 1)])
+def test_probe_publishes_result_even_when_route_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    ok: bool,
+    code: int,
+) -> None:
+    metrics = tmp_path / "vpn-probe-ru1.prom"
+    metrics.write_text("old sample\n", encoding="utf-8")
+    monkeypatch.setattr(probe, "check_egress", lambda *_args: ok)
+    monkeypatch.setattr(probe.time, "time", lambda: 1234)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "probe",
+            "--route",
+            "ru1",
+            "--socks-port",
+            "1087",
+            "--endpoint",
+            URL,
+            "--expected-egress",
+            ADDR,
+            "--textfile-dir",
+            str(tmp_path),
+        ],
+    )
+    assert probe.main() == code
+    output = (
+        f'vpn_probe_egress_success{{route="ru1"}} {int(ok)}\n'
+        'vpn_probe_egress_checked_timestamp_seconds{route="ru1"} 1234\n'
+    )
+    assert metrics.read_text(encoding="utf-8") == output
+    assert capsys.readouterr().out == output
+    assert list(tmp_path.iterdir()) == [metrics]

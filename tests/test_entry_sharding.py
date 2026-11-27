@@ -675,13 +675,16 @@ async def test_endpoint_locks_out_guessing_addresses(services: Any) -> None:
         assert (await client.get(f"/sub/{NODE}/")).status == 429
 
 
-async def test_endpoint_inactive_user_is_not_a_guess(services: Any) -> None:
+@pytest.mark.parametrize("status", ["active", "expired"])
+async def test_endpoint_expired_entitlement_is_not_a_guess(
+    services: Any, status: str
+) -> None:
     services.settings = _sharded_settings(sub_misses_per_ip_hour=2)
     await _user(services.db, 50, NODE)
     other = str(uuid.uuid4())
     await _user(services.db, 51, other)
     await services.db.set_subscription(
-        51, status="expired", expires_at=1, node_username=other, config_link=None
+        51, status=status, expires_at=1, node_username=other, config_link=None
     )
     services.hiddify.fetch_subscription = Upstream({"*": _vless(DE)})
     async with await _client(services) as client:

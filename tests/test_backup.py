@@ -5,6 +5,7 @@ The shell scripts run for real, with a stand-in docker and the real age."""
 
 from __future__ import annotations
 
+import fcntl
 import os
 import shutil
 import sqlite3
@@ -165,6 +166,23 @@ def calls(env: dict[str, str]) -> list[str]:
 
 # ------------------------------------------------------------------ the backup
 @needs_age
+def test_concurrent_backup_does_not_touch_active_run_files(env: dict[str, str]) -> None:
+    data = Path(env["FAKE_WORKDIR"]) / "data"
+    snapshot = data / ".nightly-backup.db"
+    snapshot.write_text("active backup", encoding="utf-8")
+    directory = os.open(data, os.O_RDONLY)
+    try:
+        fcntl.flock(directory, fcntl.LOCK_EX)
+        result = run("backup_all.sh", env)
+    finally:
+        os.close(directory)
+    assert result.returncode == 1
+    assert "could not take the backup lock" in result.stderr
+    assert snapshot.read_text(encoding="utf-8") == "active backup"
+    assert not archives(env)
+
+
+@needs_age
 def test_the_archive_holds_everything_and_only_the_private_key_opens_it(
     env: dict[str, str],
 ) -> None:
@@ -250,6 +268,7 @@ def test_a_database_on_the_other_server_is_fetched_not_copied_from_the_old_file(
     tool = [call for call in calls(env) if "db_tool.py" in call]
     assert len(tool) == 1
     assert tool[0].endswith("db_tool.py fetch /app/data/.nightly-backup.db")
+    assert len(archives(env)) == 2
 
 
 @needs_age

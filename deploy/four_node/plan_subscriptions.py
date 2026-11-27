@@ -28,6 +28,9 @@ def subscription_plan(
     ]
     base: dict[str, Any] = {
         "config_delivery": "subscription",
+        "entry_sharding_enabled": True,
+        "entry_sharding_strict": True,
+        "entry_shared_hosts": [],
         "expected_routes": routes,
         "requires_per_user_xray_provisioning": True,
         "client_auto_failover_verified": False,
@@ -35,24 +38,20 @@ def subscription_plan(
     if policy == "all-routes":
         base.update(
             {
-                "entry_sharding_enabled": False,
-                "entry_segments": {},
-                "entry_shared_hosts": [],
+                "entry_segments": {"all-routes": [route["host"] for route in routes]},
                 "safety_note": (
-                    "Client receives all four addresses only IF each is present "
-                    "in its Hiddify subscription; auto-failover is not guaranteed."
+                    "The filtered subscription can include all four addresses "
+                    "if they are present upstream. Verify client failover."
                 ),
             }
         )
     elif policy == "isolated-pairs":
         base.update(
             {
-                "entry_sharding_enabled": True,
                 "entry_segments": {
                     "ru-one": [inventory["ru1"], inventory["nl1"]],
                     "ru-two": [inventory["ru2"], inventory["nl2"]],
                 },
-                "entry_shared_hosts": [],
                 "safety_note": (
                     "Each customer sees only one RU+NL pair. The other pair "
                     "cannot serve as an automatic backup for that customer."

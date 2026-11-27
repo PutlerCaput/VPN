@@ -1,0 +1,38 @@
+groups:
+  - name: four-node-vpn
+    rules:
+      - alert: VpnProbeEgressFailed
+        expr: vpn_probe_egress_success{job="vpn-egress-probes"} == 0
+        for: 3m
+        annotations:
+          summary: "VPN egress check failed for {{ $labels.route }} on {{ $labels.instance }}"
+      - alert: VpnProbeResultsMissing
+        expr: |
+          label_replace(
+            up{job="vpn-egress-probes"} unless on (job, instance)
+            (time() - vpn_probe_egress_checked_timestamp_seconds{job="vpn-egress-probes", route="ru1"} <= 180),
+            "route", "ru1", "instance", ".*"
+          )
+          or label_replace(
+            up{job="vpn-egress-probes"} unless on (job, instance)
+            (time() - vpn_probe_egress_checked_timestamp_seconds{job="vpn-egress-probes", route="ru2"} <= 180),
+            "route", "ru2", "instance", ".*"
+          )
+          or label_replace(
+            up{job="vpn-egress-probes"} unless on (job, instance)
+            (time() - vpn_probe_egress_checked_timestamp_seconds{job="vpn-egress-probes", route="nl1"} <= 180),
+            "route", "nl1", "instance", ".*"
+          )
+          or label_replace(
+            up{job="vpn-egress-probes"} unless on (job, instance)
+            (time() - vpn_probe_egress_checked_timestamp_seconds{job="vpn-egress-probes", route="nl2"} <= 180),
+            "route", "nl2", "instance", ".*"
+          )
+        for: 2m
+        annotations:
+          summary: "Missing or stale VPN probe for {{ $labels.route }} on {{ $labels.instance }}"
+      - alert: VpnProbeTargetsMissing
+        expr: absent(up{job="vpn-egress-probes"})
+        for: 2m
+        annotations:
+          summary: "No VPN probe targets in Prometheus"

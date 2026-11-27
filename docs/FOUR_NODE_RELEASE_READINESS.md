@@ -91,12 +91,13 @@ Alternative for intentionally restricted address disclosure:
 
     python3 -m deploy.four_node.plan_subscriptions --inventory /private/inventory.json --policy isolated-pairs
 
-The tool prints a **proposal only**, not production configuration. All-routes
-exposes four eligible addresses to the subscriber only if the underlying
-per-user Hiddify subscription actually has those entries; client auto-switch
-must be tested. Isolated-pairs produces strict entry segments, but a subscriber
-does **not** receive the other pair as fallback. Operator approval, per-user
-provisioning on both NL exits, and monitoring are still required.
+The tool prints a **proposal only**. Both policies use the bot's filtered
+subscription endpoint with strict host allowlists. All-routes assigns a
+single segment containing the four approved entry hosts. The upstream
+per-user Hiddify subscription must contain the corresponding profiles.
+Isolated-pairs assigns two segments with one pair each. Keep the upstream
+subscription reachable by the bot and block direct access by subscribers.
+Verify client fallback, per-user provisioning on both NL exits and monitoring.
 
 ## Data-plane monitoring
 
@@ -108,10 +109,15 @@ source IP it sees. The expected IP is the paired NL exit's observed egress.
 
     python3 -m deploy.four_node.probe --route ru1 --socks-port 10871 --endpoint https://health.example.org/egress --expected-egress 192.0.2.10
 
-Schedule one probe per route and collect both emitted metrics. Alert on repeated
-failures, on a missing result and on a stale timestamp. Establish a separate
-probe from a Russian access network and verify the notification and recovery
-paths while deliberately interrupting a staging route. A successful probe
+Schedule one probe per route every minute. Pass `--textfile-dir` with the
+directory configured in node_exporter's textfile collector. The probe user
+needs write access and the collector needs read access. Each invocation
+publishes a complete sample, including failed egress checks. Use
+the `vpn-egress-probes` Prometheus scrape job for these targets and load
+[`alerts.yml`](../deploy/four_node/alerts.yml) through `rule_files`. Every
+target in that job is expected to check all four routes. Establish a separate
+probe from a Russian access network and verify Alertmanager notification
+and recovery while deliberately interrupting a staging route. A successful probe
 demonstrates HTTPS egress via the selected SOCKS listener. Verify each
 listener's Xray outbound and test DNS and real client failover separately.
 
