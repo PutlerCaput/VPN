@@ -200,7 +200,6 @@ def test_the_one_tap_bouncer_is_gone() -> None:
                 assert "connect_app_kb" not in text, path
 
 
-# ------------------------------------------------- Russian sites, directly
 def _ts_array(text: str, name: str) -> list[str]:
     """The string items of `const NAME = [ ... ];` in a TypeScript module."""
     body = text.split(f"const {name} = [", 1)[1].split("\n];", 1)[0]
@@ -218,6 +217,17 @@ def _bot_steps(direct: str) -> list[str]:
     return [re.sub(r"^\d+\. ", "", line) for line in direct.split("\n")]
 
 
+def test_windows_connection_note_is_the_same_in_all_three_places() -> None:
+    pwa = _device("pwa").split("  windows: [", 1)[1].split("  macos: [", 1)[0]
+    tma = (ROOT / "tma" / "src" / "i18n" / "ru.ts").read_text(encoding="utf-8")
+    tma = tma.split("  windows: {", 1)[1].split("  macos: {", 1)[0]
+    note = GUIDES["windows"].apps[0].note
+    assert "системный прокси" in note.lower()
+    assert "TUN" in note
+    assert _ts_string(pwa, "note:") == _ts_string(tma, "note:") == note
+
+
+# ------------------------------------------------- Russian sites, directly
 def test_the_russian_sites_steps_are_the_same_in_all_three_places() -> None:
     pwa = _device("pwa")
     tma = (ROOT / "tma" / "src" / "i18n" / "ru.ts").read_text(encoding="utf-8")
