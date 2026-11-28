@@ -1,6 +1,6 @@
 # CyberDefency — four-node release acceptance and control-plane integration
 
-**Status: not deployed and not ready for paid service.** Four new VPS: RU-1→NL-1, RU-2→NL-2, optional direct NL routes. Retired DE/RU IPs and their old instructions are not applicable.
+**Status (27.11.2026): staging routes verified, not ready for paid service.** Four new VPS: RU-1→NL-1, RU-2→NL-2, optional direct NL routes. Retired DE/RU IPs and their old instructions are not applicable.
 
 Use the current [recovery/cutover runbook](FOUR_NODE_MIGRATION_2026-11-20.md)
 and [security boundaries](SUBSCRIPTION_SECURITY_BOUNDARY.md). The release gate
@@ -123,10 +123,23 @@ listener's Xray outbound and test DNS and real client failover separately.
 
 ## Evidence and offline release gate
 
-- The owner confirmed TCP port 22 was reachable on four VPS.
-- RU-1 refused SSH authentication by the tested key/password.
-- There is no independently verified installation, subscription restore,
-  client handshake from Russia, live billing or credential rotation.
+State as tracked in the release-blocker issue (#57), 27.11.2026:
+
+- SSH host keys of all four VPS were checked against the provider console;
+  strict SSH login succeeds. Ports, services, OS and firewall were reviewed
+  with a saved rollback.
+- RU-1→NL-1 passed a Windows alpha with a real client.
+- RU-2→NL-2 passed staging REALITY, HTTPS and expected-egress checks. With the
+  staging HAProxy stopped, the direct NL-2 profile kept working; the RU-2
+  route recovered after HAProxy was started again.
+- Still open before any payment is accepted: acceptance from a physical
+  phone and subscription refresh on real mobile clients, Hiddify
+  provisioning/revocation on both NL exits, a current offsite backup with an
+  isolated restore, and payment reconciliation against the provider.
+
+These are operator observations, not independently verified evidence. The
+offline gate below stays BLOCKED until every item is confirmed in a private
+evidence file.
 
 Create a safe all-false evidence template by running:
 
